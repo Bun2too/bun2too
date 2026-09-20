@@ -13,7 +13,7 @@ A FastAPI/CrewAI service for campaign planning, content creation and reviewed de
 | Facebook/Instagram/other social OAuth credentials and tokens | n8n **Credentials** | n8n **Credentials** |
 | Social account/Page IDs, selected API version | n8n publishing workflow configuration | Same |
 | n8n database connection and `N8N_ENCRYPTION_KEY` | n8n runtime environment | n8n service Variables; keep encryption key stable and backed up |
-| `RAILWAY_TOKEN` for deployment | Not needed for generating campaigns | GitHub repository Settings → Secrets and variables → Actions |
+| `RAILWAY_API_TOKEN` for deployment | Not needed for generating campaigns | GitHub repository Settings → Secrets and variables → Actions → Secrets |
 
 CrewAI is the orchestration library; these local crews use your **LLM provider's key**. No CrewAI cloud API key is required for this path. CrewAI cloud tracing/deployment has its own optional account setup. A GitHub Actions secret does not automatically become a Railway service runtime variable.
 
@@ -105,7 +105,7 @@ This is a single-instance foundation. SQLite saves briefs, task outputs and appr
 
 BackgroundTasks is not a durable job queue. A crash/redeploy can leave runs queued/running or dispatching with no worker. Inspect interrupted runs and submit a new generation if needed; reconcile dispatching runs with n8n before any retry. Before scaling to multiple replicas or unattended operation, move jobs and run storage to a durable worker queue and shared database, add authenticated reviewer identities, and implement publication-result reconciliation and measured campaign reporting.
 
-The existing `terraform/main.tf` and deployment workflow remain scaffolding: database/n8n configuration and volumes are missing, and Terraform remote state is not configured. Deployment targeting and these infrastructure settings must be completed before calling this production-ready. Merely adding agents or a Railway token does not provision those connections.
+The existing `terraform/main.tf` and deployment workflow remain scaffolding: database/n8n configuration and volumes are missing, and Terraform remote state is not configured. These infrastructure settings must be completed before calling this production-ready. Merely adding agents or a Railway token does not provision those connections.
 
 Run local checks (LLM and n8n calls are mocked):
 
@@ -118,7 +118,7 @@ Run local checks (LLM and n8n calls are mocked):
 
 The provider address is `terraform-community-providers/railway`, constrained to `~> 0.6.2`. Commit `terraform/.terraform.lock.hcl` to keep CI on the validated version. Service sources use `source_image` or `source_repo` with `source_repo_branch`; the CrewAI service root is `crewai_agents`.
 
-CI supplies `TF_VAR_github_repository` from the GitHub repository running the workflow. For local Terraform planning, set it to your `owner/repository`. Terraform project creation needs a Railway account/workspace API token supplied as `RAILWAY_TOKEN`; a project-scoped token cannot create the parent project. The Railway GitHub integration also needs access to the source repository.
+CI supplies `TF_VAR_github_repository` from the GitHub repository running the workflow. For local Terraform planning, set it to your `owner/repository`. Terraform project creation needs a Railway account/workspace API token; a project-scoped token cannot create the parent project. CI reads the GitHub secret `RAILWAY_API_TOKEN` and maps it to `RAILWAY_TOKEN` for Terraform, then to `RAILWAY_API_TOKEN` for the CLI. For local Terraform use, export `RAILWAY_TOKEN` in the shell. The Railway GitHub integration also needs access to the source repository.
 
 To initialize and validate without deploying:
 
@@ -128,3 +128,18 @@ terraform -chdir=terraform validate
 ```
 
 Provider documentation: [Railway provider](https://registry.terraform.io/providers/terraform-community-providers/railway/latest/docs).
+
+
+### Fixing a missing Railway API token in GitHub Actions
+
+1. Create a Railway API token with permission to create projects in the intended workspace (Railway account settings → Tokens). Use a workspace-scoped token for this business workspace. A project deployment token cannot provision the project.
+2. In the GitHub repository, open **Settings → Secrets and variables → Actions → Secrets → New repository secret**. Name it exactly **`RAILWAY_API_TOKEN`** and paste the token as its value. If an existing secret named `RAILWAY_TOKEN` already holds the correct account/workspace token, rename it to `RAILWAY_API_TOKEN`. Do not rename a project-scoped token and expect it to gain permissions.
+3. Push the workflow changes to `main` to use the updated mapping. Re-running a failed run from an older commit uses that older workflow.
+
+`crewai_agents/.env` is for the local application. GitHub Actions does not upload or read it, and Terraform does not automatically load dotenv files. A value under the Actions **Variables** tab is also not a secret. Missing or unavailable secrets evaluate to an empty string, which causes the provider's `Missing API token` error. Successful `init` and `validate` do not verify Railway authentication.
+
+This workflow uses repository secrets. If you keep the token as an **environment secret**, add `environment: <your-existing-GitHub-environment-name>` to `jobs.deploy` so it can access that environment's secrets and protection rules. Organization secrets must grant this repository access.
+
+The credential preflight rejects empty/whitespace-only values without printing them. The token stays step-scoped: Terraform receives `RAILWAY_TOKEN`; the CLI receives only `RAILWAY_API_TOKEN`. Terraform outputs supply the CLI project, service and environment IDs. Upload runs from the repository root because the service's `root_directory` is already `crewai_agents`; `--ci` reports build failures instead of returning immediately after upload.
+
+References: [GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), [Railway CLI authentication](https://docs.railway.com/cli), [Railway CLI deployment targeting](https://docs.railway.com/cli/deploying).

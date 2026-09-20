@@ -11,20 +11,36 @@ jobs:
       - name: Checkout Code Repository
         uses: actions/checkout@v6
 
+      - name: Check Railway credential configuration
+        shell: bash
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          if [[ -z "${RAILWAY_API_TOKEN//[[:space:]]/}" ]]; then
+            echo "::error::Missing RAILWAY_API_TOKEN. Add a Railway account/workspace API token under repository Settings > Secrets and variables > Actions > Secrets. Local .env files and Actions variables are not Actions secrets."
+            exit 1
+          fi
+
       - name: Install and Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
       - name: Terraform Initialize and Apply
+        id: infrastructure
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          # The Terraform provider uses RAILWAY_TOKEN for account/workspace tokens.
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           TF_VAR_github_repository: ${{ github.repository }}
+          TF_IN_AUTOMATION: 'true'
         run: |
           cd terraform
-          terraform init
+          terraform init -input=false
           terraform validate
-          terraform apply -auto-approve
+          terraform apply -input=false -auto-approve
+          printf 'project_id=%s\n' "$(terraform output -raw railway_project_id)" >> "$GITHUB_OUTPUT"
+          printf 'service_id=%s\n' "$(terraform output -raw crewai_service_id)" >> "$GITHUB_OUTPUT"
+          printf 'environment_id=%s\n' "$(terraform output -raw railway_environment_id)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js 24 for Railway CLI
         uses: actions/setup-node@v6
@@ -37,7 +53,10 @@ jobs:
 
       - name: Deploy Service Containers to Production
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          # The CLI uses a different variable for the same account/workspace token.
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ steps.infrastructure.outputs.project_id }}
+          RAILWAY_SERVICE_ID: ${{ steps.infrastructure.outputs.service_id }}
+          RAILWAY_ENVIRONMENT_ID: ${{ steps.infrastructure.outputs.environment_id }}
         run: |
-          cd crewai_agents
-          railway up --detach
+          railway up --project "$RAILWAY_PROJECT_ID" --service "$RAILWAY_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci

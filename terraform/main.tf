@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "railway" {
-  # Account/workspace API token passed via RAILWAY_TOKEN.
+  # CI maps secrets.RAILWAY_API_TOKEN to the provider's RAILWAY_TOKEN variable.
 }
 
 variable "github_repository" {
@@ -45,4 +45,19 @@ resource "railway_service" "n8n_engine" {
   project_id   = railway_project.fb_pipeline.id
   name         = "n8n-orchestrator"
   source_image = "docker.io/n8nio/n8n:latest"
+}
+
+output "railway_project_id" {
+  description = "Project targeted by the Railway CLI deployment."
+  value       = railway_project.fb_pipeline.id
+}
+
+output "crewai_service_id" {
+  description = "CrewAI service targeted by the Railway CLI deployment."
+  value       = railway_service.crewai_service.id
+}
+
+output "railway_environment_id" {
+  description = "Default project environment targeted by the Railway CLI deployment."
+  value       = railway_project.fb_pipeline.default_environment.id
 }
