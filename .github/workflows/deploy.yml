@@ -9,20 +9,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Install and Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
       - name: Terraform Initialize and Apply
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          TF_VAR_github_repository: ${{ github.repository }}
         run: |
           cd terraform
           terraform init
+          terraform validate
           terraform apply -auto-approve
+
+      - name: Set up Node.js 24 for Railway CLI
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
 
       - name: Install Railway CLI Engine
         run: npm install -g @railway/cli

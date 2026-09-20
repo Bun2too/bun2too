@@ -105,10 +105,26 @@ This is a single-instance foundation. SQLite saves briefs, task outputs and appr
 
 BackgroundTasks is not a durable job queue. A crash/redeploy can leave runs queued/running or dispatching with no worker. Inspect interrupted runs and submit a new generation if needed; reconcile dispatching runs with n8n before any retry. Before scaling to multiple replicas or unattended operation, move jobs and run storage to a durable worker queue and shared database, add authenticated reviewer identities, and implement publication-result reconciliation and measured campaign reporting.
 
-The existing `terraform/main.tf` and deployment workflow remain scaffolding: the repository source still uses `github_username/repo_name`, database/n8n configuration and volumes are missing, and Terraform remote state is not configured. Deployment targeting and these infrastructure settings must be completed before calling this production-ready. Merely adding agents or a Railway token does not provision those connections.
+The existing `terraform/main.tf` and deployment workflow remain scaffolding: database/n8n configuration and volumes are missing, and Terraform remote state is not configured. Deployment targeting and these infrastructure settings must be completed before calling this production-ready. Merely adding agents or a Railway token does not provision those connections.
 
 Run local checks (LLM and n8n calls are mocked):
 
 ```sh
 .venv/bin/python -m unittest discover -s crewai_agents/tests -v
 ```
+
+
+### Terraform provider setup
+
+The provider address is `terraform-community-providers/railway`, constrained to `~> 0.6.2`. Commit `terraform/.terraform.lock.hcl` to keep CI on the validated version. Service sources use `source_image` or `source_repo` with `source_repo_branch`; the CrewAI service root is `crewai_agents`.
+
+CI supplies `TF_VAR_github_repository` from the GitHub repository running the workflow. For local Terraform planning, set it to your `owner/repository`. Terraform project creation needs a Railway account/workspace API token supplied as `RAILWAY_TOKEN`; a project-scoped token cannot create the parent project. The Railway GitHub integration also needs access to the source repository.
+
+To initialize and validate without deploying:
+
+```sh
+terraform -chdir=terraform init -backend=false
+terraform -chdir=terraform validate
+```
+
+Provider documentation: [Railway provider](https://registry.terraform.io/providers/terraform-community-providers/railway/latest/docs).
