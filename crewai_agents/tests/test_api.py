@@ -62,6 +62,28 @@ class APITests(unittest.TestCase):
         self.assertEqual(run["tasks"][0]["agent"], "product_owner")
         self.assertEqual(Store(main.DATA_DIR / "runs.sqlite3").get(run["id"]), run)
 
+    def test_automatic_campaign_publication_and_lessons(self):
+        def build(brief, callback, **kwargs):
+            def kickoff():
+                callback("product_owner", "PO decision", {
+                    "summary": "Launch", "work_items": [{"work_key": "STORY-001", "title": "Launch story",
+                    "description": "Write copy", "owner_role": "writer", "acceptance_criteria": ["Reviewed"]}]})
+                return SimpleNamespace(pydantic=artifact())
+            return SimpleNamespace(kickoff=kickoff)
+        with patch.object(main, "build_crew", side_effect=build), patch.object(main.atlassian, "publish_pending") as publish, patch.dict(os.environ, {"ATLASSIAN_AUTO_PUBLISH": "true"}):
+            response = self.client.post("/campaigns", json={"campaign_key": "test-launch", "brief": "Launch campaign"})
+            publish.assert_called_once()
+        run_id = response.json()["run_id"]
+        work = self.client.get(f"/runs/{run_id}/work").json()
+        self.assertEqual(len(work["publications"]), 3)
+        self.assertTrue(any(e["kind"] == "task_completed" for e in work["events"]))
+        result = self.client.post(f"/runs/{run_id}/lessons", json={
+            "lesson": "Use clearer calls to action", "evidence": "Reviewed campaign results", "reviewed_by": "owner"})
+        self.assertEqual(result.status_code, 200)
+        with patch.object(main, "build_crew", side_effect=build) as builder:
+            response = self.client.post("/campaigns", json={"brief": "Next campaign", "lesson_run_ids": [run_id]})
+            self.assertEqual(builder.call_args.args[0]["reviewed_lessons"][0]["lesson"], "Use clearer calls to action")
+
     def test_legacy_post_response(self):
         crew = SimpleNamespace(kickoff=lambda: SimpleNamespace(pydantic=artifact()))
         with patch.object(main, "build_crew", return_value=crew):

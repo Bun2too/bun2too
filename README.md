@@ -13,7 +13,7 @@ A FastAPI/CrewAI service for campaign planning, content creation and reviewed de
 | Facebook/Instagram/other social OAuth credentials and tokens | n8n **Credentials** | n8n **Credentials** |
 | Social account/Page IDs, selected API version | n8n publishing workflow configuration | Same |
 | n8n database connection and `N8N_ENCRYPTION_KEY` | n8n runtime environment | n8n service Variables; keep encryption key stable and backed up |
-| `RAILWAY_API_TOKEN` for deployment | Not needed for generating campaigns | GitHub repository Settings → Secrets and variables → Actions → Secrets |
+| `RAILWAY_API_TOKEN`, `POSTGRES_PASSWORD`, `TF_API_TOKEN` for deployment | See deployment guide | GitHub Settings → Environments → production / qa → Secrets |
 
 CrewAI is the orchestration library; these local crews use your **LLM provider's key**. No CrewAI cloud API key is required for this path. CrewAI cloud tracing/deployment has its own optional account setup. A GitHub Actions secret does not automatically become a Railway service runtime variable.
 
@@ -38,7 +38,7 @@ python -c 'import secrets; print(secrets.token_urlsafe(32))'
 Put the generated secret in `MARKETING_API_KEY`, choose `LLM_MODEL` and set the provider key in `.env`. Then:
 
 ```sh
-uvicorn crewai_agents.app.main:app --reload --port 8000
+python crewai_agents/start.py
 ```
 
 Open `http://localhost:8000/docs`, select **Authorize**, and enter your `MARKETING_API_KEY`. All business endpoints require bearer authentication; `/health` is public. Existing `/generate-post` clients must now send this header too. The model example is configurable; use a model available to your provider account. Non-default providers may need additional CrewAI dependencies.
@@ -55,6 +55,7 @@ Edit `crewai_agents/app/agents.json` to change roles, goals and task prompts. Th
 | Creative | Concepts, design briefs, storyboards and image prompts |
 | Writer | Social copy, calls to action and requested campaign copy |
 | Engineering | Implementation tickets, tracking and automation specifications |
+| Tester | Acceptance tests, QA scenarios and evidence gaps |
 | Editor | Quality review, corrections and blockers |
 | Delivery | Structured campaign package, final posts and proposed schedule |
 
@@ -68,6 +69,7 @@ Use `/docs` to call `POST /campaigns` with:
 
 ```json
 {
+  "campaign_key": "bun2too-awareness-launch",
   "brief": "Plan a two-week bun2too awareness campaign. Propose a backlog and creative concepts; no paid spend is approved.",
   "audience": "Prospective customers; identify assumptions needing validation",
   "channels": ["facebook", "instagram"],
@@ -105,7 +107,7 @@ This is a single-instance foundation. SQLite saves briefs, task outputs and appr
 
 BackgroundTasks is not a durable job queue. A crash/redeploy can leave runs queued/running or dispatching with no worker. Inspect interrupted runs and submit a new generation if needed; reconcile dispatching runs with n8n before any retry. Before scaling to multiple replicas or unattended operation, move jobs and run storage to a durable worker queue and shared database, add authenticated reviewer identities, and implement publication-result reconciliation and measured campaign reporting.
 
-The existing `terraform/main.tf` and deployment workflow remain scaffolding: database/n8n configuration and volumes are missing, and Terraform remote state is not configured. These infrastructure settings must be completed before calling this production-ready. Merely adding agents or a Railway token does not provision those connections.
+Deployment now uses GitHub environments and separate HCP state workspaces for production and QA in one Railway project. Postgres receives an initialization password and production volume configuration. Follow [the deployment guide](docs/deployment.md) to configure HCP, import the existing infrastructure, prepare QA storage and repair the crashed database. n8n/client database connections and application runtime variables still require setup.
 
 Run local checks (LLM and n8n calls are mocked):
 
@@ -114,32 +116,24 @@ Run local checks (LLM and n8n calls are mocked):
 ```
 
 
-### Terraform provider setup
+### Production and QA setup
 
-The provider address is `terraform-community-providers/railway`, constrained to `~> 0.6.2`. Commit `terraform/.terraform.lock.hcl` to keep CI on the validated version. Service sources use `source_image` or `source_repo` with `source_repo_branch`; the CrewAI service root is `crewai_agents`.
+See [docs/deployment.md](docs/deployment.md) for Postgres recovery, GitHub environment secrets/variables, HCP workspaces, existing-resource imports, and QA setup.
 
-CI supplies `TF_VAR_github_repository` from the GitHub repository running the workflow. For local Terraform planning, set it to your `owner/repository`. Terraform project creation needs a Railway account/workspace API token; a project-scoped token cannot create the parent project. CI reads the GitHub secret `RAILWAY_API_TOKEN` and maps it to `RAILWAY_TOKEN` for Terraform, then to `RAILWAY_API_TOKEN` for the CLI. For local Terraform use, export `RAILWAY_TOKEN` in the shell. The Railway GitHub integration also needs access to the source repository.
+| Git branch | GitHub environment | Railway environment | HCP workspace |
+| --- | --- | --- | --- |
+| `main` | `production` | `production` | `bun2too-production` |
+| `qa` | `qa` | `qa` | `bun2too-qa` |
 
-To initialize and validate without deploying:
+Production owns shared Railway project/service definitions; QA manages only its environment-specific Postgres variables. Application uploads always target the selected environment. The deployment preflight verifies target membership and rejects a QA-to-production environment mismatch.
 
-```sh
-terraform -chdir=terraform init -backend=false
-terraform -chdir=terraform validate
-```
-
-Provider documentation: [Railway provider](https://registry.terraform.io/providers/terraform-community-providers/railway/latest/docs).
+The Railway Terraform provider remains `terraform-community-providers/railway` at `~> 0.6.2`; commit its lockfile. No secrets belong in local example files or committed Terraform inputs. Your local application `.env` does not populate GitHub environment secrets.
 
 
-### Fixing a missing Railway API token in GitHub Actions
+### Traceable work and automatic corporate publishing
 
-1. Create a Railway API token with permission to create projects in the intended workspace (Railway account settings → Tokens). Use a workspace-scoped token for this business workspace. A project deployment token cannot provision the project.
-2. In the GitHub repository, open **Settings → Secrets and variables → Actions → Secrets → New repository secret**. Name it exactly **`RAILWAY_API_TOKEN`** and paste the token as its value. If an existing secret named `RAILWAY_TOKEN` already holds the correct account/workspace token, rename it to `RAILWAY_API_TOKEN`. Do not rename a project-scoped token and expect it to gain permissions.
-3. Push the workflow changes to `main` to use the updated mapping. Re-running a failed run from an older commit uses that older workflow.
+See [agent operations](docs/agent-operations.md) for role responsibilities, Datadog setup, automatic Jira CMA/Confluence CMA publishing, publication limits and reviewed lessons.
 
-`crewai_agents/.env` is for the local application. GitHub Actions does not upload or read it, and Terraform does not automatically load dotenv files. A value under the Actions **Variables** tab is also not a secret. Missing or unavailable secrets evaluate to an empty string, which causes the provider's `Missing API token` error. Successful `init` and `validate` do not verify Railway authentication.
+Campaigns with a stable `campaign_key` automatically prepare one Epic, one campaign dossier, and a limited set of PO Stories/execution Tasks. Configure `ATLASSIAN_EMAIL` and `ATLASSIAN_API_TOKEN` in Railway to enable delivery. Revisions reuse work keys; requests without a campaign key stay local unless explicitly published. Inspect each run's audit trail and external links at `GET /runs/{id}/work`.
 
-This workflow uses repository secrets. If you keep the token as an **environment secret**, add `environment: <your-existing-GitHub-environment-name>` to `jobs.deploy` so it can access that environment's secrets and protection rules. Organization secrets must grant this repository access.
-
-The credential preflight rejects empty/whitespace-only values without printing them. The token stays step-scoped: Terraform receives `RAILWAY_TOKEN`; the CLI receives only `RAILWAY_API_TOKEN`. Terraform outputs supply the CLI project, service and environment IDs. Upload runs from the repository root because the service's `root_directory` is already `crewai_agents`; `--ci` reports build failures instead of returning immediately after upload.
-
-References: [GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets), [Railway CLI authentication](https://docs.railway.com/cli), [Railway CLI deployment targeting](https://docs.railway.com/cli/deploying).
+Set `DD_API_KEY` and `DD_LLMOBS_ENABLED=1` on the service to export CrewAI traces through the new `ddtrace-run` launcher. Defaults target Datadog US5 and `bun2too-marketing-crew-team`. The API key shared in conversation is not stored in this repository; use a rotated key.

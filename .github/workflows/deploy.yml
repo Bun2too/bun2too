@@ -2,45 +2,73 @@ name: Infrastructure and Core Deployment Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, qa ]
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
+    # Both branches share one Railway project; serialize infrastructure changes.
+    concurrency:
+      group: railway-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
+      TF_WORKSPACE: ${{ github.ref_name == 'main' && 'bun2too-production' || 'bun2too-qa' }}
+      TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      POSTGRES_SERVICE_ID: ${{ vars.POSTGRES_SERVICE_ID }}
+      CREWAI_SERVICE_ID: ${{ vars.CREWAI_SERVICE_ID }}
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v6
 
-      - name: Check Railway credential configuration
-        shell: bash
+      - name: Verify environment, credentials and deployment targets
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-        run: |
-          if [[ -z "${RAILWAY_API_TOKEN//[[:space:]]/}" ]]; then
-            echo "::error::Missing RAILWAY_API_TOKEN. Add a Railway account/workspace API token under repository Settings > Secrets and variables > Actions > Secrets. Local .env files and Actions variables are not Actions secrets."
-            exit 1
-          fi
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+        run: python3 scripts/check_deployment.py
 
       - name: Install and Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Terraform Initialize and Apply
-        id: infrastructure
         env:
-          # The Terraform provider uses RAILWAY_TOKEN for account/workspace tokens.
+          # Terraform uses RAILWAY_TOKEN for account/workspace tokens.
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          TF_VAR_deployment_environment: ${{ env.DEPLOY_ENVIRONMENT }}
+          TF_VAR_railway_project_id: ${{ env.RAILWAY_PROJECT_ID }}
+          TF_VAR_railway_environment_id: ${{ env.RAILWAY_ENVIRONMENT_ID }}
+          TF_VAR_postgres_service_id: ${{ env.POSTGRES_SERVICE_ID }}
+          TF_VAR_crewai_service_id: ${{ env.CREWAI_SERVICE_ID }}
           TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+          TF_VAR_postgres_user: ${{ vars.POSTGRES_USER || 'postgres' }}
+          TF_VAR_postgres_database: ${{ vars.POSTGRES_DB || 'bun2too' }}
           TF_IN_AUTOMATION: 'true'
         run: |
           cd terraform
           terraform init -input=false
           terraform validate
+          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+            terraform state list > "$RUNNER_TEMP/railway-state.txt"
+            for resource in railway_project.fb_pipeline railway_service.postgres_db railway_service.crewai_service railway_service.n8n_engine; do
+              if ! grep -Fxq "$resource" "$RUNNER_TEMP/railway-state.txt" && ! grep -Fxq "${resource}[0]" "$RUNNER_TEMP/railway-state.txt"; then
+                echo "::error::Import or migrate the existing production resources into bun2too-production before deployment. See docs/deployment.md."
+                exit 1
+              fi
+            done
+          fi
           terraform apply -input=false -auto-approve
-          printf 'project_id=%s\n' "$(terraform output -raw railway_project_id)" >> "$GITHUB_OUTPUT"
-          printf 'service_id=%s\n' "$(terraform output -raw crewai_service_id)" >> "$GITHUB_OUTPUT"
-          printf 'environment_id=%s\n' "$(terraform output -raw railway_environment_id)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js 24 for Railway CLI
         uses: actions/setup-node@v6
@@ -51,12 +79,8 @@ jobs:
       - name: Install Railway CLI Engine
         run: npm install -g @railway/cli
 
-      - name: Deploy Service Containers to Production
+      - name: Deploy CrewAI to selected environment
         env:
-          # The CLI uses a different variable for the same account/workspace token.
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ steps.infrastructure.outputs.project_id }}
-          RAILWAY_SERVICE_ID: ${{ steps.infrastructure.outputs.service_id }}
-          RAILWAY_ENVIRONMENT_ID: ${{ steps.infrastructure.outputs.environment_id }}
         run: |
-          railway up --project "$RAILWAY_PROJECT_ID" --service "$RAILWAY_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
+          railway up --project "$RAILWAY_PROJECT_ID" --service "$CREWAI_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
