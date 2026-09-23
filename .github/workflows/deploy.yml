@@ -18,7 +18,8 @@ jobs:
       cancel-in-progress: false
     env:
       DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
-      TF_WORKSPACE: ${{ github.ref_name == 'main' && 'bun2too-production' || 'bun2too-qa' }}
+      # Set TF_WORKSPACE separately in each GitHub environment.
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
@@ -65,7 +66,7 @@ jobs:
             terraform state list > "$RUNNER_TEMP/railway-state.txt"
             for resource in railway_project.fb_pipeline railway_service.postgres_db railway_service.crewai_service railway_service.n8n_engine; do
               if ! grep -Fxq "$resource" "$RUNNER_TEMP/railway-state.txt" && ! grep -Fxq "${resource}[0]" "$RUNNER_TEMP/railway-state.txt"; then
-                echo "::error::Import or migrate the existing production resources into bun2too-production before deployment. See docs/deployment.md."
+                echo "::error::Import or migrate the existing production resources into the configured production HCP workspace before deployment. See docs/deployment.md."
                 exit 1
               fi
             done

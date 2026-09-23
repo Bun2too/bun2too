@@ -61,8 +61,6 @@ def check(env, request=request_json):
     for name in required:
         if not env.get(name, "").strip():
             raise ValueError(f"Missing {name}; configure it in the selected GitHub environment")
-    if env["TF_WORKSPACE"] != "bun2too-" + expected:
-        raise ValueError("HCP workspace must match the selected deployment environment")
     org = quote(env["TF_CLOUD_ORGANIZATION"], safe="")
     workspace = quote(env["TF_WORKSPACE"], safe="")
     with api_check(f"HCP workspace GET /api/v2/organizations/{org}/workspaces/{workspace}"):

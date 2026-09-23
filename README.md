@@ -122,8 +122,8 @@ See [docs/deployment.md](docs/deployment.md) for Postgres recovery, GitHub envir
 
 | Git branch | GitHub environment | Railway environment | HCP workspace |
 | --- | --- | --- | --- |
-| `main` | `production` | `production` | `bun2too-production` |
-| `qa` | `qa` | `qa` | `bun2too-qa` |
+| `main` | `production` | `production` | Production GitHub environment’s `TF_WORKSPACE` |
+| `qa` | `qa` | `qa` | QA GitHub environment’s `TF_WORKSPACE` |
 
 Production owns shared Railway project/service definitions; QA manages only its environment-specific Postgres variables. Application uploads always target the selected environment. The deployment preflight verifies target membership and rejects a QA-to-production environment mismatch.
 

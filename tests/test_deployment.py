@@ -104,13 +104,31 @@ class DeploymentChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'does not match'):
             check(env, self.request)
 
-    def test_missing_secret_and_wrong_workspace(self):
+    def test_missing_secrets_and_workspace(self):
         for key, value in [('POSTGRES_PASSWORD', '  '), ('RAILWAY_API_TOKEN', ''),
-                           ('TF_WORKSPACE', 'bun2too-production')]:
+                           ('TF_WORKSPACE', '  ')]:
             env = self.env()
             env[key] = value
             with self.assertRaises(ValueError):
                 check(env, self.request)
+
+    def test_configured_workspace_is_used_without_naming_assumptions(self):
+        for branch, workspace in [('main', 'code-monkey-army'),
+                                  ('qa', 'code-monkey-army-qa'),
+                                  ('main', 'another-app-production-us-east-1')]:
+            env = self.env(branch)
+            env['TF_WORKSPACE'] = workspace
+            calls = []
+
+            def request(url, token, payload=None):
+                calls.append(url)
+                return self.request(url, token, payload)
+
+            with self.subTest(branch=branch, workspace=workspace):
+                check(env, request)
+                self.assertEqual(calls[0],
+                                 'https://app.terraform.io/api/v2/organizations/example/workspaces/'
+                                 + workspace)
 
     def test_unexpected_branch(self):
         with self.assertRaisesRegex(ValueError, 'mapping'):

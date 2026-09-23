@@ -1,6 +1,6 @@
 # Production and QA deployment
 
-Both environments live in the existing Railway project. A push to `main` selects GitHub environment `production` and HCP workspace `bun2too-production`. A push to `qa` selects GitHub environment `qa` and HCP workspace `bun2too-qa`. Other branches do not deploy.
+Both environments live in the existing Railway project. A push to `main` selects GitHub environment `production`; a push to `qa` selects GitHub environment `qa`. Each GitHub environment supplies its own `TF_WORKSPACE` variable naming the actual HCP workspace. Other branches do not deploy.
 
 ## Log investigation: `logs.1790026057842.log`
 
@@ -61,7 +61,8 @@ Add the following values to **each environment**, not to the local `.env` file:
 | Secret | `RAILWAY_API_TOKEN` | Account/workspace API token with access to this Railway project |
 | Secret | `POSTGRES_PASSWORD` | That environment's database password; different for QA and production |
 | Secret | `TF_API_TOKEN` | HCP Terraform team token (or permitted user token) with workspace read access, state read/write, and locking permissions |
-| Variable | `TF_CLOUD_ORGANIZATION` | Your HCP Terraform organization name |
+| Variable | `TF_CLOUD_ORGANIZATION` | Actual HCP Terraform organization name, currently `Bun2tooinc` |
+| Variable | `TF_WORKSPACE` | Existing HCP workspace for this environment; production can use `code-monkey-army` if it owns production state; QA must use a separate workspace |
 | Variable | `RAILWAY_PROJECT_ID` | `f5a4899e-a958-4353-b6a3-99a57b80ebad` in both environments |
 | Variable | `RAILWAY_ENVIRONMENT_ID` | Production ID above, or the QA environment ID |
 | Variable | `POSTGRES_SERVICE_ID` | Postgres service ID; production ID above |
@@ -77,7 +78,7 @@ No Railway credential values are printed. Terraform receives its account token a
 
 The preflight makes exactly two requests, in order, stopping at the first failure:
 
-1. `GET https://app.terraform.io/api/v2/organizations/{TF_CLOUD_ORGANIZATION}/workspaces/{TF_WORKSPACE}` with `Authorization: Bearer $TF_API_TOKEN`. For production this is `https://app.terraform.io/api/v2/organizations/Bun2tooinc/workspaces/bun2too-production`. It requires `data.attributes.execution-mode` to be `local`.
+1. `GET https://app.terraform.io/api/v2/organizations/{TF_CLOUD_ORGANIZATION}/workspaces/{TF_WORKSPACE}` with `Authorization: Bearer $TF_API_TOKEN`. For production this is `https://app.terraform.io/api/v2/organizations/Bun2tooinc/workspaces/code-monkey-army`. It requires `data.attributes.execution-mode` to be `local`.
 2. `POST https://backboard.railway.com/graphql/v2` with `Authorization: Bearer $RAILWAY_API_TOKEN` and `Content-Type: application/json`. The exact body for the configured project is:
 
    ```json
@@ -87,7 +88,7 @@ The preflight makes exactly two requests, in order, stopping at the first failur
    }
    ```
 
-HTTP success alone is insufficient: Railway must return a project with no GraphQL errors, the selected environment ID must have exactly the name `production` or `qa`, and both distinct service IDs must belong to that project. Before either request, the script checks branch/environment/workspace mapping and required nonempty inputs. `POSTGRES_PASSWORD` is only checked for presence during preflight; it is not sent to either API.
+HTTP success alone is insufficient: Railway must return a project with no GraphQL errors, the selected environment ID must have exactly the name `production` or `qa`, and both distinct service IDs must belong to that project. Before either request, the script checks branch/environment mapping and the configured workspace name and required nonempty inputs. `POSTGRES_PASSWORD` is only checked for presence during preflight; it is not sent to either API.
 
 The HCP workspace GET does **not** require an organization token. A team token can access workspaces granted to its team; a user token inherits the user's permissions, subject to organization policy. Use a team token with access to the selected workspace and state read/write plus locking permissions for this Local execution workflow. An organization token succeeding where a team token failed does not establish that the endpoint requires an organization token. Organization tokens are intended for administrative setup, and cannot start remote runs or create configuration versions. See [HCP token types](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/api-tokens) and [workspace permissions](https://developer.hashicorp.com/terraform/cloud-docs/users-teams-organizations/permissions/workspace).
 
@@ -110,7 +111,7 @@ To reproduce the exact production preflight locally, set `TF_API_TOKEN`, `RAILWA
 GITHUB_REF_NAME=main \
 DEPLOY_ENVIRONMENT=production \
 TF_CLOUD_ORGANIZATION=Bun2tooinc \
-TF_WORKSPACE=bun2too-production \
+TF_WORKSPACE=code-monkey-army \
 RAILWAY_PROJECT_ID=f5a4899e-a958-4353-b6a3-99a57b80ebad \
 RAILWAY_ENVIRONMENT_ID=72e3af2d-37a3-430f-92ed-e0941b0b6435 \
 POSTGRES_SERVICE_ID=dd68258c-7986-46e8-b8a7-e2830403ba17 \
@@ -122,26 +123,39 @@ GitHub environment secrets override repository secrets with the same name. Updat
 
 ## HCP Terraform and existing infrastructure
 
-Create two CLI-driven workspaces in the same organization:
+Use separate state workspaces for production and QA. You do not need workspaces named `bun2too-production` or `bun2too-qa`.
 
-- `bun2too-production`
-- `bun2too-qa`
+For the existing account, keep `TF_CLOUD_ORGANIZATION=Bun2tooinc`. Set the production GitHub environment's `TF_WORKSPACE=code-monkey-army` **if that workspace is the production state owner**. Inspect its state first; the workspace URL alone does not establish its contents. Create/select a separate QA workspace, for example `code-monkey-army-qa`, and set that name in the QA GitHub environment. Never point both environments at the same workspace. Set `TF_WORKSPACE` at environment scope rather than providing a shared repository default.
+
+For a consistent convention across applications, use:
+
+| HCP level | Convention | Example |
+| --- | --- | --- |
+| Organization | Company/account | `Bun2tooinc` (or `bun2too` if deliberately renamed in HCP) |
+| Project | Application or infrastructure grouping | `code-monkey-army` |
+| Workspace | `<application>-<environment>[-<region>][-<component>]` | `code-monkey-army-production`, `code-monkey-army-qa` |
+
+HCP workspace names are unique across the **organization**, not just their project. Bare `production` and `qa` would prevent another HCP project in the same organization from using those names. An HCP project groups workspaces and permissions; it does not add a namespace to the workspace lookup URL. The project name is not needed by this workflow's explicit organization/workspace selection. See [HCP workspace naming](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/create).
+
+An existing production workspace can retain `code-monkey-army` or be renamed in HCP to `code-monkey-army-production`, with the GitHub variable updated afterward. Preserve the existing state; creating an empty replacement workspace does not move resource ownership. Moving it into an HCP project is organizational and should keep that same workspace/state.
+
+Add a region suffix only when a workspace owns independently deployed regional resources. Naming a workspace for a region does not configure Railway placement. This workflow still deploys one target per branch; simultaneous regional deployments would need explicit target mappings and separate resource ownership. In particular, the current production Terraform owns shared project/service definitions, so do not run copies of it in multiple regional workspaces against the same resources.
 
 Set **Execution Mode → Local** on both. GitHub Actions executes Terraform with that environment's credentials; HCP stores and locks state. The preflight checks the execution mode. Do not connect these workspaces to a second VCS-driven apply workflow. Limit access to state: it contains database passwords despite Terraform marking them sensitive.
 
-The `cloud {}` configuration selects the organization via `TF_CLOUD_ORGANIZATION` and the workspace via `TF_WORKSPACE`. CI sets the workspace name from the branch. Local Terraform operations must set the same variables explicitly.
+The `cloud {}` configuration selects the organization via `TF_CLOUD_ORGANIZATION` and the workspace via `TF_WORKSPACE`. CI reads the workspace name from the selected GitHub environment; it does not derive or enforce a naming convention. Local Terraform operations must set the same variables explicitly.
 
 ### One-time production state migration/import
 
 The previous workflow used ephemeral local state. **Do not apply against an empty production HCP workspace:** it would create duplicate resources. CI now refuses to apply until all four existing shared resources are present in production state.
 
-If you have the original state, back it up securely and run `terraform init` locally with `TF_WORKSPACE=bun2too-production` to follow HCP's migration prompts. The `moved` blocks preserve the original resource addresses when adding the production-only resource counts.
+If you have the original state, back it up securely and run `terraform init` locally with `TF_WORKSPACE=code-monkey-army` to follow HCP's migration prompts. The `moved` blocks preserve the original resource addresses when adding the production-only resource counts.
 
-If the old runner's state is lost, import the existing resources into `bun2too-production`. From the repository root:
+If the old runner's state is lost, import the existing resources into `code-monkey-army`. From the repository root:
 
 ```sh
 export TF_CLOUD_ORGANIZATION='YOUR_HCP_ORGANIZATION'
-export TF_WORKSPACE='bun2too-production'
+export TF_WORKSPACE='code-monkey-army'
 terraform login
 cp terraform/production.tfvars.example terraform/production.tfvars
 ```
