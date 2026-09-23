@@ -149,6 +149,18 @@ The `cloud {}` configuration selects the organization via `TF_CLOUD_ORGANIZATION
 
 The previous workflow used ephemeral local state. **Do not apply against an empty production HCP workspace:** it would create duplicate resources. CI now refuses to apply until all four existing shared resources are present in production state.
 
+The error `No state file was found!` after successful init/validate means the selected workspace has no state yet. `terraform init` connects to HCP; it does not discover or adopt existing Railway resources. The workflow now reports this explicitly instead of exiting before the import guidance.
+
+For an existing Railway deployment without recoverable Terraform state, use the built-in bootstrap:
+
+1. Put the updated workflow/scripts on `main` (the workflow must also be on the repository's default branch for GitHub's manual-run button).
+2. In **Actions → Infrastructure and Core Deployment Pipeline → Run workflow**, select branch **main** and operation **import-state**.
+3. The workflow uses the production environment's existing credentials and target IDs. It discovers the unique service named `n8n-orchestrator`; if your existing n8n service has another name, set production variable `N8N_SERVICE_ID` to its ID. It validates that all three services belong to the selected project before any import.
+4. It imports the project, Postgres, CrewAI, n8n, and existing managed Postgres/CrewAI variables into the selected HCP workspace. It skips addresses already tracked, so a partially completed import can be resumed. No apply or application deployment runs in this mode.
+5. Review the resulting Terraform plan, especially database volume/PGDATA and service source changes. Once the plan is appropriate, run the workflow on main with operation **deploy**.
+
+Importing writes Terraform state and requires HCP state-write/locking permissions. It does not recreate infrastructure or migrate database data. If these resources are already owned by another state/workspace, migrate that state instead of importing them into a second owner. The same Railway resource must not be managed by two state files. Authentication/backend/network errors reading state are not treated as an empty workspace.
+
 If you have the original state, back it up securely and run `terraform init` locally with `TF_WORKSPACE=code-monkey-army` to follow HCP's migration prompts. The `moved` blocks preserve the original resource addresses when adding the production-only resource counts.
 
 If the old runner's state is lost, import the existing resources into `code-monkey-army`. From the repository root:
@@ -188,7 +200,7 @@ References: [HCP configuration/state migration](https://developer.hashicorp.com/
 
 Each run records the commit, run ID/attempt, branch, selected environment, HCP organization/workspace, and Railway target IDs. Credential diagnostics report presence only. Preflight logs contain UTC timestamps, API method/URL, authentication scheme with a redacted token, the read-only GraphQL query and allowlisted target arguments, HTTP status, request duration, and validation results. HCP mode/inheritance and Railway environment/service matches are reported explicitly. Raw response bodies, GraphQL error messages, Postgres variable values, and Terraform state contents are excluded.
 
-Pipeline shell commands run through `scripts/run_deployment_step.py`, which logs the command, working directory, start time, duration, and exit code while preserving the command's failure status. Normal tool output remains in GitHub's masked step logs. Terraform, Node, and Railway CLI versions are recorded. Terraform state-list stdout remains private to the resource-address check; missing required addresses are named on failure. Third-party setup actions retain their standard GitHub step logs. No shell `set -x`, environment dump, or Terraform provider debug logging is enabled.
+Pipeline shell commands run through `scripts/run_deployment_step.py`, which logs the command, working directory, start time, duration, and exit code while preserving the command's failure status. Normal tool output remains in GitHub's masked step logs. Terraform, Node, and Railway CLI versions are recorded. Terraform state-list output is captured privately by the state preparation script; missing required addresses are named on failure. Third-party setup actions retain their standard GitHub step logs. No shell `set -x`, environment dump, or Terraform provider debug logging is enabled.
 
 Open the GitHub Actions run's job steps for detailed output; the run summary lists command outcomes and the final job status even after an earlier failure (subject to runner availability). These traces apply to runs using the updated commit; they cannot add detail retroactively to old runs. Provider/CLI internal HTTP traffic is not captured by this wrapper.
 

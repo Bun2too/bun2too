@@ -1,6 +1,16 @@
 name: Infrastructure and Core Deployment Pipeline
 
 on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy normally, or import existing production resources and show a plan without applying
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - import-state
   push:
     branches: [ main, qa ]
 
@@ -9,6 +19,7 @@ permissions:
 
 jobs:
   deploy:
+    if: github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
@@ -17,6 +28,7 @@ jobs:
       group: railway-${{ github.repository }}
       cancel-in-progress: false
     env:
+      DEPLOY_OPERATION: ${{ inputs.operation || 'deploy' }}
       DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
       # Set TF_WORKSPACE separately in each GitHub environment.
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
@@ -44,10 +56,12 @@ jobs:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      - name: Terraform Initialize and Apply
+      - name: Terraform initialize, prepare state and plan or apply
         env:
           # Terraform uses RAILWAY_TOKEN for account/workspace tokens.
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          N8N_SERVICE_ID: ${{ vars.N8N_SERVICE_ID }}
           TF_VAR_deployment_environment: ${{ env.DEPLOY_ENVIRONMENT }}
           TF_VAR_railway_project_id: ${{ env.RAILWAY_PROJECT_ID }}
           TF_VAR_railway_environment_id: ${{ env.RAILWAY_ENVIRONMENT_ID }}
@@ -64,39 +78,39 @@ jobs:
           run terraform version
           run terraform init -input=false -no-color
           run terraform validate -no-color
-          if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-            echo "Checking imported production resource addresses with terraform state list"
-            run terraform state list > "$RUNNER_TEMP/railway-state.txt"
-            echo "Terraform state list completed; checking required addresses"
-            for resource in railway_project.fb_pipeline railway_service.postgres_db railway_service.crewai_service railway_service.n8n_engine; do
-              if ! grep -Fxq "$resource" "$RUNNER_TEMP/railway-state.txt" && ! grep -Fxq "${resource}[0]" "$RUNNER_TEMP/railway-state.txt"; then
-                echo "::error::Missing state address: $resource"
-                echo "::error::Import or migrate the existing production resources into the configured production HCP workspace before deployment. See docs/deployment.md."
-                exit 1
-              fi
-            done
+          if [[ "$DEPLOY_OPERATION" == import-state ]]; then
+            run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py" --import-existing
+            run terraform plan -input=false -no-color
+          else
+            if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+              run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py"
+            fi
+            run terraform apply -input=false -auto-approve -no-color
           fi
-          run terraform apply -input=false -auto-approve -no-color
 
       - name: Verify Postgres password reached Railway
+        if: env.DEPLOY_OPERATION != 'import-state'
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         run: python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py --verify-postgres
 
       - name: Set up Node.js 24 for Railway CLI
+        if: env.DEPLOY_OPERATION != 'import-state'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           package-manager-cache: false
 
       - name: Install Railway CLI Engine
+        if: env.DEPLOY_OPERATION != 'import-state'
         run: |
           python3 scripts/run_deployment_step.py node --version
           python3 scripts/run_deployment_step.py npm install -g @railway/cli
           python3 scripts/run_deployment_step.py railway --version
 
       - name: Deploy CrewAI to selected environment
+        if: env.DEPLOY_OPERATION != 'import-state'
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
