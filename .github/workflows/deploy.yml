@@ -33,7 +33,9 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-        run: python3 scripts/check_deployment.py
+        run: |
+          git log -1 --format="Deployment checkout: %H"
+          python3 scripts/check_deployment.py
 
       - name: Install and Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -69,6 +71,12 @@ jobs:
             done
           fi
           terraform apply -input=false -auto-approve
+
+      - name: Verify Postgres password reached Railway
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: python3 scripts/check_deployment.py --verify-postgres
 
       - name: Set up Node.js 24 for Railway CLI
         uses: actions/setup-node@v6
