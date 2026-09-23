@@ -36,7 +36,9 @@ def api_check(label):
     except HTTPError as exc:
         hint = {
             401: "Check the selected GitHub environment's token and its expiration.",
-            403: "Check token permissions and access restrictions for the runner.",
+            403: "Request forbidden; this alone does not identify a bad token. "
+                 "Compare the successful client authentication header, selected GitHub environment secret, "
+                 "and logged response headers for gateway/runner restrictions.",
             404: "Check target names/IDs and token access; inaccessible resources may return 404.",
             429: "API rate limit reached; retry later.",
         }.get(exc.code, "Check the API service status and runner access.")
@@ -61,11 +63,29 @@ def api_check(label):
     trace(f"Passed {label}")
 
 
+# Identify this automation explicitly rather than relying on Python-urllib's default.
+API_USER_AGENT = "crew-team-deployment-preflight/1.0"
+
+
+def response_metadata(headers, token):
+    """Allowlist support/debug headers; never dump cookies or authentication headers."""
+    if headers is None:
+        return {}
+    result = {}
+    for key in ('Content-Type', 'Server', 'CF-Ray', 'CF-Mitigated', 'X-Request-ID', 'Retry-After'):
+        value = headers.get(key)
+        if isinstance(value, str):
+            result[key.lower()] = value.replace(token, '[REDACTED]')[:200] if token else value[:200]
+    return result
+
+
 def request_json(url, token, payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     request = Request(url, data=data, headers={
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": API_USER_AGENT,
     })
     details = {}
     if payload is not None:
@@ -73,11 +93,12 @@ def request_json(url, token, payload=None):
         details['variables'] = {key: value for key, value in payload.get('variables', {}).items()
                                 if key in ('id', 'projectId', 'environmentId', 'serviceId')}
     trace('API request', method=request.get_method(), url=url, timeout_seconds=30,
-          authentication='Bearer [REDACTED]', **details)
+          authentication='Bearer [REDACTED]', user_agent=API_USER_AGENT, **details)
     started = time.monotonic()
     try:
         with urlopen(request, timeout=30) as response:
             trace('API response', status=getattr(response, 'status', None),
+                  headers=response_metadata(getattr(response, 'headers', None), token),
                   duration_seconds=round(time.monotonic() - started, 3))
             result = json.load(response)
             if isinstance(result, dict) and result.get('errors'):
@@ -87,6 +108,7 @@ def request_json(url, token, payload=None):
             return result
     except HTTPError as exc:
         trace('API response', status=exc.code,
+              headers=response_metadata(exc.headers, token),
               duration_seconds=round(time.monotonic() - started, 3))
         raise
     except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:

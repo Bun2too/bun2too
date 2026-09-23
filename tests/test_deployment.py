@@ -4,7 +4,7 @@ import json
 from contextlib import redirect_stdout
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
-from scripts.check_deployment import check, check_postgres_variables, request_json
+from scripts.check_deployment import check, check_postgres_variables, request_json, API_USER_AGENT
 
 
 class DeploymentChecks(unittest.TestCase):
@@ -81,6 +81,8 @@ class DeploymentChecks(unittest.TestCase):
         with patch('scripts.check_deployment.urlopen', return_value=response) as open_url:
             request_json('https://backboard.railway.com/graphql/v2', 'test-token', payload)
             request = open_url.call_args.args[0]
+            self.assertEqual(request.get_header('User-agent'), API_USER_AGENT)
+            self.assertEqual(request.get_header('Accept'), 'application/json')
             self.assertEqual(request.get_method(), 'POST')
             self.assertEqual(request.get_header('Authorization'), 'Bearer test-token')
             self.assertEqual(json.loads(request.data), payload)
@@ -97,6 +99,26 @@ class DeploymentChecks(unittest.TestCase):
         for expected in ['API request', 'POST', 'API response', '200', 'duration_seconds', 'project']:
             self.assertIn(expected, logs)
         for secret in ['response-secret', 'token-secret', 'input-secret']:
+            self.assertNotIn(secret, logs)
+
+    def test_forbidden_response_records_only_safe_headers(self):
+        from email.message import Message
+        headers = Message()
+        headers['Content-Type'] = 'text/html'
+        headers['Server'] = 'cloudflare'
+        headers['CF-Ray'] = 'example-ray'
+        headers['X-Request-ID'] = 'token-secret'
+        headers['Set-Cookie'] = 'cookie-secret'
+        error = HTTPError('https://backboard.railway.com/graphql/v2', 403,
+                          'private-error', headers, io.BytesIO(b'private-body'))
+        output = io.StringIO()
+        with redirect_stdout(output), patch('scripts.check_deployment.urlopen', side_effect=error):
+            with self.assertRaises(HTTPError):
+                request_json(error.url, 'token-secret', {'query': 'query { project { id } }'})
+        logs = output.getvalue()
+        for expected in ['403', 'text/html', 'cloudflare', 'example-ray']:
+            self.assertIn(expected, logs)
+        for secret in ['token-secret', 'cookie-secret', 'private-error', 'private-body']:
             self.assertNotIn(secret, logs)
 
     def test_progress_does_not_print_credentials(self):
