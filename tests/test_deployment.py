@@ -85,6 +85,20 @@ class DeploymentChecks(unittest.TestCase):
             self.assertEqual(request.get_header('Authorization'), 'Bearer test-token')
             self.assertEqual(json.loads(request.data), payload)
 
+    def test_transport_trace_excludes_credentials_and_response_body(self):
+        output = io.StringIO()
+        response = io.StringIO('{"data": {"password": "response-secret"}}')
+        response.status = 200
+        with redirect_stdout(output), patch('scripts.check_deployment.urlopen', return_value=response):
+            request_json('https://backboard.railway.com/graphql/v2', 'token-secret', {
+                'query': 'query { project { id } }',
+                'variables': {'id': 'project', 'password': 'input-secret'}})
+        logs = output.getvalue()
+        for expected in ['API request', 'POST', 'API response', '200', 'duration_seconds', 'project']:
+            self.assertIn(expected, logs)
+        for secret in ['response-secret', 'token-secret', 'input-secret']:
+            self.assertNotIn(secret, logs)
+
     def test_progress_does_not_print_credentials(self):
         output = io.StringIO()
         with redirect_stdout(output):
@@ -139,6 +153,16 @@ class DeploymentChecks(unittest.TestCase):
         env['CREWAI_SERVICE_ID'] = 'other-project-service'
         with self.assertRaisesRegex(ValueError, 'do not belong'):
             check(env, self.request)
+
+    def test_execution_mode_diagnostics(self):
+        for mode in ['remote', 'agent', None, 'sensitive-response']:
+            output = io.StringIO()
+            with redirect_stdout(output), self.assertRaisesRegex(ValueError, 'required local') as exc:
+                check(self.env(), lambda *args: {'data': {'attributes': {
+                    'execution-mode': mode,
+                    'setting-overwrites': {'execution-mode': False}}}})
+            self.assertIn('setting-overwrites.execution-mode=false', output.getvalue())
+            self.assertNotIn('sensitive-response', output.getvalue() + str(exc.exception))
 
     def test_remote_execution_rejected(self):
         def remote(*args):

@@ -1,4 +1,6 @@
 """Read-only checks for CI targets. Never print credentials or API response bodies."""
+import datetime
+import time
 import argparse
 from contextlib import contextmanager
 import json
@@ -9,10 +11,26 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
+def trace(event, **fields):
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    print(f"[{stamp}] {event} {json.dumps(fields, sort_keys=True)}", flush=True)
+
+
+def trace_context(env):
+    names = ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA', 'GITHUB_REF_NAME',
+             'DEPLOY_ENVIRONMENT', 'TF_CLOUD_ORGANIZATION', 'TF_WORKSPACE',
+             'RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID', 'POSTGRES_SERVICE_ID',
+             'CREWAI_SERVICE_ID')
+    trace('Deployment context', **{name: env.get(name) for name in names})
+    trace('Credential presence', **{name: bool(env.get(name, '').strip()) for name in
+                                  ('TF_API_TOKEN', 'RAILWAY_API_TOKEN', 'POSTGRES_PASSWORD')})
+
+
 @contextmanager
 def api_check(label):
     """Report the operation, never exception text or response bodies containing secrets."""
-    print(f"Checking {label}", flush=True)
+    started = time.monotonic()
+    trace(f"Checking {label}")
     try:
         yield
     except HTTPError as exc:
@@ -38,7 +56,9 @@ def api_check(label):
         raise ValueError(f"{label}: unexpected JSON response (null or wrong field type).") from None
     except ValueError as exc:
         raise ValueError(f"{label}: {exc}") from None
-    print(f"Passed {label}", flush=True)
+    finally:
+        trace("Check finished", check=label, duration_seconds=round(time.monotonic() - started, 3))
+    trace(f"Passed {label}")
 
 
 def request_json(url, token, payload=None):
@@ -47,8 +67,32 @@ def request_json(url, token, payload=None):
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
     })
-    with urlopen(request, timeout=30) as response:
-        return json.load(response)
+    details = {}
+    if payload is not None:
+        details['query'] = payload.get('query')
+        details['variables'] = {key: value for key, value in payload.get('variables', {}).items()
+                                if key in ('id', 'projectId', 'environmentId', 'serviceId')}
+    trace('API request', method=request.get_method(), url=url, timeout_seconds=30,
+          authentication='Bearer [REDACTED]', **details)
+    started = time.monotonic()
+    try:
+        with urlopen(request, timeout=30) as response:
+            trace('API response', status=getattr(response, 'status', None),
+                  duration_seconds=round(time.monotonic() - started, 3))
+            result = json.load(response)
+            if isinstance(result, dict) and result.get('errors'):
+                errors = result['errors']
+                trace('API reported errors', count=len(errors) if isinstance(errors, list) else None,
+                      response_body='omitted')
+            return result
+    except HTTPError as exc:
+        trace('API response', status=exc.code,
+              duration_seconds=round(time.monotonic() - started, 3))
+        raise
+    except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        trace('API failure', error_type=type(exc).__name__,
+              duration_seconds=round(time.monotonic() - started, 3))
+        raise
 
 
 def check(env, request=request_json):
@@ -66,8 +110,21 @@ def check(env, request=request_json):
     with api_check(f"HCP workspace GET /api/v2/organizations/{org}/workspaces/{workspace}"):
         hcp = request(f"https://app.terraform.io/api/v2/organizations/{org}/workspaces/{workspace}",
                       env["TF_API_TOKEN"])
-        if hcp["data"]["attributes"]["execution-mode"] != "local":
-            raise ValueError("Set the HCP workspace execution mode to Local; GitHub runs Terraform")
+        attributes = hcp["data"]["attributes"]
+        mode = attributes["execution-mode"]
+        # Only emit known enum/boolean values, never arbitrary API response content.
+        reported_mode = mode if isinstance(mode, str) and mode in ("local", "remote", "agent") else "unknown/null"
+        overwrites = attributes.get("setting-overwrites") or {}
+        override = overwrites.get("execution-mode") if isinstance(overwrites, dict) else None
+        reported_override = str(override).lower() if type(override) is bool else "unavailable"
+        print(f"HCP execution-mode={reported_mode}; "
+              f"setting-overwrites.execution-mode={reported_override}", flush=True)
+        if mode != "local":
+            raise ValueError(
+                f"HCP returned execution-mode={reported_mode}; required local. "
+                "Set the HCP workspace execution mode to Local; GitHub runs Terraform. "
+                f"Verify the saved workspace setting at https://app.terraform.io/app/{org}"
+                f"/workspaces/{workspace}/settings/general and compare a fresh API read.")
     with api_check("Railway project lookup POST https://backboard.railway.com/graphql/v2"):
         result = request("https://backboard.railway.com/graphql/v2", env["RAILWAY_API_TOKEN"], {
             "query": "query($id: String!) { project(id: $id) { environments { edges { node { id name } } } services { edges { node { id } } } } }",
@@ -77,9 +134,16 @@ def check(env, request=request_json):
             raise ValueError("Railway project lookup failed; check the token and project ID")
         project = result["data"]["project"]
         environments = {e["node"]["id"]: e["node"]["name"] for e in project["environments"]["edges"]}
+        trace('Railway environment validation', expected_name=expected,
+              selected_id=env["RAILWAY_ENVIRONMENT_ID"],
+              actual_name=environments.get(env["RAILWAY_ENVIRONMENT_ID"]),
+              environment_count=len(environments))
         if environments.get(env["RAILWAY_ENVIRONMENT_ID"]) != expected:
             raise ValueError("Railway environment ID does not match the branch's environment in this project")
         services = {e["node"]["id"] for e in project["services"]["edges"]}
+        trace('Railway service validation', service_count=len(services),
+              postgres_found=env["POSTGRES_SERVICE_ID"] in services,
+              crewai_found=env["CREWAI_SERVICE_ID"] in services)
         if not {env["POSTGRES_SERVICE_ID"], env["CREWAI_SERVICE_ID"]}.issubset(services):
             raise ValueError("Service IDs do not belong to the selected Railway project")
         if env["POSTGRES_SERVICE_ID"] == env["CREWAI_SERVICE_ID"]:
@@ -126,7 +190,8 @@ def main():
     parser.add_argument("--verify-postgres", action="store_true",
                         help="Read back Postgres password configuration after Terraform apply")
     args = parser.parse_args()
-    print("Deployment diagnostics v2", flush=True)
+    trace("Deployment diagnostics v3")
+    trace_context(os.environ)
     try:
         if args.verify_postgres:
             check_postgres_variables(os.environ)

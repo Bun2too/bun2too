@@ -36,7 +36,7 @@ jobs:
           TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
         run: |
           git log -1 --format="Deployment checkout: %H"
-          python3 scripts/check_deployment.py
+          python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py
 
       - name: Install and Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -59,25 +59,30 @@ jobs:
           TF_VAR_postgres_database: ${{ vars.POSTGRES_DB || 'bun2too' }}
           TF_IN_AUTOMATION: 'true'
         run: |
+          run() { python3 "$GITHUB_WORKSPACE/scripts/run_deployment_step.py" "$@"; }
           cd terraform
-          terraform init -input=false
-          terraform validate
+          run terraform version
+          run terraform init -input=false -no-color
+          run terraform validate -no-color
           if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
-            terraform state list > "$RUNNER_TEMP/railway-state.txt"
+            echo "Checking imported production resource addresses with terraform state list"
+            run terraform state list > "$RUNNER_TEMP/railway-state.txt"
+            echo "Terraform state list completed; checking required addresses"
             for resource in railway_project.fb_pipeline railway_service.postgres_db railway_service.crewai_service railway_service.n8n_engine; do
               if ! grep -Fxq "$resource" "$RUNNER_TEMP/railway-state.txt" && ! grep -Fxq "${resource}[0]" "$RUNNER_TEMP/railway-state.txt"; then
+                echo "::error::Missing state address: $resource"
                 echo "::error::Import or migrate the existing production resources into the configured production HCP workspace before deployment. See docs/deployment.md."
                 exit 1
               fi
             done
           fi
-          terraform apply -input=false -auto-approve
+          run terraform apply -input=false -auto-approve -no-color
 
       - name: Verify Postgres password reached Railway
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-        run: python3 scripts/check_deployment.py --verify-postgres
+        run: python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py --verify-postgres
 
       - name: Set up Node.js 24 for Railway CLI
         uses: actions/setup-node@v6
@@ -86,10 +91,21 @@ jobs:
           package-manager-cache: false
 
       - name: Install Railway CLI Engine
-        run: npm install -g @railway/cli
+        run: |
+          python3 scripts/run_deployment_step.py node --version
+          python3 scripts/run_deployment_step.py npm install -g @railway/cli
+          python3 scripts/run_deployment_step.py railway --version
 
       - name: Deploy CrewAI to selected environment
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          railway up --project "$RAILWAY_PROJECT_ID" --service "$CREWAI_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
+          python3 scripts/run_deployment_step.py railway up --project "$RAILWAY_PROJECT_ID" --service "$CREWAI_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
+
+      - name: Deployment result
+        if: always()
+        env:
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        run: |
+          printf 'Deployment result: %s; commit: %s; run: %s; attempt: %s\n' "$DEPLOY_JOB_STATUS" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          printf '\nDeployment result: **%s**. Run %s, attempt %s.\n' "$DEPLOY_JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"

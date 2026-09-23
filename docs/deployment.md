@@ -103,7 +103,7 @@ Later pipeline operations are separate from these two checks:
 | Postgres verification | Railway GraphQL `variablesForServiceDeployment(projectId, environmentId, serviceId)` reads the selected Postgres variables and compares the password locally without printing values. |
 | Railway CLI deployment | `railway up --project … --service … --environment … --ci` uploads the checkout and starts/monitors the build using `RAILWAY_API_TOKEN`. |
 
-The updated workflow logs `Deployment checkout: <commit>` and `Deployment diagnostics v2`, then a `Checking`/`Passed` line for each API check. Failures identify the operation and HTTP status, network/JSON failure, missing schema field, or failed validation without logging tokens or response bodies. If these markers are absent, the run is using an older workflow/script. Re-running an older GitHub Actions run uses its original revision; deploy a commit containing these changes on the intended branch.
+The updated workflow logs `Deployment checkout: <commit>` and `Deployment diagnostics v3`, then a `Checking`/`Passed` line for each API check. Failures identify the operation and HTTP status, network/JSON failure, missing schema field, or failed validation without logging tokens or response bodies. If these markers are absent, the run is using an older workflow/script. Re-running an older GitHub Actions run uses its original revision; deploy a commit containing these changes on the intended branch.
 
 To reproduce the exact production preflight locally, set `TF_API_TOKEN`, `RAILWAY_API_TOKEN`, and `POSTGRES_PASSWORD` to the same values as the GitHub **production environment** secrets, then run from the repository root:
 
@@ -183,3 +183,11 @@ Import `POSTGRES_USER` and `POSTGRES_DB` similarly. In QA, import existing varia
 After HCP state setup, push the updated workflow to `main`, then merge it into `qa` and push that branch. The workflow verifies targets, applies the selected environment's Terraform, then uploads CrewAI to that Railway environment. `--ci` checks the application build; inspect Postgres runtime logs separately to confirm database health.
 
 References: [HCP configuration/state migration](https://developer.hashicorp.com/terraform/cli/cloud/settings), [GitHub environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), [Railway provider variable import](https://github.com/terraform-community-providers/terraform-provider-railway/blob/v0.6.2/docs/resources/variable.md).
+
+## Reading deployment traces
+
+Each run records the commit, run ID/attempt, branch, selected environment, HCP organization/workspace, and Railway target IDs. Credential diagnostics report presence only. Preflight logs contain UTC timestamps, API method/URL, authentication scheme with a redacted token, the read-only GraphQL query and allowlisted target arguments, HTTP status, request duration, and validation results. HCP mode/inheritance and Railway environment/service matches are reported explicitly. Raw response bodies, GraphQL error messages, Postgres variable values, and Terraform state contents are excluded.
+
+Pipeline shell commands run through `scripts/run_deployment_step.py`, which logs the command, working directory, start time, duration, and exit code while preserving the command's failure status. Normal tool output remains in GitHub's masked step logs. Terraform, Node, and Railway CLI versions are recorded. Terraform state-list stdout remains private to the resource-address check; missing required addresses are named on failure. Third-party setup actions retain their standard GitHub step logs. No shell `set -x`, environment dump, or Terraform provider debug logging is enabled.
+
+Open the GitHub Actions run's job steps for detailed output; the run summary lists command outcomes and the final job status even after an earlier failure (subject to runner availability). These traces apply to runs using the updated commit; they cannot add detail retroactively to old runs. Provider/CLI internal HTTP traffic is not captured by this wrapper.
