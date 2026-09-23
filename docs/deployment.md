@@ -209,3 +209,9 @@ Open the GitHub Actions run's job steps for detailed output; the run summary lis
 A 403 occurs before the script can validate Railway's environment/service response. It does not by itself prove an invalid token. Compare the exact GraphQL query/project ID and authentication header with the successful request. This script uses `Authorization: Bearer` for an account/workspace token; a Postman request using `Project-Access-Token` is a different authentication mechanism. Also ensure the production GitHub environment secret matches the locally tested credential.
 
 Requests now send `Accept: application/json` and the explicit user agent `crew-team-deployment-preflight/1.0`. This removes reliance on Python's default user agent; it is not a confirmed fix for a particular 403. Response logs include only allowlisted headers: content type, server, Cloudflare ray/mitigation headers, request ID, and retry-after. An HTML response or challenge header helps investigate a gateway rejection. A Cloudflare server/ray header alone does not prove Cloudflare blocked the request. Use the timestamp and request ID when investigating with Railway support. Cookies, raw bodies and tokens remain excluded.
+
+### State inspection diagnostics
+
+The state check runs `terraform state list -no-color` and also strips ANSI escapes defensively. Terraform can otherwise prefix its missing-state message with a color escape, which caused the earlier exact-prefix check to misclassify an empty workspace as a backend failure. On failure, redacted stdout/stderr are recorded as JSON diagnostic fields. Actual permission/network errors still stop the run.
+
+The log records `operation=deploy` or `operation=import-state`. A command ending in `prepare_terraform_state.py` without `--import-existing` only checks state; it does not import resources. For initial adoption, manually run the workflow on main with `operation=import-state`, review the plan, then run `deploy`.

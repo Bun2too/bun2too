@@ -4,6 +4,7 @@ Run from terraform/ after init. Imports write HCP state, never apply configurati
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -18,15 +19,31 @@ SHARED = ('railway_project.fb_pipeline', 'railway_service.postgres_db',
           'railway_service.crewai_service', 'railway_service.n8n_engine')
 
 
+def clean_diagnostic(value):
+    # Terraform emits ANSI colors even when stdout/stderr are captured.
+    value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+    for name, secret in os.environ.items():
+        if secret and any(marker in name.upper() for marker in ('TOKEN', 'PASSWORD', 'SECRET')):
+            value = value.replace(secret, '[REDACTED]')
+    value = re.sub(r'(?i)Bearer\s+[^\s"\']+', 'Bearer [REDACTED]', value)
+    return value.strip()
+
+
 def state_addresses():
-    trace('Terraform state inspection', command='terraform state list')
-    result = subprocess.run(['terraform', 'state', 'list'], capture_output=True, text=True)
+    trace('Terraform state inspection', command='terraform state list -no-color')
+    result = subprocess.run(['terraform', 'state', 'list', '-no-color'], capture_output=True, text=True)
     trace('Terraform state inspection result', exit_code=result.returncode)
     if result.returncode:
+        diagnostic = clean_diagnostic(result.stderr)
+        # State-list diagnostics contain no state values. Log them as JSON fields
+        # to escape newlines/workflow commands, and redact known credentials first.
+        trace('Terraform state error', stderr=diagnostic[:8000],
+              stdout=clean_diagnostic(result.stdout)[:8000])
         # Do not treat authentication, backend or network errors as empty state.
-        if result.stderr.strip().startswith('No state file was found!'):
+        if diagnostic.startswith('No state file was found!'):
+            trace('Terraform state absent; initial migration or import is required')
             return set()
-        raise ValueError('Cannot read Terraform state; check HCP state permissions and backend access. '
+        raise ValueError('Cannot read Terraform state; see the Terraform state error diagnostic above. '
                          'No imports or apply were attempted.')
     return set(result.stdout.splitlines())
 
@@ -87,6 +104,8 @@ def import_targets(env, request=request_json):
 def prepare(env, import_existing=False, read_state=state_addresses, request=request_json, execute=run):
     if env.get('DEPLOY_ENVIRONMENT') != 'production' or env.get('GITHUB_REF_NAME') != 'main':
         raise ValueError('Production state preparation requires main and the production environment')
+    trace("Terraform state preparation", operation="import-state" if import_existing else "deploy",
+          organization=env.get("TF_CLOUD_ORGANIZATION"), workspace=env.get("TF_WORKSPACE"))
     addresses = read_state()
     if not import_existing:
         missing = missing_shared(addresses)

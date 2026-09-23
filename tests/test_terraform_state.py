@@ -1,3 +1,8 @@
+import io
+import os
+import shutil
+import tempfile
+from contextlib import redirect_stdout
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -36,6 +41,35 @@ class TerraformStateTests(unittest.TestCase):
                    subprocess.CompletedProcess([], 1, '', 'Unauthorized')):
             with self.assertRaisesRegex(ValueError, 'Cannot read'):
                 state_addresses()
+
+    def test_colored_missing_state_is_recognized(self):
+        error = '\x1b[31mNo state file was found!\nGuidance\x1b[0m\n'
+        with patch('scripts.prepare_terraform_state.subprocess.run', return_value=
+                   subprocess.CompletedProcess([], 1, '', error)) as command:
+            self.assertEqual(state_addresses(), set())
+            self.assertEqual(command.call_args.args[0], ['terraform', 'state', 'list', '-no-color'])
+
+    def test_real_empty_directory_is_detected(self):
+        if not shutil.which('terraform'):
+            self.skipTest('Terraform is not installed')
+        actual_run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            def isolated_run(args, **kwargs):
+                return actual_run(args, cwd=directory, **kwargs)
+            with patch('scripts.prepare_terraform_state.subprocess.run', side_effect=isolated_run):
+                self.assertEqual(state_addresses(), set())
+
+    def test_backend_diagnostic_is_visible_and_redacted(self):
+        output = io.StringIO()
+        failure = 'Error: Unauthorized secret-sentinel Authorization: Bearer hidden-token'
+        with patch.dict(os.environ, {'TF_API_TOKEN': 'secret-sentinel'}), redirect_stdout(output):
+            with patch('scripts.prepare_terraform_state.subprocess.run', return_value=
+                       subprocess.CompletedProcess([], 1, '', failure)):
+                with self.assertRaisesRegex(ValueError, 'diagnostic above'):
+                    state_addresses()
+        self.assertIn('Unauthorized', output.getvalue())
+        self.assertNotIn('secret-sentinel', output.getvalue())
+        self.assertNotIn('hidden-token', output.getvalue())
 
     def test_import_uses_ids_and_skips_existing_state(self):
         states = iter([{'railway_project.fb_pipeline'}, {address + '[0]' for address in SHARED}])
