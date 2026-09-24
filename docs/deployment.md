@@ -1,5 +1,7 @@
 # Production and QA deployment
 
+For the daily marketing application, managed n8n workflows, runtime-variable maps and existing-n8n persistence migration, follow the [marketing architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This guide covers the underlying infrastructure and earlier state/database troubleshooting.
+
 Both environments live in the existing Railway project. A push to `main` selects GitHub environment `production`; a push to `qa` selects GitHub environment `qa`. Each GitHub environment supplies its own `TF_WORKSPACE` variable naming the actual HCP workspace. Other branches do not deploy.
 
 ## Log investigation: `logs.1790026057842.log`
@@ -48,7 +50,7 @@ Use the project from the supplied link: `f5a4899e-a958-4353-b6a3-99a57b80ebad`. 
 5. Set runtime application credentials in **each Railway environment's CrewAI service**, including `MARKETING_API_KEY`, model/provider settings and any n8n handoff settings. GitHub environment secrets are not automatically application runtime variables. Keep QA social publishing disabled unless deliberately configured for test accounts.
 6. Configure n8n/database connections separately if using them. This change initializes Postgres; it does not migrate n8n to Postgres or automatically wire application clients to it.
 
-Production Terraform owns the shared project/service definitions. QA Terraform owns only the QA Postgres variables; it cannot create, delete or update shared services. A production change to a shared Railway service can affect both instances, because the provider can redeploy all instances. The workflow serializes both branches' deployments within the repository.
+Production Terraform owns the shared project/service definitions. QA Terraform owns its environment-specific variables (Postgres, CrewAI and configured n8n runtime settings); it cannot create, delete or update shared services. A production change to a shared Railway service can affect both instances, because the provider can redeploy all instances. The workflow serializes both branches' deployments within the repository.
 
 ## GitHub environments and values
 

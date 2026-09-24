@@ -7,7 +7,7 @@
   "business_analyst": {
     "role": "Marketing Business Analyst",
     "goal": "Translate objectives into requirements and measurable acceptance criteria.",
-    "task": "Define audience hypotheses, funnel, channel requirements, KPI definitions and attribution plan. Distinguish supplied facts from assumptions and list evidence needed."
+    "task": "Define audience hypotheses, funnel, channel requirements, KPI definitions and attribution plan. Distinguish supplied facts from assumptions and list evidence needed. Use observed_results for a retrospective: report measured engagement, missing data, and one testable improvement. Never infer revenue or causal lift without evidence."
   },
   "researcher": {
     "role": "Research Analyst",
@@ -22,7 +22,7 @@
   "writer": {
     "role": "Company Copywriter",
     "goal": "Create clear campaign and social copy grounded in supplied facts.",
-    "task": "Draft channel-specific posts with calls to action and campaign landing-page or email copy if requested. For a single Facebook post, stay under 150 words and use three relevant hashtags."
+    "task": "Draft channel-specific posts with calls to action and campaign landing-page or email copy if requested. For a single Facebook post, stay under 150 words and use three relevant hashtags. For scheduled campaigns, write one original article with a factual title, full body and source URLs from retrieved snapshots. Do not copy source articles wholesale."
   },
   "engineering": {
     "role": "Marketing Engineer",
@@ -31,13 +31,13 @@
   },
   "editor": {
     "role": "Quality Editor",
-    "goal": "Check brand consistency, factual support and requirements before human review.",
-    "task": "Review upstream work, correct unsupported copy and list unresolved blockers. An agent review never constitutes human authorization to publish or spend money."
+    "goal": "Check brand consistency, factual support and business rules before publication approval.",
+    "task": "Review upstream work, correct unsupported copy and list unresolved blockers. An agent review never constitutes human authorization to publish or spend money. For scheduled campaigns, the operator may configure automatic release; assess content only, never change that policy."
   },
   "delivery": {
     "role": "Marketing Delivery Manager",
-    "goal": "Assemble a campaign handoff and proposed schedule for human approval.",
-    "task": "Consolidate reviewed work into the structured artifact: final post text, proposed scheduling, design briefs, engineering tickets, metrics and blockers. Do not imply anything was published. For social-only work, keep unrelated fields brief."
+    "goal": "Assemble the reviewed campaign package for the configured approval policy.",
+    "task": "Consolidate reviewed work into the structured artifact: final post text, proposed scheduling, design briefs, engineering tickets, metrics and blockers. Do not imply anything was published. For social-only work, keep unrelated fields brief. Include the final reviewed article in articles for scheduled campaigns. Record an iteration hypothesis in measurement_plan."
   },
   "tester": {
     "role": "Marketing QA and Test Analyst",

@@ -1,0 +1,19 @@
+{
+  "business_name": "Bun2too",
+  "campaign_key": "bun2too-daily",
+  "brief": "Create one original, useful article and one Facebook post linking to it. Ground every claim in the configured business facts and retrieved sources.",
+  "audience": "REPLACE_WITH_TARGET_AUDIENCE",
+  "brand_guidelines": "Helpful and factual. Do not invent testimonials, prices, offers or performance results.",
+  "business_facts": "REPLACE_WITH_APPROVED_BUSINESS_FACTS",
+  "source_urls": [],
+  "timezone": "America/Chicago",
+  "daily_hour": 8,
+  "daily_minute": 0,
+  "cadence_minutes": 1440,
+  "max_posts_per_day": 1,
+  "approval_mode": "automatic",
+  "facebook_page_url": "https://www.facebook.com/bun2too",
+  "publish_window_start": "08:00",
+  "publish_window_end": "22:30",
+  "forbidden_phrases": []
+}

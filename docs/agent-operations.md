@@ -1,5 +1,7 @@
 # Marketing team: work, observability and Atlassian records
 
+For scheduled Facebook publishing and the daily retrospective loop, use the [MVP architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This document describes the retained manual-campaign and Atlassian integration; daily scheduled campaigns do not automatically create Jira/Confluence work.
+
 The application now records what each role was asked to do, its output and structured decisions, and the status of publication to Jira/Confluence. It uses nine roles:
 
 | Role | Actual current work |

@@ -56,6 +56,9 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
                              "Use STORY-001 style keys for PO stories and TASK-ROLE-001 for follow-ups. "
                              "Avoid duplicate work across roles; reference existing work keys. "
                              "PO must decompose the proposed campaign into at most six actionable stories. "
+                             "Tester and Editor must set approved_for_publication=true only after checking "
+                             "all claims against supplied evidence, business rules, audience and brand; "
+                             "otherwise leave false and explain blockers. All other roles leave false. "
                              "Other roles add at most two follow-up tasks only when needed. Cite supplied "
                              "Jira keys, Confluence IDs and reviewed lesson sources where relevant."),
             context=list(tasks),

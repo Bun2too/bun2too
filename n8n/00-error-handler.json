@@ -1,0 +1,63 @@
+{
+  "name": "Bun2too marketing errors (__DEPLOY_ENVIRONMENT__)",
+  "nodes": [
+    {
+      "id": "error-trigger",
+      "name": "Workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "report-error",
+      "name": "Record failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($json.execution?.id || \"trigger\"), workflow_name: $json.workflow?.name || \"marketing\", status: \"failed\"}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Workflow error": {
+      "main": [
+        [
+          {
+            "node": "Record failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}

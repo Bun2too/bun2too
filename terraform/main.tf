@@ -156,6 +156,65 @@ resource "railway_service" "n8n_engine" {
   project_id   = railway_project.fb_pipeline[0].id
   name         = "n8n-orchestrator"
   source_image = "docker.io/n8nio/n8n:latest"
+  # Existing SQLite/config data must be backed up and restored before enabling.
+  volume = var.n8n_volume_ready ? {
+    name       = "n8n-data"
+    mount_path = "/home/node/.n8n"
+  } : null
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+variable "n8n_volume_ready" {
+  type        = bool
+  default     = false
+  description = "Enable only for a new instance or after planning backup/restore of the existing n8n data directory."
+}
+
+variable "n8n_service_id" {
+  type    = string
+  default = ""
+}
+
+variable "marketing_runtime_config" {
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+  description = "CrewAI runtime variables and secrets. Stored in sensitive HCP state. DATA_DIR is managed separately."
+  validation {
+    condition     = !contains(keys(var.marketing_runtime_config), "DATA_DIR")
+    error_message = "Do not include DATA_DIR in marketing_runtime_config."
+  }
+}
+
+variable "n8n_runtime_config" {
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+  description = "n8n runtime variables. Preserve the existing N8N_ENCRYPTION_KEY when migrating."
+}
+
+resource "railway_variable" "marketing_runtime" {
+  for_each       = nonsensitive(toset(keys(var.marketing_runtime_config)))
+  service_id     = var.crewai_service_id
+  environment_id = var.railway_environment_id
+  name           = each.key
+  value          = var.marketing_runtime_config[each.key]
+}
+
+resource "railway_variable" "n8n_runtime" {
+  for_each       = nonsensitive(toset(keys(var.n8n_runtime_config)))
+  service_id     = var.n8n_service_id
+  environment_id = var.railway_environment_id
+  name           = each.key
+  value          = var.n8n_runtime_config[each.key]
+  lifecycle {
+    precondition {
+      condition     = length(var.n8n_service_id) > 0
+      error_message = "Set n8n_service_id before configuring n8n runtime variables."
+    }
+  }
 }
 
 output "railway_project_id" {

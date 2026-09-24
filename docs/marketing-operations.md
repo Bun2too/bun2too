@@ -1,0 +1,184 @@
+# Marketing MVP deployment and operating runbook
+
+Read [the architecture specification](marketing-mvp-architecture.md) for component/agent contracts, the flow diagram, state machine, business rules and failure semantics.
+
+## Current verified deployment facts
+
+Read-only checks during this implementation found:
+
+- `https://crewai.bun2too.com/health`: HTTP 200. Railway has this custom domain configured for CrewAI.
+- `https://crewai.bun2too.com/ready`: HTTP 404. The currently deployed application does not expose the new readiness endpoint; the new application must be deployed.
+- `https://n8n.bun2too.com/healthz`: HTTP 200.
+- Railway's production CrewAI deployment-variable lookup reported no configured `MARKETING_API_KEY`, `LLM_MODEL`, `OPENAI_API_KEY`, Facebook settings, `PUBLIC_API_BASE_URL` or `DD_API_KEY`.
+- The n8n deployment-variable lookup reported no explicit `DB_TYPE`, `N8N_ENCRYPTION_KEY` or `WEBHOOK_URL`. This does not mean its internally generated encryption key is missing; preserve its existing data/configuration.
+- Local env files contain some infrastructure, model and Datadog credentials. Local presence is not proof of validity and does not install those variables in Railway. The local marketing API key is empty; Facebook and n8n management credentials have not been supplied for activation.
+
+No live publishing, workflow activation, infrastructure mutation or credential changes were performed as part of these checks. No commit or push is implied by this document.
+
+## 1. Verify locally before committing
+
+From the repository root, with dependencies installed:
+
+```sh
+.venv/bin/python scripts/verify_marketing.py --terraform
+```
+
+Verification for this working tree passed 69 Python tests, 5 Terraform mock-provider tests, Terraform validation/format checks, workflow JSON/YAML parsing and Bash syntax checks. The command below reruns the offline checks. If Terraform is not initialized, first use the existing [deployment guide](deployment.md) to initialize the configured backend/provider. The tests themselves do not apply anything or require a Facebook token.
+
+The mock end-to-end test covers schedule deduplication, all nine role callbacks, approval, publication ID, public article, repeat-poll suppression and actual-field-only metrics. Additional tests cover simultaneous claims, restart recovery, timed publishing, content/hash rejection, source network restrictions and Datadog retries/redaction. This still needs a live n8n import/activation test against the installed version; Docker is not running in the inspected local environment.
+
+For local interactive operation, set `MARKETING_API_KEY`, `LLM_MODEL` and its provider key in ignored `crewai_agents/.env`. Keep `PUBLISHING_ENABLED=false` for initial generation checks. Fill `crewai_agents/config/marketing.json`, then run:
+
+```sh
+.venv/bin/python crewai_agents/start.py
+```
+
+Open `http://localhost:8000/docs`, authorize with the marketing key and use `/campaigns` for a manual draft. Scheduled `/automation/tick` additionally needs `MARKETING_AUTOMATION_ENABLED=true`. The local worker stores scheduled work in `crewai_agents/.data`; do not point local tests at the production database. LLM calls require a valid provider account and may incur costs.
+
+## 2. Complete the business profile once
+
+Edit the packaged `crewai_agents/config/marketing.json`:
+
+- Fill the intended audience and approved business facts; describe the actual products/services and value proposition.
+- Supply approved public HTTPS source pages, at most five. Use direct pages without redirects, credentials or private-network addresses. Very large pages are rejected; provide smaller evidence pages.
+- Add brand rules and forbidden phrases for claims/offers that should never be published.
+- Retain `approval_mode=automatic`, `timezone=America/Chicago`, window `08:00`–`22:30`, daily cadence and a maximum one publication attempt per day, as requested.
+
+The Page handle `bun2too` is not a replacement for `FACEBOOK_PAGE_ID`. Obtain the numeric Page ID and authorized Page access token from the business's Meta account/app. Use a supported Graph API version explicitly; do not rely on an unversioned URL. Page publishing ordinarily requires `pages_manage_posts` and read permissions such as `pages_read_engagement`; confirm the current permissions/access approval for the app and target Page in [Meta's documentation](https://developers.facebook.com/docs/pages-api/posts/).
+
+## 3. Configure runtime and deployment secrets
+
+In Railway production CrewAI Variables, or the GitHub `MARKETING_RUNTIME_CONFIG` JSON secret, configure:
+
+```json
+{
+  "MARKETING_API_KEY": "YOUR_RANDOM_SHARED_KEY",
+  "LLM_MODEL": "YOUR_CONFIGURED_PROVIDER_MODEL",
+  "OPENAI_API_KEY": "YOUR_PROVIDER_KEY_IF_USING_OPENAI",
+  "PUBLIC_API_BASE_URL": "https://crewai.bun2too.com",
+  "FACEBOOK_PAGE_ID": "YOUR_NUMERIC_PAGE_ID",
+  "FACEBOOK_GRAPH_VERSION": "YOUR_SUPPORTED_vMAJOR.MINOR",
+  "FACEBOOK_PAGE_ACCESS_TOKEN": "YOUR_PAGE_TOKEN",
+  "MARKETING_AUTOMATION_ENABLED": "true",
+  "AUTO_APPROVAL_ENABLED": "true",
+  "PUBLISHING_ENABLED": "true",
+  "WORKER_ENABLED": "true",
+  "DD_LOGS_ENABLED": "true",
+  "DD_LLMOBS_ENABLED": "1",
+  "DD_LLMOBS_AGENTLESS_ENABLED": "1",
+  "DD_SITE": "us5.datadoghq.com",
+  "DD_API_KEY": "YOUR_DATADOG_KEY",
+  "DD_ENV": "production",
+  "DD_SERVICE": "bun2too-marketing-api"
+}
+```
+
+This is a schema example, not a file to commit with real values. Use the actual provider key name required by your model, and the Datadog site belonging to your account. For an initial no-publication acceptance run, keep `PUBLISHING_ENABLED=false`; enable it after inspecting actual output. Automatic publishing itself is already the owner's chosen policy.
+
+`DATA_DIR=/data` is managed by Terraform separately. Keep CrewAI at one replica. GitHub environment secrets and Railway Variables are independent unless included in the Terraform runtime map. HCP state stores the sensitive values; restrict access.
+
+Set the **same** `MARKETING_API_KEY` as a GitHub environment secret for runtime checks. Create an n8n **Header Auth** credential named Marketing API:
+
+- Header: `Authorization`
+- Value: `Bearer ` followed by that same key
+
+Save its ID as GitHub variable `N8N_MARKETING_CREDENTIAL_ID`. Create an n8n management API key with access to the managed workflows, save as GitHub secret `N8N_API_KEY`. Do not paste tokens into chat, workflow JSON or prompts.
+
+Additional GitHub environment variables:
+
+```text
+CREWAI_BASE_URL=https://crewai.bun2too.com
+N8N_BASE_URL=https://n8n.bun2too.com
+MARKETING_DEPLOY_ENABLED=true
+N8N_ACTIVATE_WORKFLOWS=true
+N8N_SERVICE_ID=1120d946-3a88-41f7-9096-4135d5f70d94
+DD_SITE=us5.datadoghq.com
+```
+
+Keep the existing HCP/Railway project, workspace, environment and service settings. Add GitHub secret `DD_API_KEY` to record deployment results. `MARKETING_DEPLOY_ENABLED=false` or missing skips workflow deployment, so a green infrastructure job alone is not enough to assert marketing is installed.
+
+## 4. Preserve n8n before changing its runtime/storage
+
+Follow the [architecture migration procedure](marketing-mvp-architecture.md#n8n-persistence-and-existing-instance-migration) before enabling `N8N_VOLUME_READY=true`. It provisions `/home/node/.n8n`; mounting it empty over the current container files can hide the current owner, workflows and credentials. Do not replace its existing encryption key with a new local value just because both variables have the same name.
+
+After verified backup/restore, set `N8N_RUNTIME_CONFIG` to desired n8n variables, preserving that key:
+
+```json
+{
+  "N8N_ENCRYPTION_KEY": "THE_EXISTING_INSTANCE_KEY",
+  "WEBHOOK_URL": "https://n8n.bun2too.com/",
+  "N8N_EDITOR_BASE_URL": "https://n8n.bun2too.com",
+  "N8N_PROXY_HOPS": "1",
+  "GENERIC_TIMEZONE": "America/Chicago",
+  "TZ": "America/Chicago"
+}
+```
+
+The MVP uses persisted SQLite for n8n and CrewAI. Configuring `DB_TYPE=postgresdb` alone would not migrate the existing SQLite contents; database migration is a separate operation. After cutover, restart n8n and confirm the same owner and credential/workflow records are available.
+
+## 5. Deploy and verify without guessing what ran
+
+Review the local diff and Terraform plan before committing. Keep secrets and local state ignored. Deploy the reviewed revision through GitHub Actions on the intended branch with `operation=deploy`; do not rerun an old job expecting it to pick up uncommitted code.
+
+The job now tests code, applies infra/runtime variables, uploads CrewAI, polls `/ready`, updates the n8n workflows and activates the schedule when configured. Readiness is a configuration/worker check, not a live LLM or Meta authorization test. Missing `MARKETING_API_KEY` yields 503, a wrong key 401, and an old app without `/ready` 404.
+
+To perform the same read-only runtime check locally with exported variables:
+
+```sh
+export CREWAI_BASE_URL='https://crewai.bun2too.com'
+python3 scripts/check_marketing_runtime.py
+```
+
+The environment must contain `MARKETING_API_KEY`; the script never prints it. Once runtime verification succeeds, install/update workflows locally if needed:
+
+```sh
+export N8N_BASE_URL='https://n8n.bun2too.com'
+export DEPLOY_ENVIRONMENT='production'
+export MARKETING_TIMEZONE='America/Chicago'
+export N8N_ACTIVATE_WORKFLOWS='true'
+python3 scripts/deploy_n8n.py
+```
+
+This is a real mutation: requires exported `N8N_API_KEY` and `N8N_MARKETING_CREDENTIAL_ID`, and can activate publishing. It is the same installer used by CI. Keep `N8N_ACTIVATE_WORKFLOWS=false` if importing for inspection first. Templates are not instantiated merely by deploying the n8n Docker image.
+
+In n8n, expect `[production] Marketing daily operations` and `Bun2too marketing errors (production)`. Inspect the former's credentials, active/published state and execution history. The error workflow is referenced by the main workflow and does not need its own active schedule.
+
+## 6. Inspect a real campaign and publication
+
+These commands work in macOS zsh/bash with values exported in the current shell. They read state and do not publish:
+
+```sh
+curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MARKETING_API_KEY:?Export MARKETING_API_KEY}" \
+  'https://crewai.bun2too.com/ready'
+
+curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MARKETING_API_KEY:?Export MARKETING_API_KEY}" \
+  'https://crewai.bun2too.com/automation/status'
+```
+
+Use the returned run ID in `/docs` to inspect `/runs/{run_id}` and `/runs/{run_id}/work`. Verify all role outputs, source snapshots, article, approved hash, target window and actual publication outcome. A scheduled tick returns immediately; generation can take minutes. Polling is expected. An HTTP 200 from `/automation/publish` can contain `blocked` entries, so inspect its body and run events.
+
+After a real publication, verify the Page displays the exact approved message and article link. `published` requires a returned remote post ID; a draft, approved run or successful n8n HTTP call is not evidence of a live post. Open the public article URL without authentication to confirm it is reachable from Facebook.
+
+The next metrics collection should record actual available counts and observation time. Check a later run's model context/deliverables for measured retrospective findings and a new hypothesis. A missing metric is not zero, and engagement is not proof of revenue.
+
+## 7. Datadog and emergency operations
+
+In Datadog Logs search `service:bun2too-marketing-api env:production`, then the run ID. Deployment logs use `service:bun2too-deployment`; n8n execution records use the same app service with `@kind:n8n_execution_failed`/`completed`. For agent/model spans use LLM Observability, app `bun2too-marketing-crew-team`, matching run/session ID. The production configuration must actually include the keys/flags; markdown instructions alone do not transmit logs.
+
+Confirm a recent `task_completed`, `facebook_publish_finished`, n8n execution event and deployment outcome in intake. The exporter omits prompt content from operational logs; LLM span capture is separate and optional. No infrastructure CPU/memory integration or alert monitor is installed by this change.
+
+To stop publication immediately, set CrewAI `PUBLISHING_ENABLED=false` and ensure that variable change reaches the running deployment; also deactivate the main n8n workflow. Disabling the workflow alone will not revoke a request already executing. Never delete the publication database to clear an error.
+
+For `publication_unknown` or a stuck `publishing`/`sending` record, inspect Facebook first. If the post exists, use `/social-publications/{id}/reconcile` with its numeric `PAGE_POST` ID and reviewer. The endpoint verifies Page and exact text. Do not resend blindly after a timeout. For auth failures renew the correct Page token; for policy blockers revise evidence/rules and regenerate. Retain failed runs for diagnosis.
+
+## Live activation inputs still needed
+
+1. Approved business/product facts, audience and source URLs; the profile remains intentionally incomplete.
+2. Numeric Facebook Page ID, supported API version and authorized Page token.
+3. A populated shared marketing API key, installed consistently in CrewAI, GitHub and n8n.
+4. n8n management API key and saved Header Auth credential ID.
+5. Verified preservation/migration of the current n8n data and encryption key before attaching its volume.
+
+These are the remaining prerequisites for live automatic operation; the repository changes and offline tests cannot substitute for them.

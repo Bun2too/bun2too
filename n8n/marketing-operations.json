@@ -1,0 +1,299 @@
+{
+  "name": "[__DEPLOY_ENVIRONMENT__] Marketing daily operations",
+  "nodes": [
+    {
+      "id": "trigger-0",
+      "name": "Generate daily campaign schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "operation-0",
+      "name": "Generate daily campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/tick",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "trigger-1",
+      "name": "Publish approved content schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        240
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "operation-1",
+      "name": "Publish approved content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/publish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "trigger-2",
+      "name": "Collect Facebook results schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        480
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "operation-2",
+      "name": "Collect Facebook results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/metrics",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "event-operation-0",
+      "name": "Record Generate daily campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "event-operation-1",
+      "name": "Record Publish approved content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "event-operation-2",
+      "name": "Record Collect Facebook results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Generate daily campaign schedule": {
+      "main": [
+        [
+          {
+            "node": "Generate daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish approved content schedule": {
+      "main": [
+        [
+          {
+            "node": "Publish approved content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Facebook results schedule": {
+      "main": [
+        [
+          {
+            "node": "Collect Facebook results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Record Generate daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish approved content": {
+      "main": [
+        [
+          {
+            "node": "Record Publish approved content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Facebook results": {
+      "main": [
+        [
+          {
+            "node": "Record Collect Facebook results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 660
+  }
+}

@@ -24,6 +24,7 @@ class BacklogItem(BaseModel):
 
 
 class AgentDeliverable(BaseModel):
+    approved_for_publication: bool = False
     summary: str
     decisions: list[str]
     evidence: list[str]
@@ -51,7 +52,14 @@ class SocialPost(BaseModel):
     asset_brief: str = ""
 
 
+class Article(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=100, max_length=20000)
+    source_urls: list[str] = Field(default_factory=list, max_length=10)
+
+
 class MarketingArtifact(BaseModel):
+    articles: list[Article] = Field(default_factory=list, max_length=1)
     campaign_plan: str
     requirements: str
     creative_brief: str

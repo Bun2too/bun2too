@@ -51,3 +51,34 @@ run "production_owns_shared_services" {
     error_message = "Postgres must have persistent storage."
   }
 }
+
+run "production_n8n_storage_is_opt_in" {
+  command = plan
+  variables {
+    deployment_environment = "production"
+    n8n_volume_ready       = true
+  }
+  assert {
+    condition     = railway_service.n8n_engine[0].volume.mount_path == "/home/node/.n8n"
+    error_message = "n8n must persist its database and credential configuration at the correct mount."
+  }
+}
+
+run "runtime_variables_target_environment" {
+  command = plan
+  variables {
+    deployment_environment = "qa"
+    n8n_service_id         = "55555555-5555-4555-8555-555555555555"
+    marketing_runtime_config = {
+      PUBLISHING_ENABLED = "false"
+      MARKETING_API_KEY  = "test-only-key"
+    }
+    n8n_runtime_config = {
+      GENERIC_TIMEZONE = "America/Chicago"
+    }
+  }
+  assert {
+    condition     = railway_variable.marketing_runtime["MARKETING_API_KEY"].service_id == var.crewai_service_id && railway_variable.marketing_runtime["MARKETING_API_KEY"].environment_id == var.railway_environment_id && railway_variable.n8n_runtime["GENERIC_TIMEZONE"].service_id == var.n8n_service_id
+    error_message = "Runtime configuration must target the selected service and environment."
+  }
+}
