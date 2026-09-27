@@ -50,7 +50,7 @@ Requires installed dependencies and initialized Terraform providers. Tests use m
 
 ## Deploy applications and workflows as code
 
-The [GitHub workflow](.github/workflows/deploy.yml) tests code, checks HCP/Railway targets, applies Terraform, uploads CrewAI, optionally checks runtime readiness and installs/activates the version-controlled [n8n workflows](n8n/marketing-operations.json). Configure `MARKETING_DEPLOY_ENABLED=true` and the required environment variables/secrets; otherwise workflow installation is skipped. Import-state mode only imports and plans.
+The [GitHub workflow](.github/workflows/deploy.yml) tests code, checks HCP/Railway targets, applies Terraform, uploads CrewAI, checks runtime readiness and installs/activates the version-controlled [n8n workflows](n8n/marketing-operations.json). Normal `deploy` requires workflow credentials and `N8N_ACTIVATE_WORKFLOWS=true`; missing configuration fails instead of silently skipping the application. The manual `infrastructure-only` operation applies Terraform without uploading CrewAI or installing workflows. Import-state mode only imports and plans. Workflow IDs, links and verified active states appear in the GitHub summary.
 
 | Branch | GitHub/Railway environment | HCP workspace |
 | --- | --- | --- |

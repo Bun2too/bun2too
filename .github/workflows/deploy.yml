@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy normally, or import existing production resources and show a plan without applying
+        description: Deploy the full application, apply infrastructure only, or import state and plan
         required: true
         default: deploy
         type: choice
         options:
           - deploy
+          - infrastructure-only
           - import-state
   push:
     branches: [ main, qa ]
@@ -45,6 +46,17 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      - name: Verify requested deployment scope before changes
+        env:
+          CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          N8N_MARKETING_CREDENTIAL_ID: ${{ vars.N8N_MARKETING_CREDENTIAL_ID }}
+          N8N_ACTIVATE_WORKFLOWS: ${{ vars.N8N_ACTIVATE_WORKFLOWS }}
+          MARKETING_DEPLOY_ENABLED: ${{ vars.MARKETING_DEPLOY_ENABLED }}
+        run: python3 scripts/check_deployment_scope.py
 
       - name: Verify application and deployment logic locally
         run: |
@@ -110,35 +122,35 @@ jobs:
         run: python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py --verify-postgres
 
       - name: Set up Node.js 24 for Railway CLI
-        if: env.DEPLOY_OPERATION != 'import-state'
+        if: env.DEPLOY_OPERATION == 'deploy'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           package-manager-cache: false
 
       - name: Install Railway CLI Engine
-        if: env.DEPLOY_OPERATION != 'import-state'
+        if: env.DEPLOY_OPERATION == 'deploy'
         run: |
           python3 scripts/run_deployment_step.py node --version
           python3 scripts/run_deployment_step.py npm install -g @railway/cli
           python3 scripts/run_deployment_step.py railway --version
 
       - name: Deploy CrewAI to selected environment
-        if: env.DEPLOY_OPERATION != 'import-state'
+        if: env.DEPLOY_OPERATION == 'deploy'
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
           python3 scripts/run_deployment_step.py railway up --project "$RAILWAY_PROJECT_ID" --service "$CREWAI_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
 
       - name: Verify marketing runtime before installing schedules
-        if: env.DEPLOY_OPERATION != 'import-state' && vars.MARKETING_DEPLOY_ENABLED == 'true'
+        if: env.DEPLOY_OPERATION == 'deploy'
         env:
           CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
           MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
         run: python3 scripts/run_deployment_step.py python3 scripts/check_marketing_runtime.py
 
       - name: Deploy version-controlled n8n workflows
-        if: env.DEPLOY_OPERATION != 'import-state' && vars.MARKETING_DEPLOY_ENABLED == 'true'
+        if: env.DEPLOY_OPERATION == 'deploy'
         env:
           N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}

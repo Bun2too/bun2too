@@ -2,7 +2,41 @@
 
 Read [the architecture specification](marketing-mvp-architecture.md) for component/agent contracts, the flow diagram, state machine, business rules and failure semantics.
 
-## Current verified deployment facts
+## What a complete deployment creates
+
+Creating Railway services completes only the infrastructure layer:
+
+| Layer | Deployment action | Visible evidence |
+| --- | --- | --- |
+| Infrastructure | Terraform manages services, variables and configured volumes | Railway services/volumes and HCP state |
+| CrewAI application | Railway builds/runs the Python API and worker | Authenticated `/ready`; run IDs and role outputs under `/runs` |
+| Scheduled marketing | Installer creates/updates and activates the n8n workflow JSON | `[production] Marketing daily operations` in n8n, active state and execution history |
+
+The old pipeline skipped the last layer when `MARKETING_DEPLOY_ENABLED` was missing or false. Its code could therefore report success with only services deployed; a particular past run must be checked against its step log and revision. Normal `deploy` now requires the workflow inputs, checks readiness, and reads the workflows back after installation. GitHub's summary includes their IDs, links and active states. This verifies application/schedule deployment, not a successful real model call or Facebook post.
+
+The runtime sequence is:
+
+```text
+n8n Schedule Trigger: every 5 minutes
+  → CrewAI API /automation/tick
+  → durable job, at most one per campaign/day
+  → Railway worker creates and runs the nine CrewAI agents
+  → saves the reviewed article and Facebook copy
+
+n8n Schedule Trigger: every 5 minutes
+  → /automation/publish
+  → sends approved content within its daily release window
+
+n8n Schedule Trigger: 07:45 America/Chicago
+  → /automation/metrics
+  → observations inform the next campaign
+```
+
+The schedule lives inside n8n. Five-minute polling does not mean a new post every five minutes: the API enforces daily deduplication and the 08:00–22:30 Central window. After activation, expect a polling execution within five minutes; `not_due` or an existing run can be a valid result.
+
+**Why no agents appear in the CrewAI account:** this repository uses the CrewAI Python framework inside Railway. `Agent`, `Task` and `Crew` objects are constructed in `crewai_agents/app/crews.py` for each execution. That does not register a hosted deployment in CrewAI AMP. Optional CrewAI tracing is also separate from hosting. Running in the CrewAI cloud account would require an AMP deployment and authenticated kickoff/status integration, which are not implemented here. Do not run both backends against the same publishing campaign. See [CrewAI AMP](https://docs.crewai.com/enterprise/introduction).
+
+## Previously verified deployment facts (2026-09-23)
 
 Read-only checks during this implementation found:
 
@@ -89,13 +123,12 @@ Additional GitHub environment variables:
 ```text
 CREWAI_BASE_URL=https://crewai.bun2too.com
 N8N_BASE_URL=https://n8n.bun2too.com
-MARKETING_DEPLOY_ENABLED=true
 N8N_ACTIVATE_WORKFLOWS=true
 N8N_SERVICE_ID=1120d946-3a88-41f7-9096-4135d5f70d94
 DD_SITE=us5.datadoghq.com
 ```
 
-Keep the existing HCP/Railway project, workspace, environment and service settings. Add GitHub secret `DD_API_KEY` to record deployment results. `MARKETING_DEPLOY_ENABLED=false` or missing skips workflow deployment, so a green infrastructure job alone is not enough to assert marketing is installed.
+Keep the existing HCP/Railway project, workspace, environment and service settings. Add GitHub secret `DD_API_KEY` to record deployment results. Normal `deploy` fails before infrastructure changes if workflow inputs are missing or activation is disabled. The legacy `MARKETING_DEPLOY_ENABLED` variable is no longer required; remove a false value if present. Select the explicit manual `infrastructure-only` operation when you intentionally want only Terraform changes.
 
 ## 4. Preserve n8n before changing its runtime/storage
 

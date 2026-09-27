@@ -219,7 +219,7 @@ The legacy `/campaigns`, `/generate-post`, and `/runs/{id}/dispatch` interfaces 
 
 ## 9. CI/CD and activation configuration
 
-The deployment job now executes application and infrastructure-script tests before external preflight; initializes/validates Terraform; imports state and plans when explicitly in import mode, or prepares state and applies in deploy mode; verifies Postgres; uploads the CrewAI app; optionally checks authenticated runtime readiness and installs n8n workflows; and reports deployment outcome to Datadog. All command wrappers retain timestamps, exit codes and duration.
+The deployment job now executes application and infrastructure-script tests before external preflight; initializes/validates Terraform; imports state and plans when explicitly in import mode, or prepares state and applies in deploy mode; verifies Postgres; uploads the CrewAI app; checks authenticated runtime readiness and installs/activates n8n workflows for a full deploy; and reports deployment outcome to Datadog. All command wrappers retain timestamps, exit codes and duration.
 
 Application/secret configuration is explicit. `MARKETING_RUNTIME_CONFIG` and `N8N_RUNTIME_CONFIG` are GitHub environment secrets containing JSON string maps that Terraform writes into the selected Railway service/environment. Sensitive values are still stored in HCP Terraform state. Protect state access, keep maps complete across deployments, and never put plaintext secrets into committed tfvars. Existing variables being adopted into Terraform should be imported/reviewed using the provider format described in the deployment guide.
 
@@ -229,13 +229,13 @@ Application/secret configuration is explicit. `MARKETING_RUNTIME_CONFIG` and `N8
 | `N8N_RUNTIME_CONFIG` | GitHub environment secret: existing encryption key, public URL/proxy/timezone and optional retention config |
 | `N8N_SERVICE_ID` | GitHub environment variable for runtime variable targeting |
 | `N8N_VOLUME_READY` | GitHub variable `true` only after the existing-data migration is prepared/completed; keep true after adoption |
-| `MARKETING_DEPLOY_ENABLED` | GitHub variable `true` enables runtime check and n8n installation steps |
+| `MARKETING_DEPLOY_ENABLED` | Legacy switch; no longer needed. A false value rejects full deploy; select explicit `infrastructure-only` to omit applications |
 | `CREWAI_BASE_URL` | GitHub variable: public HTTPS API origin, no trailing API path |
 | `N8N_BASE_URL` | GitHub variable: `https://n8n.bun2too.com` |
 | `N8N_API_KEY` | GitHub secret: n8n management key authorized to list/create/update/activate these workflows |
 | `N8N_MARKETING_CREDENTIAL_ID` | GitHub variable: ID of n8n Header Auth credential with header `Authorization`, value `Bearer <MARKETING_API_KEY>` |
 | `MARKETING_API_KEY` | GitHub secret for readiness; must equal the CrewAI runtime key and n8n credential value |
-| `N8N_ACTIVATE_WORKFLOWS` | GitHub variable: `true` to activate the installed schedule, false to leave it inactive |
+| `N8N_ACTIVATE_WORKFLOWS` | Must be `true` for full pipeline deploy. The standalone installer can still import inactive workflows for inspection |
 | `DD_API_KEY`, `DD_SITE` | GitHub secret/variable for deployment logs; also separately in the CrewAI runtime map |
 
 For automatic production operations, the CrewAI runtime must include `MARKETING_AUTOMATION_ENABLED=true`, `AUTO_APPROVAL_ENABLED=true`, `PUBLISHING_ENABLED=true`, `WORKER_ENABLED=true`, a model and its provider key, public article URL and Facebook version/Page token/ID. Keep QA publishing disabled or point QA exclusively at an authorized test Page. Token expiration and revocation require operator renewal; the code does not manufacture long-lived authorization.

@@ -67,6 +67,7 @@ def deploy(env, request=api):
         cursor = result.get('nextCursor')
         path = '/workflows?limit=100&cursor=' + quote(cursor, safe='') if cursor else None
     error_workflow_id = None
+    verified_workflows = []
     for source in sorted((ROOT / 'n8n').glob('*.json')):
         payload = render(json.loads(source.read_text()), crew, env['N8N_MARKETING_CREDENTIAL_ID'],
                          env.get('DEPLOY_ENVIRONMENT', 'production'), env.get('MARKETING_TIMEZONE', 'America/Chicago'))
@@ -88,7 +89,22 @@ def deploy(env, request=api):
             error_workflow_id = workflow_id
         if not is_error and env.get('N8N_ACTIVATE_WORKFLOWS', 'false').lower() == 'true':
             request(base, key, f'/workflows/{workflow_id}/activate', 'POST')
-        print(f"Deployed n8n workflow {payload['name']} id={workflow_id}; activation={env.get('N8N_ACTIVATE_WORKFLOWS', 'false')}")
+        observed = request(base, key, f'/workflows/{workflow_id}')
+        if observed.get('name') != payload['name']:
+            raise ValueError('n8n workflow readback did not match the deployed workflow')
+        should_activate = not is_error and env.get('N8N_ACTIVATE_WORKFLOWS', 'false').lower() == 'true'
+        if should_activate and observed.get('active') is not True:
+            raise ValueError('n8n schedule is not active after deployment')
+        if not is_error and (observed.get('settings') or {}).get('errorWorkflow') != error_workflow_id:
+            raise ValueError('n8n error workflow link was not saved')
+        record = dict(name=payload['name'], id=workflow_id, active=observed.get('active') is True,
+                      url=base + '/workflow/' + workflow_id)
+        verified_workflows.append(record)
+        print('Verified n8n workflow ' + json.dumps(record), flush=True)
+        if env.get('GITHUB_STEP_SUMMARY'):
+            with Path(env['GITHUB_STEP_SUMMARY']).open('a') as output:
+                output.write(f"\nWorkflow [{record['name']}]({record['url']}): active={record['active']} (read back from n8n).\n")
+    return verified_workflows
 
 
 if __name__ == '__main__':

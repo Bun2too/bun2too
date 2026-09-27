@@ -2,6 +2,8 @@
 
 For the daily marketing application, managed n8n workflows, runtime-variable maps and existing-n8n persistence migration, follow the [marketing architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This guide covers the underlying infrastructure and earlier state/database troubleshooting.
 
+Normal `deploy` includes the CrewAI application and verified active n8n workflows. Use manual `infrastructure-only` to apply only Terraform changes, or `import-state` to import and plan. Missing application settings now fail full deploy instead of silently skipping it.
+
 Both environments live in the existing Railway project. A push to `main` selects GitHub environment `production`; a push to `qa` selects GitHub environment `qa`. Each GitHub environment supplies its own `TF_WORKSPACE` variable naming the actual HCP workspace. Other branches do not deploy.
 
 ## Log investigation: `logs.1790026057842.log`
