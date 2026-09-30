@@ -117,12 +117,14 @@ jobs:
             if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
               run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py"
             fi
+            run python3 "$GITHUB_WORKSPACE/scripts/ensure_n8n_volume.py"
             # Saved plan may contain secrets; keep it local and remove it on exit.
             plan_file="$RUNNER_TEMP/crew-deploy.tfplan"
             trap 'rm -f "$plan_file"' EXIT
             run terraform plan -input=false -no-color -out="$plan_file"
             run python3 "$GITHUB_WORKSPACE/scripts/check_n8n_storage_plan.py" "$plan_file"
             run terraform apply -input=false -no-color "$plan_file"
+            run python3 "$GITHUB_WORKSPACE/scripts/ensure_n8n_volume.py" --verify-only
           fi
 
       - name: Verify Postgres password reached Railway

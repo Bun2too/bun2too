@@ -9,8 +9,10 @@ import sys
 
 if __package__:
     from .check_deployment import request_json
+    from .ensure_n8n_volume import ensure
 else:
     from check_deployment import request_json
+    from ensure_n8n_volume import ensure
 
 PROTECTED = ('N8N_ENCRYPTION_KEY', 'N8N_USER_FOLDER', 'DB_TYPE', 'DB_SQLITE_DATABASE',
              'DB_POSTGRESDB_HOST', 'DB_POSTGRESDB_PORT', 'DB_POSTGRESDB_DATABASE',
@@ -35,7 +37,7 @@ def current_variables(env, request=request_json):
     return values
 
 
-def validate(plan, env, existing=None):
+def validate(plan, env, existing=None, volume_verified=False):
     old_variables, new_variables = {}, {}
     for resource in plan.get('resource_changes', []):
         change = resource['change']
@@ -45,6 +47,8 @@ def validate(plan, env, existing=None):
             if 'delete' in actions:
                 raise ValueError('Refusing to delete or replace the n8n service and its persistent data')
             old_volume, new_volume = before.get('volume'), after.get('volume')
+            if not new_volume and not old_volume and volume_verified:
+                continue  # Provider can miss an attachment that the scoped API verified.
             if not new_volume or new_volume.get('mount_path') != '/home/node/.n8n':
                 raise ValueError('n8n must retain a volume mounted at /home/node/.n8n')
             if old_volume:
@@ -76,7 +80,7 @@ def validate(plan, env, existing=None):
             if name not in old_variables and new_variables.get(name, default) != default and (existing or {}).get(name) != new_variables.get(name):
                 raise ValueError('Refusing an unverified n8n database/path migration via ' + name)
     # Production owns service volumes. QA volumes must be provisioned separately.
-    if env.get('DEPLOY_ENVIRONMENT') == 'qa' and new_variables and env.get('N8N_VOLUME_READY', '').lower() != 'true':
+    if env.get('DEPLOY_ENVIRONMENT') == 'qa' and new_variables and not volume_verified and env.get('N8N_VOLUME_READY', '').lower() != 'true':
         raise ValueError('Confirm QA has its own volume at /home/node/.n8n and set N8N_VOLUME_READY=true before updating n8n')
 
 
@@ -87,7 +91,8 @@ if __name__ == '__main__':
         plan = json.loads(result.stdout)
         has_runtime = any(r['type'] == 'railway_variable_collection' and r['name'] == 'n8n_runtime'
                           for r in plan.get('resource_changes', []))
-        validate(plan, os.environ, current_variables(os.environ) if has_runtime else None)
+        ensure(os.environ, verify_only=True)
+        validate(plan, os.environ, current_variables(os.environ) if has_runtime else None, volume_verified=True)
     except ValueError as exc:
         # JSON parsing errors are kept generic; schema validation messages use fixed field names only.
         message = 'Cannot parse Terraform plan JSON' if isinstance(exc, json.JSONDecodeError) else str(exc)

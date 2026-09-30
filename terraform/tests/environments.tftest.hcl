@@ -52,15 +52,15 @@ run "production_owns_shared_services" {
   }
 }
 
-run "production_n8n_storage_is_mandatory" {
+run "n8n_volume_is_managed_by_environment_scoped_provisioner" {
   command = plan
   variables {
     deployment_environment = "production"
     n8n_volume_ready       = false
   }
   assert {
-    condition     = railway_service.n8n_engine[0].volume.mount_path == "/home/node/.n8n"
-    error_message = "n8n must persist its database and credential configuration at the correct mount."
+    condition     = railway_service.n8n_engine[0].volume == null
+    error_message = "The provider must not create a nested n8n volume; the scoped provisioner owns storage."
   }
 }
 

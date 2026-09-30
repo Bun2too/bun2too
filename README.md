@@ -39,7 +39,7 @@ Restrict production deployments to `main` and QA deployments to `qa` in GitHub's
 | `N8N_BASE_URL` | Required | `https://n8n.bun2too.com` | n8n management API origin; no `/api/v1` suffix |
 | `N8N_MARKETING_CREDENTIAL_ID` | Required | ID of the Header Auth credential you save in the target n8n instance; see step 5 | Select the credential used by n8n to call CrewAI; **not** a token or credential display name |
 | `N8N_ACTIVATE_WORKFLOWS` | Required | `true` | Full deploy must activate the daily workflow |
-| `N8N_VOLUME_READY` | Storage migration acknowledgement | Set `true` only after preparing backup/restore for an existing unpersisted instance or confirming it is empty | Production always declares `/home/node/.n8n` storage. This flag never detaches it. QA needs a separately attached volume and this acknowledgement |
+| `N8N_VOLUME_READY` | Storage migration acknowledgement | Set `true` only after preparing backup/restore for an existing unpersisted instance or confirming it is empty | CI ensures `/home/node/.n8n` storage in the selected environment through the Railway API. This flag permits creation after migration preparation; it never detaches storage |
 | `DD_SITE` | Default available; set explicitly for observability | `us5.datadoghq.com` if your Datadog account is in US5; otherwise its actual site | Datadog intake for **GitHub deployment logs**; default US5 |
 | `POSTGRES_USER` | Optional override | Default `postgres`; preserve the initialized database's actual user | Postgres initialization configuration |
 | `POSTGRES_DB` | Optional override | Default `bun2too`; preserve the initialized database's actual database | Postgres initialization configuration |
@@ -140,7 +140,7 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `N8N_PROXY_HOPS` | `1` for the documented single reverse-proxy setup; adjust if the actual proxy chain differs |
 | `GENERIC_TIMEZONE`, `TZ` | `America/Chicago` for scheduling/system time with daylight saving; the workflow installer also explicitly uses this timezone |
 
-Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. For an existing service with no volume, `N8N_VOLUME_READY=true` acknowledges this migration; the pipeline refuses to attach an empty volume without it. Storage remains declared even if the flag is later absent or false. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
+Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. For an existing service with no volume, `N8N_VOLUME_READY=true` acknowledges this migration; the pipeline refuses to attach an empty volume without it. An existing correct attachment is reused even if the flag is later absent or false. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
 
 ### 5. One-time setup outside the GitHub settings screen
 

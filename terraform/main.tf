@@ -156,15 +156,12 @@ resource "railway_service" "n8n_engine" {
   project_id   = railway_project.fb_pipeline[0].id
   name         = "n8n-orchestrator"
   source_image = "docker.io/n8nio/n8n:latest"
-  # Always persist SQLite, users, API keys, workflows and local encryption config.
-  # The plan guard requires explicit migration acknowledgement for an existing
-  # service with no volume; a normal update cannot remove or replace its volume.
-  volume = {
-    name       = "n8n-data"
-    mount_path = "/home/node/.n8n"
-  }
+  # ensure_n8n_volume.py provisions/verifies storage for the explicit environment.
+  # Provider 0.6.2's nested volume update can return null after creation. Keep any
+  # provider-observed attachment without creating, renaming or removing it here.
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [volume]
   }
 }
 
