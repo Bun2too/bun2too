@@ -9,6 +9,16 @@ from scripts import check_marketing_runtime as runtime
 
 
 class RuntimeChecks(unittest.TestCase):
+    def test_profile_failure_points_to_file_instead_of_secrets(self):
+        problems = runtime.configuration_problems({
+            'model_configured': True, 'automation_enabled': 'true',
+            'missing_configuration': ['marketing_profile'],
+        })
+        self.assertEqual(len(problems), 1)
+        self.assertIn('crewai_agents/config/marketing.json', problems[0])
+        self.assertIn('audience and business_facts', problems[0])
+        self.assertNotIn('MARKETING_RUNTIME_CONFIG', problems[0])
+
     def test_reported_configuration_failure_is_actionable_and_not_retried(self):
         result = {'automation_enabled': 'false', 'model_configured': False,
                   'worker_ready': True, 'storage': 'ok', 'missing_configuration': []}

@@ -21,8 +21,13 @@ def configuration_problems(result):
         problems.append('LLM_MODEL is not configured in the deployed service')
     if result.get('automation_enabled') != 'true':
         problems.append('MARKETING_AUTOMATION_ENABLED must be "true" in the deployed service')
-    if result.get('missing_configuration'):
-        problems.append('/ready reports missing_configuration; check the runtime configuration and marketing profile')
+    missing = result.get('missing_configuration') or []
+    if 'marketing_profile' in missing:
+        problems.append('Marketing profile is incomplete or invalid. Edit crewai_agents/config/marketing.json '
+                        '(audience and business_facts ship as placeholders), or fix the file selected by '
+                        'MARKETING_PROFILE_PATH. This is a profile file error, not a missing API secret')
+    if any(item != 'marketing_profile' for item in missing):
+        problems.append('/ready reports missing runtime configuration; check MARKETING_RUNTIME_CONFIG')
     return problems
 
 
@@ -76,7 +81,7 @@ def check():
             problems = configuration_problems(result)
             if problems:
                 raise ConfigurationError('; '.join(problems) +
-                                         '. Update MARKETING_RUNTIME_CONFIG in the selected GitHub environment and redeploy.')
+                                         '. Correct the indicated configuration and redeploy.')
             if not result.get('worker_ready'):
                 raise ValueError('Worker is not ready')
             return

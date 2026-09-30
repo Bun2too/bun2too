@@ -338,11 +338,16 @@ def worker_loop(stop):
 def readiness():
     db = store()
     missing = []
+    configuration_errors = {}
     if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() == 'true':
         try:
             marketing.profile()
+        except marketing.ProfileError as exc:
+            missing.append('marketing_profile')
+            configuration_errors['marketing_profile'] = str(exc)
         except (ValueError, OSError):
             missing.append('marketing_profile')
+            configuration_errors['marketing_profile'] = 'Invalid marketing profile settings in config/marketing.json or MARKETING_PROFILE_PATH'
         try:
             marketing.delivery_config()
         except ValueError:
@@ -361,6 +366,7 @@ def readiness():
     if os.getenv('DD_LOGS_ENABLED', 'false').lower() == 'true' and not os.getenv('DD_API_KEY'):
         missing.append('DD_API_KEY')
     return {'storage': 'ok', 'model_configured': bool(os.getenv('LLM_MODEL')),
+            'configuration_errors': configuration_errors,
             'worker_ready': worker_ready.is_set(), 'missing_configuration': missing,
             'publishing_enabled': os.getenv('PUBLISHING_ENABLED', 'false'),
             'automation_enabled': os.getenv('MARKETING_AUTOMATION_ENABLED', 'false'),

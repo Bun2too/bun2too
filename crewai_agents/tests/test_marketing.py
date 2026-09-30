@@ -31,6 +31,32 @@ def artifact():
         posts=[dict(channel='facebook', text='Read our useful article.')]).model_dump()
 
 
+class ProfileConfigurationTests(unittest.TestCase):
+    def test_placeholder_diagnostics_identify_both_fields_without_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'marketing.json'
+            data = dict(config(), audience='REPLACE_PRIVATE_AUDIENCE', business_facts='REPLACE_PRIVATE_FACTS')
+            path.write_text(json.dumps(data))
+            with patch.dict(os.environ, MARKETING_PROFILE_PATH=str(path)), self.assertRaises(marketing.ProfileError) as caught:
+                marketing.profile()
+            message = str(caught.exception)
+            self.assertIn('audience', message)
+            self.assertIn('business_facts', message)
+            self.assertNotIn('PRIVATE', message)
+            path.write_text(json.dumps(config()))
+            with patch.dict(os.environ, MARKETING_PROFILE_PATH=str(path)):
+                self.assertEqual(marketing.profile()['audience'], 'Business owners')
+
+    def test_readiness_returns_actionable_profile_error(self):
+        with patch.dict(os.environ, MARKETING_AUTOMATION_ENABLED='true', PUBLISHING_ENABLED='false', DD_LOGS_ENABLED='false'), \
+                patch.object(main, 'store', return_value=Mock(queued=Mock(return_value=[]))), \
+                patch.object(marketing, 'profile', side_effect=marketing.ProfileError('Missing fields: audience, business_facts')), \
+                patch.object(marketing, 'delivery_config'):
+            result = main.readiness()
+        self.assertEqual(result['missing_configuration'], ['marketing_profile'])
+        self.assertIn('audience, business_facts', result['configuration_errors']['marketing_profile'])
+
+
 class MarketingTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

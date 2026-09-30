@@ -14,12 +14,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 
+class ProfileError(ValueError):
+    """Safe operator-facing profile validation message; contains no profile values."""
+
+
 def profile():
     path = os.getenv('MARKETING_PROFILE_PATH') or str(Path(__file__).resolve().parents[1] / 'config' / 'marketing.json')
-    data = json.loads(Path(path).read_text())
-    for key in ('business_name', 'campaign_key', 'brief', 'audience', 'business_facts'):
-        if not isinstance(data.get(key), str) or not data[key].strip() or 'REPLACE_' in data[key]:
-            raise ValueError(f'Configure marketing profile field {key}')
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, UnicodeError, ValueError):
+        raise ProfileError('Marketing profile must be a readable JSON file; check MARKETING_PROFILE_PATH or packaged config/marketing.json') from None
+    if not isinstance(data, dict):
+        raise ProfileError('Marketing profile must be a JSON object')
+    missing = [key for key in ('business_name', 'campaign_key', 'brief', 'audience', 'business_facts')
+               if not isinstance(data.get(key), str) or not data[key].strip() or 'REPLACE_' in data[key]]
+    if missing:
+        raise ProfileError('Marketing profile has missing or placeholder fields: ' + ', '.join(missing))
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{2,60}', data['campaign_key']):
         raise ValueError('Invalid marketing campaign_key')
     if data.get('approval_mode', 'human') not in ('human', 'automatic'):
