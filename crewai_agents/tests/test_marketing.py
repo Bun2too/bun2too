@@ -129,6 +129,22 @@ class MarketingTests(unittest.TestCase):
             self.assertEqual(self.db.get(run_id)['status'], 'expired')
             send.assert_not_called()
 
+    def test_no_scheduled_job_or_model_spend_without_delivery(self):
+        for overrides in ({'PUBLISHING_ENABLED':'false'}, {'FACEBOOK_PAGE_ACCESS_TOKEN':''},
+                          {'FACEBOOK_PAGE_ID':''}, {'PUBLIC_API_BASE_URL':''}):
+            with self.subTest(overrides=list(overrides)), patch.dict(os.environ, overrides), patch.object(main, 'build_crew') as build:
+                response = self.client.post('/automation/tick')
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(self.db.queued(), [])
+                build.assert_not_called()
+
+    def test_queued_job_does_not_spend_after_delivery_disabled(self):
+        run, _ = self.db.schedule('disabled-after-queue', {'campaign_key':'bun2too-daily','channels':['facebook']})
+        with patch.dict(os.environ, {'PUBLISHING_ENABLED':'false'}), patch.object(main, 'build_crew') as build:
+            main.execute_run(run['id'])
+            build.assert_not_called()
+        self.assertEqual(self.db.get(run['id'])['status'], 'failed')
+
     def test_source_fetch_rejects_local_network_and_non_https(self):
         with self.assertRaises(ValueError): marketing.source_context({'source_urls':['http://example.com']})
         with patch.object(marketing.socket, 'getaddrinfo', return_value=[(2,1,6,'',('127.0.0.1',443))]):

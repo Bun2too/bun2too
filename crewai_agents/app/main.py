@@ -93,6 +93,8 @@ def execute_run(run_id, social_only=False):
 
         brief = dict(run["brief"])
         if run.get('scheduled'):
+            # Recheck queued jobs too: delivery may have been disabled since creation.
+            marketing.delivery_config()
             config = marketing.profile()
             sources = marketing.source_context(config)
             db.update(run_id, source_snapshots=sources)
@@ -341,6 +343,10 @@ def readiness():
             marketing.profile()
         except (ValueError, OSError):
             missing.append('marketing_profile')
+        try:
+            marketing.delivery_config()
+        except ValueError:
+            missing.append('scheduled_facebook_delivery_configuration')
     if os.getenv('PUBLISHING_ENABLED', 'false').lower() == 'true':
         for key in ('FACEBOOK_GRAPH_VERSION', 'FACEBOOK_PAGE_ID', 'FACEBOOK_PAGE_ACCESS_TOKEN', 'PUBLIC_API_BASE_URL'):
             if not os.getenv(key):
@@ -367,6 +373,7 @@ def automation_tick():
         raise HTTPException(409, 'Scheduled marketing is disabled')
     try:
         config = marketing.profile()
+        marketing.delivery_config()
         if not os.getenv('LLM_MODEL'):
             raise ValueError('LLM_MODEL is not configured')
         slot = marketing.schedule_slot(config)

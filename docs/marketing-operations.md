@@ -61,13 +61,13 @@ Verification for this working tree passed 69 Python tests, 5 Terraform mock-prov
 
 The mock end-to-end test covers schedule deduplication, all nine role callbacks, approval, publication ID, public article, repeat-poll suppression and actual-field-only metrics. Additional tests cover simultaneous claims, restart recovery, timed publishing, content/hash rejection, source network restrictions and Datadog retries/redaction. This still needs a live n8n import/activation test against the installed version; Docker is not running in the inspected local environment.
 
-For local interactive operation, set `MARKETING_API_KEY`, `LLM_MODEL` and its provider key in ignored `crewai_agents/.env`. Keep `PUBLISHING_ENABLED=false` for initial generation checks. Fill `crewai_agents/config/marketing.json`, then run:
+For local interactive operation, set `MARKETING_API_KEY`, `LLM_MODEL` and its provider key in ignored `crewai_agents/.env`. Keep `PUBLISHING_ENABLED=false` for initial manual draft checks. Fill `crewai_agents/config/marketing.json`, then run:
 
 ```sh
 .venv/bin/python crewai_agents/start.py
 ```
 
-Open `http://localhost:8000/docs`, authorize with the marketing key and use `/campaigns` for a manual draft. Scheduled `/automation/tick` additionally needs `MARKETING_AUTOMATION_ENABLED=true`. The local worker stores scheduled work in `crewai_agents/.data`; do not point local tests at the production database. LLM calls require a valid provider account and may incur costs.
+Open `http://localhost:8000/docs`, authorize with the marketing key and use `/campaigns` for a manual draft. Scheduled `/automation/tick` needs `MARKETING_AUTOMATION_ENABLED=true` and configured/enabled Facebook delivery. Unattended generation is rejected when publishing is disabled or destination settings are missing. Use `/campaigns` for deliberate draft-only tests. The local worker stores scheduled work in `crewai_agents/.data`; do not point local tests at the production database. LLM calls require a valid provider account and may incur costs.
 
 ## 2. Complete the business profile once
 
@@ -82,70 +82,13 @@ The Page handle `bun2too` is not a replacement for `FACEBOOK_PAGE_ID`. Obtain th
 
 ## 3. Configure runtime and deployment secrets
 
-In Railway production CrewAI Variables, or the GitHub `MARKETING_RUNTIME_CONFIG` JSON secret, configure:
-
-```json
-{
-  "MARKETING_API_KEY": "YOUR_RANDOM_SHARED_KEY",
-  "LLM_MODEL": "YOUR_CONFIGURED_PROVIDER_MODEL",
-  "OPENAI_API_KEY": "YOUR_PROVIDER_KEY_IF_USING_OPENAI",
-  "PUBLIC_API_BASE_URL": "https://crewai.bun2too.com",
-  "FACEBOOK_PAGE_ID": "YOUR_NUMERIC_PAGE_ID",
-  "FACEBOOK_GRAPH_VERSION": "YOUR_SUPPORTED_vMAJOR.MINOR",
-  "FACEBOOK_PAGE_ACCESS_TOKEN": "YOUR_PAGE_TOKEN",
-  "MARKETING_AUTOMATION_ENABLED": "true",
-  "AUTO_APPROVAL_ENABLED": "true",
-  "PUBLISHING_ENABLED": "true",
-  "WORKER_ENABLED": "true",
-  "DD_LOGS_ENABLED": "true",
-  "DD_LLMOBS_ENABLED": "1",
-  "DD_LLMOBS_AGENTLESS_ENABLED": "1",
-  "DD_SITE": "us5.datadoghq.com",
-  "DD_API_KEY": "YOUR_DATADOG_KEY",
-  "DD_ENV": "production",
-  "DD_SERVICE": "bun2too-marketing-api"
-}
-```
-
-This is a schema example, not a file to commit with real values. Use the actual provider key name required by your model, and the Datadog site belonging to your account. For an initial no-publication acceptance run, keep `PUBLISHING_ENABLED=false`; enable it after inspecting actual output. Automatic publishing itself is already the owner's chosen policy.
-
-`DATA_DIR=/data` is managed by Terraform separately. Keep CrewAI at one replica. GitHub environment secrets and Railway Variables are independent unless included in the Terraform runtime map. HCP state stores the sensitive values; restrict access.
-
-Set the **same** `MARKETING_API_KEY` as a GitHub environment secret for runtime checks. Create an n8n **Header Auth** credential named Marketing API:
-
-- Header: `Authorization`
-- Value: `Bearer ` followed by that same key
-
-Save its ID as GitHub variable `N8N_MARKETING_CREDENTIAL_ID`. Create an n8n management API key with access to the managed workflows, save as GitHub secret `N8N_API_KEY`. Do not paste tokens into chat, workflow JSON or prompts.
-
-Additional GitHub environment variables:
-
-```text
-CREWAI_BASE_URL=https://crewai.bun2too.com
-N8N_BASE_URL=https://n8n.bun2too.com
-N8N_ACTIVATE_WORKFLOWS=true
-N8N_SERVICE_ID=1120d946-3a88-41f7-9096-4135d5f70d94
-DD_SITE=us5.datadoghq.com
-```
-
-Keep the existing HCP/Railway project, workspace, environment and service settings. Add GitHub secret `DD_API_KEY` to record deployment results. Normal `deploy` fails before infrastructure changes if workflow inputs are missing or activation is disabled. The legacy `MARKETING_DEPLOY_ENABLED` variable is no longer required; remove a false value if present. Select the explicit manual `infrastructure-only` operation when you intentionally want only Terraform changes.
+Use the [complete GitHub configuration checklist](deployment.md#complete-github-configuration-for-the-mvp), also included in [README.md](../README.md#complete-github-configuration-for-the-mvp). It contains every GitHub Variable/Secret, both complete runtime JSON objects, the n8n credential setup, matching-key rules and production/QA differences. No additional secret checklist is maintained here.
 
 ## 4. Preserve n8n before changing its runtime/storage
 
 Follow the [architecture migration procedure](marketing-mvp-architecture.md#n8n-persistence-and-existing-instance-migration) before enabling `N8N_VOLUME_READY=true`. It provisions `/home/node/.n8n`; mounting it empty over the current container files can hide the current owner, workflows and credentials. Do not replace its existing encryption key with a new local value just because both variables have the same name.
 
-After verified backup/restore, set `N8N_RUNTIME_CONFIG` to desired n8n variables, preserving that key:
-
-```json
-{
-  "N8N_ENCRYPTION_KEY": "THE_EXISTING_INSTANCE_KEY",
-  "WEBHOOK_URL": "https://n8n.bun2too.com/",
-  "N8N_EDITOR_BASE_URL": "https://n8n.bun2too.com",
-  "N8N_PROXY_HOPS": "1",
-  "GENERIC_TIMEZONE": "America/Chicago",
-  "TZ": "America/Chicago"
-}
-```
+After verified backup/restore, configure `N8N_RUNTIME_CONFIG` from the central checklist, preserving the existing encryption key.
 
 The MVP uses persisted SQLite for n8n and CrewAI. Configuring `DB_TYPE=postgresdb` alone would not migrate the existing SQLite contents; database migration is a separate operation. After cutover, restart n8n and confirm the same owner and credential/workflow records are available.
 

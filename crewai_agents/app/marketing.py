@@ -140,14 +140,21 @@ def graph_config():
     return version, page, token
 
 
-def publish_one(db, run_id):
+def delivery_config():
+    """Require a configured delivery destination before unattended model spending."""
     if os.getenv('PUBLISHING_ENABLED', 'false').lower() != 'true':
         raise ValueError('Publishing is disabled')
-    config = profile()
     version, page, token = graph_config()
     base = os.getenv('PUBLIC_API_BASE_URL', '').rstrip('/')
-    if urlsplit(base).scheme != 'https' or not urlsplit(base).hostname:
+    parsed = urlsplit(base)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('PUBLIC_API_BASE_URL must be the deployed HTTPS CrewAI URL')
+    return version, page, token, base
+
+
+def publish_one(db, run_id):
+    version, page, token, base = delivery_config()
+    config = profile()
     run = db.get(run_id)
     artifact = check_artifact(run, config)
     if run['status'] != 'approved' or not run.get('approval'):

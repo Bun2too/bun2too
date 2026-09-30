@@ -1,10 +1,174 @@
 # Production and QA deployment
 
-For the daily marketing application, managed n8n workflows, runtime-variable maps and existing-n8n persistence migration, follow the [marketing architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This guide covers the underlying infrastructure and earlier state/database troubleshooting.
+Use this document to configure the complete MVP from one checklist. The GitHub configuration block is also included in README.md; keep those two copies identical. Historical infrastructure troubleshooting follows the checklist.
 
-Normal `deploy` includes the CrewAI application and verified active n8n workflows. Use manual `infrastructure-only` to apply only Terraform changes, or `import-state` to import and plan. Missing application settings now fail full deploy instead of silently skipping it.
+<!-- BEGIN GITHUB MVP CONFIGURATION: keep identical in README.md and docs/deployment.md -->
+## Complete GitHub configuration for the MVP
 
-Both environments live in the existing Railway project. A push to `main` selects GitHub environment `production`; a push to `qa` selects GitHub environment `qa`. Each GitHub environment supplies its own `TF_WORKSPACE` variable naming the actual HCP workspace. Other branches do not deploy.
+Use this checklist for **scheduled article creation, automatic Facebook Page publication, engagement feedback, n8n persistence and Datadog logs/traces**. All GitHub settings consumed by the current deployment workflow are listed below. Runtime settings inside the two JSON secrets are listed separately. This configures the self-hosted Railway application, not a CrewAI cloud deployment or email delivery.
+
+### 1. Where to enter the settings
+
+Open **GitHub repository → Settings → Environments**. Create/select `production` and `qa`, then use **Environment variables** and **Environment secrets** as indicated below. Add values separately to each environment. Local `.env` files do not populate GitHub or Railway.
+
+| Branch | GitHub environment | Railway environment | HCP workspace |
+| --- | --- | --- | --- |
+| `main` | `production` | Existing environment named `production` | Existing production state, currently `code-monkey-army` |
+| `qa` | `qa` | Separate environment named `qa` | Separate workspace owning QA state |
+
+Restrict production deployments to `main` and QA deployments to `qa` in GitHub's environment settings. The YAML does not configure those restrictions for you. QA needs its own API keys, URLs/credential IDs, database password, storage and authorized **test Facebook Page**. Full scheduled QA deployment also requires publishing enabled, against that test Page. For tests with publishing disabled use manual draft generation instead of the scheduled full-deploy path.
+
+### 2. GitHub Environment variables — individual entries
+
+“Required” means configure for the complete MVP even where a lower-level script permits an empty/default value. IDs below are the recorded production targets; verify they still identify your services. Do not copy production environment IDs, public URLs or Page credentials into QA.
+
+| Variable name | Requirement | Production value / where to get it | Purpose |
+| --- | --- | --- | --- |
+| `TF_CLOUD_ORGANIZATION` | Required | `Bun2tooinc` — HCP organization **name**, not `org-…` ID | Select Terraform organization |
+| `TF_WORKSPACE` | Required | `code-monkey-army`, if it still owns production state | Select existing HCP state; use a separate workspace for QA |
+| `RAILWAY_PROJECT_ID` | Required | `f5a4899e-a958-4353-b6a3-99a57b80ebad` | Target Railway project |
+| `RAILWAY_ENVIRONMENT_ID` | Required | `72e3af2d-37a3-430f-92ed-e0941b0b6435`; QA must differ | Target the correct Railway environment |
+| `POSTGRES_SERVICE_ID` | Required | `dd68258c-7986-46e8-b8a7-e2830403ba17` | Configure/check Postgres |
+| `CREWAI_SERVICE_ID` | Required | `8eefe858-998d-4887-9f5c-bcacc5a16e3a` | Upload application and set CrewAI runtime variables |
+| `N8N_SERVICE_ID` | Required with the n8n runtime map below | `1120d946-3a88-41f7-9096-4135d5f70d94` | Target n8n runtime variables; also usable during import |
+| `CREWAI_BASE_URL` | Required | `https://crewai.bun2too.com` | Public HTTPS API origin used by readiness checks and n8n; no `/docs` suffix |
+| `N8N_BASE_URL` | Required | `https://n8n.bun2too.com` | n8n management API origin; no `/api/v1` suffix |
+| `N8N_MARKETING_CREDENTIAL_ID` | Required | ID of the Header Auth credential you save in the target n8n instance; see step 5 | Select the credential used by n8n to call CrewAI; **not** a token or credential display name |
+| `N8N_ACTIVATE_WORKFLOWS` | Required | `true` | Full deploy must activate the daily workflow |
+| `N8N_VOLUME_READY` | Explicit storage decision | Default `false`. Set `true` only for a new empty instance or after preparing verified backup/restore of existing n8n data | Production Terraform manages `/home/node/.n8n`; keep true after adoption. False does not provide persistence. QA volume attachment remains separate |
+| `DD_SITE` | Default available; set explicitly for observability | `us5.datadoghq.com` if your Datadog account is in US5; otherwise its actual site | Datadog intake for **GitHub deployment logs**; default US5 |
+| `POSTGRES_USER` | Optional override | Default `postgres`; preserve the initialized database's actual user | Postgres initialization configuration |
+| `POSTGRES_DB` | Optional override | Default `bun2too`; preserve the initialized database's actual database | Postgres initialization configuration |
+| `MARKETING_DEPLOY_ENABLED` | **Retired — remove it** | Not required. An existing `false` value rejects full deploy | No longer controls silent skipping; use explicit `infrastructure-only` when intended |
+
+Service IDs can be shared across Railway environments in one project; environment IDs must differ. Merely changing `POSTGRES_USER`, `POSTGRES_DB` or the password does not migrate an initialized database.
+
+### 3. GitHub Environment secrets — individual entries
+
+Create these **eight entries** for the full MVP including Datadog and pipeline-managed runtime configuration. The two `*_RUNTIME_CONFIG` entries contain JSON objects, not file paths.
+
+| Secret name | Exact contents | Used by |
+| --- | --- | --- |
+| `TF_API_TOKEN` | HCP team token or permitted user token with workspace read, state read/write and lock/unlock access | Terraform backend/preflight; HCP workspace must use **Local** execution mode |
+| `RAILWAY_API_TOKEN` | Railway account/workspace API token with access to the project/environment | Railway API, Terraform provider and CLI upload; the workflow maps the provider alias itself |
+| `POSTGRES_PASSWORD` | Correct password for this environment; different in QA | Postgres Terraform variable and configuration readback |
+| `MARKETING_API_KEY` | A long random secret **you generate**; use the same value in the n8n Header Auth credential; CI injects it into the CrewAI runtime map | Deployed API authentication and post-deployment readiness check |
+| `N8N_API_KEY` | Management API key created in the target n8n account, with access to list/read/create/update/activate the managed workflows | Install and verify n8n workflows; **not** used to authenticate CrewAI calls |
+| `MARKETING_RUNTIME_CONFIG` | Complete CrewAI JSON object from step 4, with real values | Terraform writes these variables into the selected Railway CrewAI service |
+| `N8N_RUNTIME_CONFIG` | Complete n8n JSON object from step 4, preserving the current encryption key | Terraform writes these variables into the selected Railway n8n service |
+| `DD_API_KEY` | Datadog API key for the configured site | **GitHub deployment outcome logs**; also supply a runtime Datadog key inside the CrewAI JSON for agent activity |
+
+The two Datadog keys may be the same valid key or separate keys for the same site. Configuring only standalone `DD_API_KEY` does not forward it to CrewAI. The pipeline can run without deployment-log ingestion, but that does not fulfill the requested Datadog observability.
+
+### 4. Paste the complete runtime JSON secrets
+
+All JSON values below are **strings**, including booleans. Replace every `REPLACE_…` placeholder. GitHub does not expand expressions or substitute one secret inside another secret's JSON: paste the actual values. Keep the complete map when editing it; deleting an already-managed key can cause Terraform to delete that Railway variable. These sensitive values are stored in HCP state even though Terraform hides them in normal output.
+
+**Secret: `MARKETING_RUNTIME_CONFIG`** — example using an OpenAI-backed model:
+
+```json
+{
+  "LLM_MODEL": "REPLACE_WITH_YOUR_PROVIDER_MODEL",
+  "OPENAI_API_KEY": "REPLACE_WITH_YOUR_MODEL_PROVIDER_KEY",
+  "PUBLIC_API_BASE_URL": "https://crewai.bun2too.com",
+  "FACEBOOK_PAGE_ID": "REPLACE_WITH_BUN2TOO_NUMERIC_PAGE_ID",
+  "FACEBOOK_GRAPH_VERSION": "REPLACE_WITH_SUPPORTED_VERSION_SUCH_AS_vMAJOR.MINOR",
+  "FACEBOOK_PAGE_ACCESS_TOKEN": "REPLACE_WITH_AUTHORIZED_PAGE_ACCESS_TOKEN",
+  "MARKETING_AUTOMATION_ENABLED": "true",
+  "AUTO_APPROVAL_ENABLED": "true",
+  "PUBLISHING_ENABLED": "true",
+  "WORKER_ENABLED": "true",
+  "DD_API_KEY": "REPLACE_WITH_DATADOG_API_KEY",
+  "DD_SITE": "us5.datadoghq.com",
+  "DD_LOGS_ENABLED": "true",
+  "DD_LLMOBS_ENABLED": "1",
+  "DD_LLMOBS_AGENTLESS_ENABLED": "1",
+  "DD_LLMOBS_ML_APP": "bun2too-marketing-crew-team",
+  "DD_SERVICE": "bun2too-marketing-api",
+  "DD_ENV": "production",
+  "DD_TRACE_ENABLED": "false"
+}
+```
+
+| Keys inside `MARKETING_RUNTIME_CONFIG` | Function / requirement |
+| --- | --- |
+| `MARKETING_API_KEY` | Injected from the standalone GitHub secret before Terraform apply; overrides any legacy JSON value. Must match the n8n credential |
+| `LLM_MODEL`, `OPENAI_API_KEY` | Required model selection and provider authorization. Choose an available provider-qualified model; for another provider replace/add its required key name and dependencies. These are not separate GitHub entries read by the workflow |
+| `PUBLIC_API_BASE_URL` | Required public article origin; match `CREWAI_BASE_URL`. Facebook links point to `/articles/{run_id}` here |
+| `FACEBOOK_PAGE_ID` | Required numeric ID for the authorized target Page. The `bun2too` handle or profile URL does not resolve this ID automatically |
+| `FACEBOOK_GRAPH_VERSION` | Required supported version formatted `v<number>.<number>`; configure the version used by your Meta app |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | Required Page access token authorized to publish to that ID; not an app token, Railway token or n8n token |
+| `MARKETING_AUTOMATION_ENABLED` | `true` enables scheduled job creation |
+| `AUTO_APPROVAL_ENABLED` | `true` allows policy-based approval when the business profile also selects automatic mode |
+| `PUBLISHING_ENABLED` | `true` enables real publication. Scheduled generation/readiness rejects disabled or missing delivery configuration |
+| `WORKER_ENABLED` | `true` starts the durable scheduled-generation worker; default is true, included explicitly |
+| `DD_API_KEY`, `DD_SITE` | Runtime Datadog credentials/site; no automatic inheritance from the standalone GitHub entries |
+| `DD_LOGS_ENABLED` | `true` exports durable application and n8n callback events to Datadog Logs |
+| `DD_LLMOBS_ENABLED`, `DD_LLMOBS_AGENTLESS_ENABLED` | `1` enables the launcher/integration and direct LLM Observability export |
+| `DD_LLMOBS_ML_APP`, `DD_SERVICE`, `DD_ENV` | App/service/environment labels. Change `DD_ENV` to `qa` in QA |
+| `DD_TRACE_ENABLED` | `false` disables conventional APM export to a nonexistent local Datadog Agent; LLM Observability uses its separate agentless path |
+
+**Secret: `N8N_RUNTIME_CONFIG`**:
+
+```json
+{
+  "N8N_ENCRYPTION_KEY": "REPLACE_WITH_THE_EXISTING_N8N_INSTANCE_KEY",
+  "WEBHOOK_URL": "https://n8n.bun2too.com/",
+  "N8N_EDITOR_BASE_URL": "https://n8n.bun2too.com",
+  "N8N_PROXY_HOPS": "1",
+  "GENERIC_TIMEZONE": "America/Chicago",
+  "TZ": "America/Chicago"
+}
+```
+
+| Keys inside `N8N_RUNTIME_CONFIG` | Function / requirement |
+| --- | --- |
+| `N8N_ENCRYPTION_KEY` | Stable key used to decrypt n8n credentials. For the existing instance preserve its actual key from its current environment/configuration; do not replace it with a newly generated key. Generate a new key only for a genuinely new instance |
+| `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL` | Public n8n URL with/without the shown trailing slash; use the QA URLs in QA |
+| `N8N_PROXY_HOPS` | `1` for the documented single reverse-proxy setup; adjust if the actual proxy chain differs |
+| `GENERIC_TIMEZONE`, `TZ` | `America/Chicago` for scheduling/system time with daylight saving; the workflow installer also explicitly uses this timezone |
+
+Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. Do not enable `N8N_VOLUME_READY` just to make a check green. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
+
+### 5. One-time setup outside the GitHub settings screen
+
+1. **HCP/Railway:** confirm the IDs above, existing production state/import, Local HCP execution mode and persistent storage. Keep CrewAI at one replica with `/data`; QA needs its own CrewAI and n8n volumes. Both service URLs must reach the intended environment.
+2. **Generate the marketing key:** locally run `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`. Put the generated value in GitHub secret `MARKETING_API_KEY`; CI injects it into the Terraform runtime map.
+3. **Create n8n Header Auth credential:** in the target n8n instance save a credential named `Marketing API` with header name `Authorization` and value `Bearer ` followed by that same marketing key. Copy its saved **ID** into GitHub variable `N8N_MARKETING_CREDENTIAL_ID`. The installer references this credential; it does not create it. Create the separate n8n management API key for `N8N_API_KEY` as well.
+4. **Authorize the destination:** obtain the numeric Facebook Page ID, supported Graph version and a Page token with the required publishing/read access. For production verify the ID is your Bun2too Page; for QA use a test Page. These go inside `MARKETING_RUNTIME_CONFIG`.
+5. **Complete the business profile:** edit the committed `crewai_agents/config/marketing.json` with business facts, audience, approved source URLs and brand rules. Keep `approval_mode=automatic`, daily cadence `1440`, `max_posts_per_day=1`, `timezone=America/Chicago`, generation at `08:00` and release window `08:00`–`22:30` for the requested MVP. This file is not a GitHub Variable; placeholders stop scheduled operation. To use a different packaged profile, supply an absolute `MARKETING_PROFILE_PATH` inside the CrewAI JSON and ensure the file exists in the image.
+
+The credential relationships must be exact:
+
+```text
+GitHub MARKETING_API_KEY
+  = deployed Railway MARKETING_API_KEY (injected by CI)
+  = the token after "Bearer " in the saved n8n Header Auth credential
+
+GitHub CREWAI_BASE_URL = MARKETING_RUNTIME_CONFIG.PUBLIC_API_BASE_URL
+GitHub DD_SITE = MARKETING_RUNTIME_CONFIG.DD_SITE (for the same Datadog site)
+```
+
+### 6. Names you must not configure as extra GitHub entries
+
+The workflow already supplies `DEPLOY_ENVIRONMENT`, `DEPLOY_OPERATION`, `MARKETING_TIMEZONE`, `TF_IN_AUTOMATION`, all `TF_VAR_*` mappings, the provider's `RAILWAY_TOKEN` alias and GitHub's `GITHUB_*` values. Terraform sets CrewAI `DATA_DIR=/data`; **do not add `DATA_DIR` to the runtime JSON**, where it is explicitly rejected. Railway/application defaults handle `PORT` (default 8000).
+
+Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `OPENAI_API_KEY`, `LLM_MODEL`, `DD_ENV`, `DD_LOGS_ENABLED` or `N8N_ENCRYPTION_KEY` are **not consumed** by this workflow. Put them in the appropriate JSON secret above. `MARKETING_API_KEY` is automatically merged into the runtime map from the standalone secret. `DD_API_KEY` and `DD_SITE` still need runtime JSON entries because CI and the runtime use them separately.
+
+`N8N_WEBHOOK_URL` and `N8N_WEBHOOK_TOKEN` belong to the legacy manual dispatch endpoint and are not required for the scheduled MVP. `CREWAI_TRACING_ENABLED`, `AGENT_VERBOSE`, CrewAI cloud credentials, Atlassian/Jira/Confluence settings and email-provider keys are not required for this Facebook MVP. The agents run in Railway; no CrewAI cloud registration is performed.
+
+### 7. Deploy and verify the requested outcome
+
+- [ ] Every required variable and all eight secrets above are set in the selected GitHub environment; both JSON objects are complete and valid.
+- [ ] The three copies of the marketing key match, the n8n credential ID is real, and the Facebook ID/token belong to the intended Page.
+- [ ] The business profile is complete; HCP state and both persistent application data directories are prepared without losing existing data.
+- [ ] Run `.venv/bin/python scripts/verify_marketing.py --terraform` locally before committing the reviewed revision.
+- [ ] Run **Actions → Infrastructure and Core Deployment Pipeline → Run workflow → operation `deploy`** on `main` or `qa`. A push to either branch also requests full deploy. `infrastructure-only` applies Terraform without uploading CrewAI/installing workflows; `import-state` on main imports and plans without applying.
+- [ ] GitHub's summary contains workflow IDs/links and shows `[production] Marketing daily operations` (or QA equivalent) active. Its error-handler workflow is referenced and does not require its own active schedule.
+- [ ] Within five minutes, inspect n8n Executions and authenticated `/automation/status`. Polls outside the generation window may correctly return `not_due`; repeat polls reuse the day's run.
+- [ ] Verify a real Facebook post ID, its reachable article URL and later engagement observations. In Datadog verify app logs/LLM activity and the separate deployment log. A green deployment alone does not prove a successful model call or Facebook publication.
+
+<!-- END GITHUB MVP CONFIGURATION -->
 
 ## Log investigation: `logs.1790026057842.log`
 
@@ -49,34 +213,10 @@ Use the project from the supplied link: `f5a4899e-a958-4353-b6a3-99a57b80ebad`. 
 2. Create `qa` in the same project. Duplicate service configuration into QA if needed, then inspect all inherited variables. Use a **separate empty QA Postgres volume**, mounted at `/var/lib/postgresql/data`, and a different database password. Do not restore production data into QA as part of this setup.
 3. Ensure the QA Postgres instance uses `postgres:15-alpine`. Ensure the QA CrewAI instance has root directory `crewai_agents`. Record the QA environment ID and the service IDs shown in that environment.
 4. Disable Railway GitHub autodeploy triggers for CrewAI in both environments; this workflow uploads the checked-out branch. Production Terraform removes the old project-level GitHub source connection. This avoids an inherited `main` trigger deploying production code into QA.
-5. Set runtime application credentials in **each Railway environment's CrewAI service**, including `MARKETING_API_KEY`, model/provider settings and any n8n handoff settings. GitHub environment secrets are not automatically application runtime variables. Keep QA social publishing disabled unless deliberately configured for test accounts.
+5. Configure the two GitHub runtime JSON secrets using the complete checklist above; Terraform writes their fields into each selected Railway service/environment. Full scheduled QA deployments need an authorized test Page and enabled delivery. Use manual drafts when publishing is disabled.
 6. Configure n8n/database connections separately if using them. This change initializes Postgres; it does not migrate n8n to Postgres or automatically wire application clients to it.
 
 Production Terraform owns the shared project/service definitions. QA Terraform owns its environment-specific variables (Postgres, CrewAI and configured n8n runtime settings); it cannot create, delete or update shared services. A production change to a shared Railway service can affect both instances, because the provider can redeploy all instances. The workflow serializes both branches' deployments within the repository.
-
-## GitHub environments and values
-
-Create **Settings → Environments → production** and **qa**. Under deployment branches/tags, allow only `main` for production and only `qa` for QA. Add any production reviewers you require. These restrictions are GitHub settings; a YAML environment declaration alone does not configure them.
-
-Add the following values to **each environment**, not to the local `.env` file:
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Secret | `RAILWAY_API_TOKEN` | Account/workspace API token with access to this Railway project |
-| Secret | `POSTGRES_PASSWORD` | That environment's database password; different for QA and production |
-| Secret | `TF_API_TOKEN` | HCP Terraform team token (or permitted user token) with workspace read access, state read/write, and locking permissions |
-| Variable | `TF_CLOUD_ORGANIZATION` | Actual HCP Terraform organization name, currently `Bun2tooinc` |
-| Variable | `TF_WORKSPACE` | Existing HCP workspace for this environment; production can use `code-monkey-army` if it owns production state; QA must use a separate workspace |
-| Variable | `RAILWAY_PROJECT_ID` | `f5a4899e-a958-4353-b6a3-99a57b80ebad` in both environments |
-| Variable | `RAILWAY_ENVIRONMENT_ID` | Production ID above, or the QA environment ID |
-| Variable | `POSTGRES_SERVICE_ID` | Postgres service ID; production ID above |
-| Variable | `CREWAI_SERVICE_ID` | CrewAI service ID from Railway |
-| Optional variable | `POSTGRES_USER` | Default `postgres` |
-| Optional variable | `POSTGRES_DB` | Default `bun2too` |
-
-Services commonly retain the same service ID across environments in a single project. Environment IDs must differ. The preflight checks that the selected Railway environment name matches the branch and that both service IDs belong to the project. Store environment-specific credentials at environment scope rather than relying on repository-secret fallbacks.
-
-No Railway credential values are printed. Terraform receives its account token as `RAILWAY_TOKEN`, while the CLI receives it as `RAILWAY_API_TOKEN`.
 
 ## Pipeline API calls and preflight diagnostics
 
@@ -105,7 +245,7 @@ Later pipeline operations are separate from these two checks:
 | Terraform setup/init | Installs Terraform/provider packages; the same `TF_API_TOKEN` is installed as Terraform's HCP credential for workspace/state access. |
 | Terraform state list/apply | HCP state reads, locking, writes/unlocking; Railway provider reads and mutations for resources in `terraform/main.tf`, authenticated with the same Railway secret mapped to the provider's `RAILWAY_TOKEN`. Exact calls depend on the plan and provider implementation. Production must already have imported/migrated shared resources in state. |
 | Postgres verification | Railway GraphQL `variablesForServiceDeployment(projectId, environmentId, serviceId)` reads the selected Postgres variables and compares the password locally without printing values. |
-| Railway CLI deployment | `railway up --project … --service … --environment … --ci` uploads the checkout and starts/monitors the build using `RAILWAY_API_TOKEN`. |
+| Railway CLI deployment | `python3 -m scripts.deploy_crewai` uploads with `railway up --detach --json`, then polls the returned deployment ID until Railway reports `SUCCESS` (15-minute status deadline). Failed deployments stop the pipeline before HTTP readiness. |
 
 The updated workflow logs `Deployment checkout: <commit>` and `Deployment diagnostics v3`, then a `Checking`/`Passed` line for each API check. Failures identify the operation and HTTP status, network/JSON failure, missing schema field, or failed validation without logging tokens or response bodies. If these markers are absent, the run is using an older workflow/script. Re-running an older GitHub Actions run uses its original revision; deploy a commit containing these changes on the intended branch.
 
@@ -196,7 +336,7 @@ terraform -chdir=terraform import -var-file=production.tfvars 'railway_variable.
 
 Import `POSTGRES_USER` and `POSTGRES_DB` similarly. In QA, import existing variables into the QA workspace with its environment name if already configured; no shared project/service resources belong in QA state. Use QA-specific input values when importing there.
 
-After HCP state setup, push the updated workflow to `main`, then merge it into `qa` and push that branch. The workflow verifies targets, applies the selected environment's Terraform, then uploads CrewAI to that Railway environment. `--ci` checks the application build; inspect Postgres runtime logs separately to confirm database health.
+After HCP state setup, push the updated workflow to `main`, then merge it into `qa` and push that branch. The workflow verifies targets, applies the selected environment's Terraform, then uploads CrewAI to that Railway environment. The upload step waits for the exact new deployment to reach Railway `SUCCESS` before `/ready` is checked and n8n schedules are installed. No running CrewAI API is required before configuration and upload. A readiness failure leaves the uploaded deployment in Railway for diagnosis; it does not roll back configuration or code. Inspect Postgres runtime logs separately to confirm database health.
 
 References: [HCP configuration/state migration](https://developer.hashicorp.com/terraform/cli/cloud/settings), [GitHub environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), [Railway provider variable import](https://github.com/terraform-community-providers/terraform-provider-railway/blob/v0.6.2/docs/resources/variable.md).
 

@@ -78,6 +78,12 @@ jobs:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
+      - name: Prepare CrewAI runtime configuration for Terraform
+        env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+        run: python3 scripts/prepare_runtime_config.py
+
       - name: Terraform initialize, prepare state and plan or apply
         env:
           # Terraform uses RAILWAY_TOKEN for account/workspace tokens.
@@ -91,7 +97,6 @@ jobs:
           TF_VAR_crewai_service_id: ${{ env.CREWAI_SERVICE_ID }}
           TF_VAR_n8n_service_id: ${{ vars.N8N_SERVICE_ID }}
           TF_VAR_n8n_volume_ready: ${{ vars.N8N_VOLUME_READY || 'false' }}
-          TF_VAR_marketing_runtime_config: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
           TF_VAR_n8n_runtime_config: ${{ secrets.N8N_RUNTIME_CONFIG || '{}' }}
           TF_VAR_github_repository: ${{ github.repository }}
           TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
@@ -135,14 +140,15 @@ jobs:
           python3 scripts/run_deployment_step.py npm install -g @railway/cli
           python3 scripts/run_deployment_step.py railway --version
 
-      - name: Deploy CrewAI to selected environment
+      - name: Deploy CrewAI and wait for Railway deployment success
         if: env.DEPLOY_OPERATION == 'deploy'
+        timeout-minutes: 21
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
-          python3 scripts/run_deployment_step.py railway up --project "$RAILWAY_PROJECT_ID" --service "$CREWAI_SERVICE_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --ci
+          python3 scripts/run_deployment_step.py python3 -m scripts.deploy_crewai
 
-      - name: Verify marketing runtime before installing schedules
+      - name: Verify deployed marketing runtime before installing schedules
         if: env.DEPLOY_OPERATION == 'deploy'
         env:
           CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}

@@ -20,19 +20,7 @@ The run remains sequential: later roles receive earlier outputs. Publishing is d
 
 ## Datadog setup
 
-Set these variables on each Railway **CrewAI service instance**:
-
-```dotenv
-DD_SITE=us5.datadoghq.com
-DD_LLMOBS_ENABLED=1
-DD_LLMOBS_ML_APP=bun2too-marketing-crew-team
-DD_LLMOBS_AGENTLESS_ENABLED=1
-DD_SERVICE=bun2too-marketing-api
-DD_ENV=production
-DD_TRACE_ENABLED=false
-```
-
-Add a rotated `DD_API_KEY` as a runtime secret. Use `DD_ENV=qa` in QA. The key supplied in the conversation was not embedded in the repository or sent during tests. The example env file leaves observability disabled until a key is configured.
+Configure Datadog through the [complete GitHub configuration checklist](deployment.md#complete-github-configuration-for-the-mvp), also in [README.md](../README.md#complete-github-configuration-for-the-mvp). It includes the CrewAI runtime JSON and the separate CI log credentials. This section explains the telemetry after configuration; it does not provide another settings snippet.
 
 The container now runs `python start.py`. This loads local dotenv settings before starting `ddtrace-run python -m uvicorn ...`; running locally works with `.venv/bin/python crewai_agents/start.py`. Directly starting Uvicorn bypasses this bootstrap, so use the launcher for Datadog instrumentation.
 
