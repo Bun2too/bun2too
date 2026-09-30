@@ -52,11 +52,11 @@ run "production_owns_shared_services" {
   }
 }
 
-run "production_n8n_storage_is_opt_in" {
+run "production_n8n_storage_is_mandatory" {
   command = plan
   variables {
     deployment_environment = "production"
-    n8n_volume_ready       = true
+    n8n_volume_ready       = false
   }
   assert {
     condition     = railway_service.n8n_engine[0].volume.mount_path == "/home/node/.n8n"

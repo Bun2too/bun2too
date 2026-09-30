@@ -35,7 +35,7 @@ Restrict production deployments to `main` and QA deployments to `qa` in GitHub's
 | `N8N_BASE_URL` | Required | `https://n8n.bun2too.com` | n8n management API origin; no `/api/v1` suffix |
 | `N8N_MARKETING_CREDENTIAL_ID` | Required | ID of the Header Auth credential you save in the target n8n instance; see step 5 | Select the credential used by n8n to call CrewAI; **not** a token or credential display name |
 | `N8N_ACTIVATE_WORKFLOWS` | Required | `true` | Full deploy must activate the daily workflow |
-| `N8N_VOLUME_READY` | Explicit storage decision | Default `false`. Set `true` only for a new empty instance or after preparing verified backup/restore of existing n8n data | Production Terraform manages `/home/node/.n8n`; keep true after adoption. False does not provide persistence. QA volume attachment remains separate |
+| `N8N_VOLUME_READY` | Storage migration acknowledgement | Set `true` only after preparing backup/restore for an existing unpersisted instance or confirming it is empty | Production always declares `/home/node/.n8n` storage. This flag never detaches it. QA needs a separately attached volume and this acknowledgement |
 | `DD_SITE` | Default available; set explicitly for observability | `us5.datadoghq.com` if your Datadog account is in US5; otherwise its actual site | Datadog intake for **GitHub deployment logs**; default US5 |
 | `POSTGRES_USER` | Optional override | Default `postgres`; preserve the initialized database's actual user | Postgres initialization configuration |
 | `POSTGRES_DB` | Optional override | Default `bun2too`; preserve the initialized database's actual database | Postgres initialization configuration |
@@ -136,7 +136,7 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `N8N_PROXY_HOPS` | `1` for the documented single reverse-proxy setup; adjust if the actual proxy chain differs |
 | `GENERIC_TIMEZONE`, `TZ` | `America/Chicago` for scheduling/system time with daylight saving; the workflow installer also explicitly uses this timezone |
 
-Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. Do not enable `N8N_VOLUME_READY` just to make a check green. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
+Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. For an existing service with no volume, `N8N_VOLUME_READY=true` acknowledges this migration; the pipeline refuses to attach an empty volume without it. Storage remains declared even if the flag is later absent or false. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
 
 ### 5. One-time setup outside the GitHub settings screen
 
@@ -177,6 +177,34 @@ Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`
 - [ ] Verify a real Facebook post ID, its reachable article URL and later engagement observations. In Datadog verify app logs/LLM activity and the separate deployment log. A green deployment alone does not prove a successful model call or Facebook publication.
 
 <!-- END GITHUB MVP CONFIGURATION -->
+
+## n8n persistence, recovery and first deployment
+
+n8n's default SQLite database lives at `/home/node/.n8n/database.sqlite`. It contains owner/admin accounts, login configuration, API keys, workflows and credential records. Keeping only `N8N_ENCRYPTION_KEY` does not keep this database. The separate Postgres service is not used by n8n unless a deliberate database migration configures it. See [n8n Docker persistence](https://github.com/n8n-io/n8n-docs/blob/main/docs/deploy/host-n8n/install-options/install-with-docker.md).
+
+Production Terraform now always declares a volume at `/home/node/.n8n`. n8n variable updates depend on that service resource so the provider does not restart it with new variables before provisioning storage. The workflow saves a Terraform plan, checks it, and applies that exact plan. The check rejects deleting/replacing the n8n service, moving/removing its volume, deleting its runtime collection, and changing/removing its tracked encryption key or database location. It also compares supplied protected settings with the current Railway service variables to cover keys not yet recorded in state. It never prints variable values or plan JSON. A key stored only in the container config cannot be compared through the Railway variables API; preserve that key during initial adoption. QA storage is separately attached and acknowledged with `N8N_VOLUME_READY=true`.
+
+### If the owner setup screen reappears
+
+Pause deployments and inspect the selected Railway environment, n8n volume attachment and database location before creating another owner. The screen means n8n is seeing an uninitialized database; it does not prove that the old database has been deleted. An absent/wrong volume, a changed database path, or a fresh external database can produce the same symptom.
+
+- If an old volume or backup exists, restore the original database and matching encryption key. Preserve the entire `.n8n` directory. For SQLite, use a consistent backup or stop writes before copying the directory, including any WAL files; copying a live `database.sqlite` alone may omit recent data.
+- If the old container still exists without persistent storage, back up its `.n8n` directory before another deployment. Do not mount an empty volume over the only recoverable copy.
+- If the old database existed only on discarded ephemeral storage and no backup survives, CI cannot recover the former accounts or API keys. Establish persistent storage, then set up the owner and credentials once again.
+
+An existing service with no volume needs a controlled migration: prepare a backup and restore procedure (or verify it is empty), set `N8N_VOLUME_READY=true`, apply infrastructure, restore data before use, and verify the owner login and existing API key. Keep the same `N8N_ENCRYPTION_KEY`. Enable Railway volume backups and verify a restore separately. No automatic recovery or backup is implied by creating a volume.
+
+### First-time bootstrap
+
+1. Configure Railway/HCP targets and the runtime JSON maps. For a genuinely new n8n instance, generate a stable encryption key once and include it in `N8N_RUNTIME_CONFIG`. Do not replace a key belonging to an existing database.
+2. Run the workflow manually with **operation=infrastructure-only**. This provisions persistent infrastructure without requiring `N8N_API_KEY`, installing workflows, or activating schedules. If the Railway service already exists but is empty and unpersisted, set the migration acknowledgement described above.
+3. Confirm the production n8n volume is mounted at `/home/node/.n8n` (and configure the separate QA volume when applicable). Complete owner setup in n8n, then create a management API key under **Settings → n8n API**. Save it as the selected GitHub environment's `N8N_API_KEY`; create the Header Auth credential and save its actual ID as `N8N_MARKETING_CREDENTIAL_ID`.
+4. Run **operation=deploy**. Ordinary updates reuse the same database and encryption key, so owner setup and API-key creation are not repeated. Confirm the existing login and workflow API still work after the first subsequent redeployment.
+
+The current workflow does not automate owner creation or API-key issuance. n8n's documented initial API-key flow requires an authenticated owner/admin UI session. Newer n8n versions offer `N8N_INSTANCE_OWNER_MANAGED_BY_ENV`, but it overwrites owner details on every startup and is deliberately not enabled for existing instances. See [owner environment settings](https://github.com/n8n-io/n8n-docs/blob/main/docs/reusable-content/.gitbook/includes/self-hosting/configuration/environment-variables/settings-env-vars/instance-owner.md) and [API-key creation](https://github.com/n8n-io/n8n-docs/blob/main/docs/connect/n8n-api/authentication.md).
+
+GitHub environment secrets can be written through its API with an appropriately authorized GitHub App or personal access token. The workflow's `GITHUB_TOKEN` has `contents: read` and cannot write them. Automatic secret saving would require separately provisioned environment-secret write access; it is not a zero-credential bootstrap. From an authenticated local GitHub CLI, `gh secret set N8N_API_KEY --env production` prompts for the value without putting it in command arguments. Do not paste keys into workflow logs. See [GitHub environment-secret API](https://docs.github.com/en/rest/actions/secrets#create-or-update-an-environment-secret).
+
 
 ## Log investigation: `logs.1790026057842.log`
 

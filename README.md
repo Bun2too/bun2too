@@ -39,7 +39,7 @@ Restrict production deployments to `main` and QA deployments to `qa` in GitHub's
 | `N8N_BASE_URL` | Required | `https://n8n.bun2too.com` | n8n management API origin; no `/api/v1` suffix |
 | `N8N_MARKETING_CREDENTIAL_ID` | Required | ID of the Header Auth credential you save in the target n8n instance; see step 5 | Select the credential used by n8n to call CrewAI; **not** a token or credential display name |
 | `N8N_ACTIVATE_WORKFLOWS` | Required | `true` | Full deploy must activate the daily workflow |
-| `N8N_VOLUME_READY` | Explicit storage decision | Default `false`. Set `true` only for a new empty instance or after preparing verified backup/restore of existing n8n data | Production Terraform manages `/home/node/.n8n`; keep true after adoption. False does not provide persistence. QA volume attachment remains separate |
+| `N8N_VOLUME_READY` | Storage migration acknowledgement | Set `true` only after preparing backup/restore for an existing unpersisted instance or confirming it is empty | Production always declares `/home/node/.n8n` storage. This flag never detaches it. QA needs a separately attached volume and this acknowledgement |
 | `DD_SITE` | Default available; set explicitly for observability | `us5.datadoghq.com` if your Datadog account is in US5; otherwise its actual site | Datadog intake for **GitHub deployment logs**; default US5 |
 | `POSTGRES_USER` | Optional override | Default `postgres`; preserve the initialized database's actual user | Postgres initialization configuration |
 | `POSTGRES_DB` | Optional override | Default `bun2too`; preserve the initialized database's actual database | Postgres initialization configuration |
@@ -56,7 +56,7 @@ Create these **eight entries** for the full MVP including Datadog and pipeline-m
 | `TF_API_TOKEN` | HCP team token or permitted user token with workspace read, state read/write and lock/unlock access | Terraform backend/preflight; HCP workspace must use **Local** execution mode |
 | `RAILWAY_API_TOKEN` | Railway account/workspace API token with access to the project/environment | Railway API, Terraform provider and CLI upload; the workflow maps the provider alias itself |
 | `POSTGRES_PASSWORD` | Correct password for this environment; different in QA | Postgres Terraform variable and configuration readback |
-| `MARKETING_API_KEY` | A long random secret **you generate**; use the same value inside the CrewAI JSON and n8n Header Auth credential | Authenticated deployment readiness check |
+| `MARKETING_API_KEY` | A long random secret **you generate**; use the same value in the n8n Header Auth credential; CI injects it into the CrewAI runtime map | Deployed API authentication and post-deployment readiness check |
 | `N8N_API_KEY` | Management API key created in the target n8n account, with access to list/read/create/update/activate the managed workflows | Install and verify n8n workflows; **not** used to authenticate CrewAI calls |
 | `MARKETING_RUNTIME_CONFIG` | Complete CrewAI JSON object from step 4, with real values | Terraform writes these variables into the selected Railway CrewAI service |
 | `N8N_RUNTIME_CONFIG` | Complete n8n JSON object from step 4, preserving the current encryption key | Terraform writes these variables into the selected Railway n8n service |
@@ -66,13 +66,20 @@ The two Datadog keys may be the same valid key or separate keys for the same sit
 
 ### 4. Paste the complete runtime JSON secrets
 
+For production, save `MARKETING_RUNTIME_CONFIG` under the repository's **Settings → Environments → production → Environment secrets**. A pipeline environment showing `TF_VAR_marketing_runtime_config` with only `MARKETING_API_KEY` means no additional runtime fields reached Terraform. Separate GitHub secrets named `LLM_MODEL` or `OPENAI_API_KEY` are not read by this workflow.
+
+Full deployments validate the declared model, automation, worker and Facebook delivery settings locally before Terraform changes anything. This does not contact CrewAI, so it supports first deployment. It validates configuration shape, not provider credentials, model access, Facebook permissions or the business profile. Supply the chosen model provider's credentials in the map as well. Infrastructure-only and import operations do not require the scheduled-application configuration.
+
+If `/ready` returns `model_configured: false` and `automation_enabled: "false"`, API authentication has succeeded but the runtime is missing `LLM_MODEL` and automation is disabled. `missing_configuration: []` is not an overall readiness verdict: the server's marketing checks only run when automation is enabled. Correct the secret and redeploy; retries cannot populate missing settings.
+
 All JSON values below are **strings**, including booleans. Replace every `REPLACE_…` placeholder. GitHub does not expand expressions or substitute one secret inside another secret's JSON: paste the actual values. Keep the complete map when editing it; deleting an already-managed key can cause Terraform to delete that Railway variable. These sensitive values are stored in HCP state even though Terraform hides them in normal output.
+
+CrewAI and n8n runtime maps use `railway_variable_collection`, which batches each map and requests one service redeployment per changed collection. The old per-key resources requested a redeployment for every key and could fail with `Service deployment rate limit exceeded`. Terraform 1.7+ `removed` blocks discard the old per-key state without deleting live variables; the new collections upsert the supplied values, including keys left by a partially failed apply. Keep both JSON maps complete during this migration: omitted legacy keys remain live but are not adopted by the collection. No manual state removal or key rotation is required. Deploy the commit containing the collection change after Railway's rate limit clears; rerunning the old revision repeats the per-key deployment requests. A separate Railway 503 can still require retrying after service recovery.
 
 **Secret: `MARKETING_RUNTIME_CONFIG`** — example using an OpenAI-backed model:
 
 ```json
 {
-  "MARKETING_API_KEY": "REPLACE_WITH_THE_SAME_MARKETING_API_KEY_SECRET",
   "LLM_MODEL": "REPLACE_WITH_YOUR_PROVIDER_MODEL",
   "OPENAI_API_KEY": "REPLACE_WITH_YOUR_MODEL_PROVIDER_KEY",
   "PUBLIC_API_BASE_URL": "https://crewai.bun2too.com",
@@ -97,7 +104,7 @@ All JSON values below are **strings**, including booleans. Replace every `REPLAC
 
 | Keys inside `MARKETING_RUNTIME_CONFIG` | Function / requirement |
 | --- | --- |
-| `MARKETING_API_KEY` | Required for API authentication. Must match the standalone GitHub secret and n8n credential |
+| `MARKETING_API_KEY` | Injected from the standalone GitHub secret before Terraform apply; overrides any legacy JSON value. Must match the n8n credential |
 | `LLM_MODEL`, `OPENAI_API_KEY` | Required model selection and provider authorization. Choose an available provider-qualified model; for another provider replace/add its required key name and dependencies. These are not separate GitHub entries read by the workflow |
 | `PUBLIC_API_BASE_URL` | Required public article origin; match `CREWAI_BASE_URL`. Facebook links point to `/articles/{run_id}` here |
 | `FACEBOOK_PAGE_ID` | Required numeric ID for the authorized target Page. The `bun2too` handle or profile URL does not resolve this ID automatically |
@@ -133,12 +140,12 @@ All JSON values below are **strings**, including booleans. Replace every `REPLAC
 | `N8N_PROXY_HOPS` | `1` for the documented single reverse-proxy setup; adjust if the actual proxy chain differs |
 | `GENERIC_TIMEZONE`, `TZ` | `America/Chicago` for scheduling/system time with daylight saving; the workflow installer also explicitly uses this timezone |
 
-Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. Do not enable `N8N_VOLUME_READY` just to make a check green. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
+Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. For an existing service with no volume, `N8N_VOLUME_READY=true` acknowledges this migration; the pipeline refuses to attach an empty volume without it. Storage remains declared even if the flag is later absent or false. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
 
 ### 5. One-time setup outside the GitHub settings screen
 
 1. **HCP/Railway:** confirm the IDs above, existing production state/import, Local HCP execution mode and persistent storage. Keep CrewAI at one replica with `/data`; QA needs its own CrewAI and n8n volumes. Both service URLs must reach the intended environment.
-2. **Generate the marketing key:** locally run `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`. Put the same generated value in GitHub secret `MARKETING_API_KEY` and the JSON field of the same name.
+2. **Generate the marketing key:** locally run `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`. Put the generated value in GitHub secret `MARKETING_API_KEY`; CI injects it into the Terraform runtime map.
 3. **Create n8n Header Auth credential:** in the target n8n instance save a credential named `Marketing API` with header name `Authorization` and value `Bearer ` followed by that same marketing key. Copy its saved **ID** into GitHub variable `N8N_MARKETING_CREDENTIAL_ID`. The installer references this credential; it does not create it. Create the separate n8n management API key for `N8N_API_KEY` as well.
 4. **Authorize the destination:** obtain the numeric Facebook Page ID, supported Graph version and a Page token with the required publishing/read access. For production verify the ID is your Bun2too Page; for QA use a test Page. These go inside `MARKETING_RUNTIME_CONFIG`.
 5. **Complete the business profile:** edit the committed `crewai_agents/config/marketing.json` with business facts, audience, approved source URLs and brand rules. Keep `approval_mode=automatic`, daily cadence `1440`, `max_posts_per_day=1`, `timezone=America/Chicago`, generation at `08:00` and release window `08:00`–`22:30` for the requested MVP. This file is not a GitHub Variable; placeholders stop scheduled operation. To use a different packaged profile, supply an absolute `MARKETING_PROFILE_PATH` inside the CrewAI JSON and ensure the file exists in the image.
@@ -147,7 +154,7 @@ The credential relationships must be exact:
 
 ```text
 GitHub MARKETING_API_KEY
-  = MARKETING_RUNTIME_CONFIG.MARKETING_API_KEY
+  = deployed Railway MARKETING_API_KEY (injected by CI)
   = the token after "Bearer " in the saved n8n Header Auth credential
 
 GitHub CREWAI_BASE_URL = MARKETING_RUNTIME_CONFIG.PUBLIC_API_BASE_URL
@@ -158,7 +165,7 @@ GitHub DD_SITE = MARKETING_RUNTIME_CONFIG.DD_SITE (for the same Datadog site)
 
 The workflow already supplies `DEPLOY_ENVIRONMENT`, `DEPLOY_OPERATION`, `MARKETING_TIMEZONE`, `TF_IN_AUTOMATION`, all `TF_VAR_*` mappings, the provider's `RAILWAY_TOKEN` alias and GitHub's `GITHUB_*` values. Terraform sets CrewAI `DATA_DIR=/data`; **do not add `DATA_DIR` to the runtime JSON**, where it is explicitly rejected. Railway/application defaults handle `PORT` (default 8000).
 
-Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `OPENAI_API_KEY`, `LLM_MODEL`, `DD_ENV`, `DD_LOGS_ENABLED` or `N8N_ENCRYPTION_KEY` are **not consumed** by this workflow. Put them in the appropriate JSON secret above. `MARKETING_API_KEY`, `DD_API_KEY` and `DD_SITE` intentionally appear in two places because CI and the runtime use them separately.
+Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `OPENAI_API_KEY`, `LLM_MODEL`, `DD_ENV`, `DD_LOGS_ENABLED` or `N8N_ENCRYPTION_KEY` are **not consumed** by this workflow. Put them in the appropriate JSON secret above. `MARKETING_API_KEY` is automatically merged into the runtime map from the standalone secret. `DD_API_KEY` and `DD_SITE` still need runtime JSON entries because CI and the runtime use them separately.
 
 `N8N_WEBHOOK_URL` and `N8N_WEBHOOK_TOKEN` belong to the legacy manual dispatch endpoint and are not required for the scheduled MVP. `CREWAI_TRACING_ENABLED`, `AGENT_VERBOSE`, CrewAI cloud credentials, Atlassian/Jira/Confluence settings and email-provider keys are not required for this Facebook MVP. The agents run in Railway; no CrewAI cloud registration is performed.
 

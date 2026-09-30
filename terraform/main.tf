@@ -156,11 +156,13 @@ resource "railway_service" "n8n_engine" {
   project_id   = railway_project.fb_pipeline[0].id
   name         = "n8n-orchestrator"
   source_image = "docker.io/n8nio/n8n:latest"
-  # Existing SQLite/config data must be backed up and restored before enabling.
-  volume = var.n8n_volume_ready ? {
+  # Always persist SQLite, users, API keys, workflows and local encryption config.
+  # The plan guard requires explicit migration acknowledgement for an existing
+  # service with no volume; a normal update cannot remove or replace its volume.
+  volume = {
     name       = "n8n-data"
     mount_path = "/home/node/.n8n"
-  } : null
+  }
   lifecycle {
     prevent_destroy = true
   }
@@ -169,7 +171,7 @@ resource "railway_service" "n8n_engine" {
 variable "n8n_volume_ready" {
   type        = bool
   default     = false
-  description = "Enable only for a new instance or after planning backup/restore of the existing n8n data directory."
+  description = "Acknowledge a prepared migration when attaching storage to an existing service without a volume. Does not toggle or detach storage."
 }
 
 variable "n8n_service_id" {
@@ -222,6 +224,8 @@ resource "railway_variable_collection" "marketing_runtime" {
 }
 
 resource "railway_variable_collection" "n8n_runtime" {
+  # Provider variable updates restart n8n. Attach storage first in production.
+  depends_on     = [railway_service.n8n_engine]
   count          = length(nonsensitive(keys(var.n8n_runtime_config))) > 0 ? 1 : 0
   service_id     = var.n8n_service_id
   environment_id = var.railway_environment_id
