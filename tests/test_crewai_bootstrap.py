@@ -46,10 +46,11 @@ class BootstrapTests(unittest.TestCase):
     def test_standalone_key_is_deployed_and_other_config_preserved(self):
         config = json.loads(prepare_runtime_config.prepare({
             'MARKETING_API_KEY': 'current-key',
+            'DEPLOY_OPERATION': 'infrastructure-only',
             'MARKETING_RUNTIME_CONFIG': '{"MARKETING_API_KEY":"old-key","LLM_MODEL":"model"}',
         }))
         self.assertEqual(config, {'MARKETING_API_KEY': 'current-key', 'LLM_MODEL': 'model'})
-        self.assertEqual(json.loads(prepare_runtime_config.prepare({'MARKETING_API_KEY': 'first-key'})),
+        self.assertEqual(json.loads(prepare_runtime_config.prepare({'MARKETING_API_KEY': 'first-key', 'DEPLOY_OPERATION': 'infrastructure-only'})),
                          {'MARKETING_API_KEY': 'first-key'})
 
     def test_infrastructure_operation_preserves_map_without_standalone_key(self):
@@ -63,3 +64,21 @@ class BootstrapTests(unittest.TestCase):
                     {'MARKETING_API_KEY': 'key', 'MARKETING_RUNTIME_CONFIG': '{"X":true}'}]:
             with self.subTest(env=env), self.assertRaises(ValueError):
                 prepare_runtime_config.prepare(env)
+
+    def test_key_only_full_deploy_reports_all_required_settings_without_secret(self):
+        with self.assertRaises(ValueError) as caught:
+            prepare_runtime_config.prepare({'MARKETING_API_KEY': 'private-key'})
+        message = str(caught.exception)
+        for name in ('LLM_MODEL', 'MARKETING_AUTOMATION_ENABLED', 'PUBLISHING_ENABLED',
+                     'FACEBOOK_PAGE_ID', 'FACEBOOK_GRAPH_VERSION', 'FACEBOOK_PAGE_ACCESS_TOKEN',
+                     'PUBLIC_API_BASE_URL'):
+            self.assertIn(name, message)
+        self.assertNotIn('private-key', message)
+
+    def test_complete_declared_settings_can_bootstrap_without_live_api(self):
+        config = dict(LLM_MODEL='provider/model', MARKETING_AUTOMATION_ENABLED='true',
+                      PUBLISHING_ENABLED='true', FACEBOOK_PAGE_ID='123', FACEBOOK_GRAPH_VERSION='v1.0',
+                      FACEBOOK_PAGE_ACCESS_TOKEN='page-key', PUBLIC_API_BASE_URL='https://crew.example')
+        prepared = json.loads(prepare_runtime_config.prepare({
+            'MARKETING_API_KEY': 'api-key', 'MARKETING_RUNTIME_CONFIG': json.dumps(config)}))
+        self.assertEqual(prepared, dict(config, MARKETING_API_KEY='api-key'))

@@ -78,7 +78,22 @@ run "runtime_variables_target_environment" {
     }
   }
   assert {
-    condition     = railway_variable.marketing_runtime["MARKETING_API_KEY"].service_id == var.crewai_service_id && railway_variable.marketing_runtime["MARKETING_API_KEY"].environment_id == var.railway_environment_id && railway_variable.n8n_runtime["GENERIC_TIMEZONE"].service_id == var.n8n_service_id
+    condition     = railway_variable_collection.marketing_runtime[0].service_id == var.crewai_service_id && railway_variable_collection.marketing_runtime[0].environment_id == var.railway_environment_id && railway_variable_collection.n8n_runtime[0].service_id == var.n8n_service_id
     error_message = "Runtime configuration must target the selected service and environment."
+  }
+  assert {
+    condition     = length(railway_variable_collection.marketing_runtime) == 1 && length(railway_variable_collection.marketing_runtime[0].variables) == 2 && railway_variable_collection.marketing_runtime[0].variables[0].name == "MARKETING_API_KEY" && railway_variable_collection.marketing_runtime[0].variables[0].value == "test-only-key"
+    error_message = "Runtime keys must be batched into one collection per service with stable ordering and preserved values."
+  }
+}
+
+run "empty_maps_do_not_create_collections" {
+  command = plan
+  variables {
+    deployment_environment = "qa"
+  }
+  assert {
+    condition     = length(railway_variable_collection.marketing_runtime) == 0 && length(railway_variable_collection.n8n_runtime) == 0
+    error_message = "Empty maps must not create invalid empty collections."
   }
 }

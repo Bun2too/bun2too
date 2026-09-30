@@ -9,6 +9,24 @@ from scripts import check_marketing_runtime as runtime
 
 
 class RuntimeChecks(unittest.TestCase):
+    def test_reported_configuration_failure_is_actionable_and_not_retried(self):
+        result = {'automation_enabled': 'false', 'model_configured': False,
+                  'worker_ready': True, 'storage': 'ok', 'missing_configuration': []}
+        response = Mock()
+        response.__enter__ = Mock(return_value=io.StringIO(json.dumps(result)))
+        response.__exit__ = Mock(return_value=False)
+        opener = Mock()
+        opener.open.return_value = response
+        with patch.dict(runtime.os.environ, CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='secret'), \
+                patch.object(runtime, 'build_opener', return_value=opener), \
+                patch.object(runtime.time, 'sleep') as sleep, \
+                self.assertRaises(runtime.ConfigurationError) as caught:
+            runtime.check()
+        self.assertIn('LLM_MODEL', str(caught.exception))
+        self.assertIn('MARKETING_AUTOMATION_ENABLED', str(caught.exception))
+        opener.open.assert_called_once()
+        sleep.assert_not_called()
+
     def test_readiness_identifies_client_and_keeps_authentication(self):
         response = Mock()
         response.__enter__ = Mock(return_value=io.StringIO(json.dumps({

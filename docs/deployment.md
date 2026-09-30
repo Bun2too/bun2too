@@ -62,7 +62,15 @@ The two Datadog keys may be the same valid key or separate keys for the same sit
 
 ### 4. Paste the complete runtime JSON secrets
 
+For production, save `MARKETING_RUNTIME_CONFIG` under the repository's **Settings → Environments → production → Environment secrets**. A pipeline environment showing `TF_VAR_marketing_runtime_config` with only `MARKETING_API_KEY` means no additional runtime fields reached Terraform. Separate GitHub secrets named `LLM_MODEL` or `OPENAI_API_KEY` are not read by this workflow.
+
+Full deployments validate the declared model, automation, worker and Facebook delivery settings locally before Terraform changes anything. This does not contact CrewAI, so it supports first deployment. It validates configuration shape, not provider credentials, model access, Facebook permissions or the business profile. Supply the chosen model provider's credentials in the map as well. Infrastructure-only and import operations do not require the scheduled-application configuration.
+
+If `/ready` returns `model_configured: false` and `automation_enabled: "false"`, API authentication has succeeded but the runtime is missing `LLM_MODEL` and automation is disabled. `missing_configuration: []` is not an overall readiness verdict: the server's marketing checks only run when automation is enabled. Correct the secret and redeploy; retries cannot populate missing settings.
+
 All JSON values below are **strings**, including booleans. Replace every `REPLACE_…` placeholder. GitHub does not expand expressions or substitute one secret inside another secret's JSON: paste the actual values. Keep the complete map when editing it; deleting an already-managed key can cause Terraform to delete that Railway variable. These sensitive values are stored in HCP state even though Terraform hides them in normal output.
+
+CrewAI and n8n runtime maps use `railway_variable_collection`, which batches each map and requests one service redeployment per changed collection. The old per-key resources requested a redeployment for every key and could fail with `Service deployment rate limit exceeded`. Terraform 1.7+ `removed` blocks discard the old per-key state without deleting live variables; the new collections upsert the supplied values, including keys left by a partially failed apply. Keep both JSON maps complete during this migration: omitted legacy keys remain live but are not adopted by the collection. No manual state removal or key rotation is required. Deploy the commit containing the collection change after Railway's rate limit clears; rerunning the old revision repeats the per-key deployment requests. A separate Railway 503 can still require retrying after service recovery.
 
 **Secret: `MARKETING_RUNTIME_CONFIG`** — example using an OpenAI-backed model:
 

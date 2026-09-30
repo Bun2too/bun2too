@@ -1,6 +1,6 @@
 # Terraform configuration to deploy PostgreSQL and n8n onto Railway dynamically
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.7.0"
   cloud {} # TF_CLOUD_ORGANIZATION and TF_WORKSPACE select durable HCP state.
   required_providers {
     railway = {
@@ -195,20 +195,40 @@ variable "n8n_runtime_config" {
   description = "n8n runtime variables. Preserve the existing N8N_ENCRYPTION_KEY when migrating."
 }
 
-resource "railway_variable" "marketing_runtime" {
-  for_each       = nonsensitive(toset(keys(var.marketing_runtime_config)))
-  service_id     = var.crewai_service_id
-  environment_id = var.railway_environment_id
-  name           = each.key
-  value          = var.marketing_runtime_config[each.key]
+// Forget legacy per-key state without deleting live variables. The collection
+// upserts the supplied map, including values written by a partially failed apply.
+removed {
+  from = railway_variable.marketing_runtime
+  lifecycle {
+    destroy = false
+  }
 }
 
-resource "railway_variable" "n8n_runtime" {
-  for_each       = nonsensitive(toset(keys(var.n8n_runtime_config)))
+removed {
+  from = railway_variable.n8n_runtime
+  lifecycle {
+    destroy = false
+  }
+}
+
+resource "railway_variable_collection" "marketing_runtime" {
+  count          = length(nonsensitive(keys(var.marketing_runtime_config))) > 0 ? 1 : 0
+  service_id     = var.crewai_service_id
+  environment_id = var.railway_environment_id
+  variables = [for name in sort(nonsensitive(keys(var.marketing_runtime_config))) : {
+    name  = name
+    value = var.marketing_runtime_config[name]
+  }]
+}
+
+resource "railway_variable_collection" "n8n_runtime" {
+  count          = length(nonsensitive(keys(var.n8n_runtime_config))) > 0 ? 1 : 0
   service_id     = var.n8n_service_id
   environment_id = var.railway_environment_id
-  name           = each.key
-  value          = var.n8n_runtime_config[each.key]
+  variables = [for name in sort(nonsensitive(keys(var.n8n_runtime_config))) : {
+    name  = name
+    value = var.n8n_runtime_config[name]
+  }]
   lifecycle {
     precondition {
       condition     = length(var.n8n_service_id) > 0

@@ -58,6 +58,12 @@ jobs:
           MARKETING_DEPLOY_ENABLED: ${{ vars.MARKETING_DEPLOY_ENABLED }}
         run: python3 scripts/check_deployment_scope.py
 
+      - name: Prepare CrewAI runtime configuration for Terraform
+        env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+        run: python3 scripts/prepare_runtime_config.py
+
       - name: Verify application and deployment logic locally
         run: |
           python3 -m pip install -r crewai_agents/requirements.txt
@@ -77,12 +83,6 @@ jobs:
         with:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
-
-      - name: Prepare CrewAI runtime configuration for Terraform
-        env:
-          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
-          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
-        run: python3 scripts/prepare_runtime_config.py
 
       - name: Terraform initialize, prepare state and plan or apply
         env:

@@ -11,6 +11,21 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 API_USER_AGENT = 'crew-team-deployment-preflight/1.0'
 
 
+class ConfigurationError(RuntimeError):
+    pass
+
+
+def configuration_problems(result):
+    problems = []
+    if not result.get('model_configured'):
+        problems.append('LLM_MODEL is not configured in the deployed service')
+    if result.get('automation_enabled') != 'true':
+        problems.append('MARKETING_AUTOMATION_ENABLED must be "true" in the deployed service')
+    if result.get('missing_configuration'):
+        problems.append('/ready reports missing_configuration; check the runtime configuration and marketing profile')
+    return problems
+
+
 def error_metadata(error, token):
     """Report selected diagnostic headers and a recognized edge code, never raw bodies."""
     metadata = {}
@@ -57,12 +72,16 @@ def check():
             })
             with build_opener(NoRedirect).open(request, timeout=15) as response:
                 result = json.load(response)
-            if (result.get('missing_configuration') or not result.get('model_configured') or
-                    not result.get('worker_ready') or result.get('automation_enabled') != 'true'):
-                print(json.dumps(result, sort_keys=True), flush=True)
-                raise ValueError('Runtime is not ready')
             print(json.dumps(result, sort_keys=True), flush=True)
+            problems = configuration_problems(result)
+            if problems:
+                raise ConfigurationError('; '.join(problems) +
+                                         '. Update MARKETING_RUNTIME_CONFIG in the selected GitHub environment and redeploy.')
+            if not result.get('worker_ready'):
+                raise ValueError('Worker is not ready')
             return
+        except ConfigurationError:
+            raise  # Static settings will not change by retrying the same deployment.
         except Exception as exc:
             # URLs, tokens and HTTP bodies are deliberately excluded.
             status = f' http_status={exc.code}' if isinstance(exc, HTTPError) else ''
@@ -77,6 +96,9 @@ def check():
 if __name__ == '__main__':
     try:
         check()
+    except ConfigurationError as exc:
+        print('::error::' + str(exc), file=sys.stderr)
+        sys.exit(1)
     except Exception as exc:
         print('Runtime check failed: ' + type(exc).__name__, file=sys.stderr)
         sys.exit(1)
