@@ -140,6 +140,8 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `N8N_PROXY_HOPS` | `1` for the documented single reverse-proxy setup; adjust if the actual proxy chain differs |
 | `GENERIC_TIMEZONE`, `TZ` | `America/Chicago` for scheduling/system time with daylight saving; the workflow installer also explicitly uses this timezone |
 
+Terraform supplies `RAILWAY_RUN_UID="0"` for Railway volume write access and defaults `N8N_USER_FOLDER="/home/node"` to preserve the mounted data location. You do not need additional GitHub secrets for these settings.
+
 Persist `/home/node/.n8n` as well as its encryption key. An empty volume mounted over an existing data directory hides its contents; back up, verify restoration and restore the existing data as part of the storage cutover before activating schedules. For an existing service with no volume, `N8N_VOLUME_READY=true` acknowledges this migration; the pipeline refuses to attach an empty volume without it. An existing correct attachment is reused even if the flag is later absent or false. The current MVP uses SQLite persistence; the separate Postgres service is **not automatically connected to n8n**. Changing `DB_TYPE` is not a database migration.
 
 ### 5. One-time setup outside the GitHub settings screen

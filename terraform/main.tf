@@ -194,6 +194,17 @@ variable "n8n_runtime_config" {
   description = "n8n runtime variables. Preserve the existing N8N_ENCRYPTION_KEY when migrating."
 }
 
+locals {
+  # Railway mounts volumes as root. Its documented UID override lets the stock
+  # n8n image write the mounted database/config directory. Pin the user folder
+  # independently of the process user's home so UID 0 does not select /root/.n8n.
+  n8n_effective_runtime_config = merge(
+    { N8N_USER_FOLDER = "/home/node" },
+    var.n8n_runtime_config,
+    { RAILWAY_RUN_UID = "0" }
+  )
+}
+
 // Forget legacy per-key state without deleting live variables. The collection
 // upserts the supplied map, including values written by a partially failed apply.
 removed {
@@ -226,9 +237,9 @@ resource "railway_variable_collection" "n8n_runtime" {
   count          = length(nonsensitive(keys(var.n8n_runtime_config))) > 0 ? 1 : 0
   service_id     = var.n8n_service_id
   environment_id = var.railway_environment_id
-  variables = [for name in sort(nonsensitive(keys(var.n8n_runtime_config))) : {
+  variables = [for name in sort(nonsensitive(keys(local.n8n_effective_runtime_config))) : {
     name  = name
-    value = var.n8n_runtime_config[name]
+    value = local.n8n_effective_runtime_config[name]
   }]
   lifecycle {
     precondition {

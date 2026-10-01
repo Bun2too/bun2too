@@ -75,6 +75,7 @@ run "runtime_variables_target_environment" {
     }
     n8n_runtime_config = {
       GENERIC_TIMEZONE = "America/Chicago"
+      RAILWAY_RUN_UID  = "1000"
     }
   }
   assert {
@@ -84,6 +85,10 @@ run "runtime_variables_target_environment" {
   assert {
     condition     = length(railway_variable_collection.marketing_runtime) == 1 && length(railway_variable_collection.marketing_runtime[0].variables) == 2 && railway_variable_collection.marketing_runtime[0].variables[0].name == "MARKETING_API_KEY" && railway_variable_collection.marketing_runtime[0].variables[0].value == "test-only-key"
     error_message = "Runtime keys must be batched into one collection per service with stable ordering and preserved values."
+  }
+  assert {
+    condition     = { for v in railway_variable_collection.n8n_runtime[0].variables : v.name => v.value }["RAILWAY_RUN_UID"] == "0" && { for v in railway_variable_collection.n8n_runtime[0].variables : v.name => v.value }["N8N_USER_FOLDER"] == "/home/node" && { for v in railway_variable_collection.n8n_runtime[0].variables : v.name => v.value }["GENERIC_TIMEZONE"] == "America/Chicago"
+    error_message = "n8n must be able to write Railway's root-owned volume while retaining its /home/node/.n8n data location and user configuration."
   }
 }
 
