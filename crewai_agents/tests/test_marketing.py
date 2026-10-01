@@ -249,5 +249,20 @@ class MarketingTests(unittest.TestCase):
                 self.assertNotIn('Private source text',payload); self.assertNotIn('sensitive',payload)
             self.assertEqual(self.db.log_batch(),[])
 
+    def test_datadog_status_reports_rejection_and_recovery_without_secrets(self):
+        self.db.event('runtime', 'runtime_started', status='ready')
+        with patch.dict(os.environ, DD_LOGS_ENABLED='true', DD_API_KEY='private-dd-key', DD_SITE='us5.datadoghq.com'):
+            response = httpx.Response(403, request=httpx.Request('POST', 'https://example.com'))
+            with patch.object(telemetry.httpx, 'post', return_value=response):
+                telemetry.flush(self.db)
+            state = telemetry.status(self.db)
+            self.assertEqual(state['last_export']['http_status'], 403)
+            self.assertEqual(state['pending_batch_count'], 1)
+            self.assertNotIn('private-dd-key', json.dumps(state))
+            with patch.object(telemetry.httpx, 'post', return_value=httpx.Response(202, request=httpx.Request('POST', 'https://example.com'))):
+                telemetry.flush(self.db)
+            self.assertEqual(telemetry.status(self.db)['last_export']['status'], 'accepted')
+            self.assertEqual(telemetry.status(self.db)['pending_batch_count'], 0)
+
 
 if __name__ == '__main__': unittest.main()

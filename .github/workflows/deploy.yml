@@ -168,6 +168,7 @@ jobs:
         env:
           N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
           CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
           N8N_MARKETING_CREDENTIAL_ID: ${{ vars.N8N_MARKETING_CREDENTIAL_ID }}
           N8N_ACTIVATE_WORKFLOWS: ${{ vars.N8N_ACTIVATE_WORKFLOWS || 'false' }}

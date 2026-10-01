@@ -47,8 +47,50 @@ def render(template, base, credential_id, environment, timezone):
     return result
 
 
+def marketing_credential(env, base, key, request):
+    """Provision encrypted n8n credential data, never embed the secret in workflows."""
+    from urllib.parse import quote
+    supplied = env.get('N8N_MARKETING_CREDENTIAL_ID', '')
+    token = env.get('MARKETING_API_KEY', '')
+    if not token:
+        if supplied in ('', 'MARKETING_API_KEY', 'N8N_MARKETING_CREDENTIAL_ID'):
+            raise ValueError('Pass MARKETING_API_KEY to provision the n8n Header Auth credential; a secret name is not a credential ID')
+        # Legacy manually managed credentials remain supported.
+        return supplied
+    name = 'Bun2too Marketing API (' + env.get('DEPLOY_ENVIRONMENT', 'production') + ')'
+    matches = []
+    path = '/credentials?limit=100'
+    while path:
+        try:
+            result = request(base, key, path)
+        except HTTPError as exc:
+            raise ValueError(f'n8n credential discovery failed HTTP {exc.code}; requires a version supporting '
+                             'public credential list/update APIs and an owner/admin API key with credential permissions') from None
+        matches.extend(c for c in result['data'] if c.get('name') == name or c.get('id') == supplied)
+        cursor = result.get('nextCursor')
+        path = '/credentials?limit=100&cursor=' + quote(cursor, safe='') if cursor else None
+    explicit = [c for c in matches if c.get('id') == supplied]
+    selected = explicit or [c for c in matches if c.get('name') == name]
+    if len(selected) > 1:
+        raise ValueError('Duplicate managed Marketing API credentials; reconcile them before deployment')
+    payload = {'name': name, 'type': 'httpHeaderAuth',
+               'data': {'name': 'Authorization', 'value': 'Bearer ' + token}}
+    if selected:
+        credential = selected[0]
+        if credential.get('type') != 'httpHeaderAuth':
+            raise ValueError('Selected n8n marketing credential must have type httpHeaderAuth')
+        credential_id = credential['id']
+        request(base, key, '/credentials/' + quote(credential_id, safe=''), 'PATCH', payload)
+    else:
+        credential_id = request(base, key, '/credentials', 'POST', payload)['id']
+    if not isinstance(credential_id, str) or not credential_id:
+        raise ValueError('n8n did not return a credential ID')
+    print('Provisioned n8n Header Auth credential; secret omitted.', flush=True)
+    return credential_id
+
+
 def deploy(env, request=api):
-    required = ('N8N_BASE_URL', 'N8N_API_KEY', 'CREWAI_BASE_URL', 'N8N_MARKETING_CREDENTIAL_ID')
+    required = ('N8N_BASE_URL', 'N8N_API_KEY', 'CREWAI_BASE_URL')
     for name in required:
         if not env.get(name):
             raise ValueError('Missing ' + name)
@@ -66,10 +108,11 @@ def deploy(env, request=api):
         from urllib.parse import quote
         cursor = result.get('nextCursor')
         path = '/workflows?limit=100&cursor=' + quote(cursor, safe='') if cursor else None
+    credential_id = marketing_credential(env, base, key, request)
     error_workflow_id = None
     verified_workflows = []
     for source in sorted((ROOT / 'n8n').glob('*.json')):
-        payload = render(json.loads(source.read_text()), crew, env['N8N_MARKETING_CREDENTIAL_ID'],
+        payload = render(json.loads(source.read_text()), crew, credential_id,
                          env.get('DEPLOY_ENVIRONMENT', 'production'), env.get('MARKETING_TIMEZONE', 'America/Chicago'))
         if error_workflow_id:
             payload['settings']['errorWorkflow'] = error_workflow_id

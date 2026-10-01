@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 SITES = {'datadoghq.com', 'us3.datadoghq.com', 'us5.datadoghq.com', 'datadoghq.eu',
          'ap1.datadoghq.com', 'ap2.datadoghq.com', 'ddog-gov.com'}
@@ -32,5 +33,6 @@ if __name__ == '__main__':
     try:
         report(os.environ)
     except Exception as exc:
-        print('Datadog deployment log failed: ' + type(exc).__name__, file=sys.stderr)
+        status = f' HTTP {exc.code}' if isinstance(exc, HTTPError) else ''
+        print('Datadog deployment log failed: ' + type(exc).__name__ + status, file=sys.stderr)
         sys.exit(1)

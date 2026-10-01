@@ -5,6 +5,22 @@ from scripts import deploy_n8n, report_deployment, check_deployment_scope
 
 
 class WorkflowDeploymentTests(unittest.TestCase):
+    def test_credential_is_created_with_actual_key_and_reused_on_next_deploy(self):
+        env = dict(self.env(), MARKETING_API_KEY='private-marketing-key', N8N_MARKETING_CREDENTIAL_ID='MARKETING_API_KEY')
+        request = Mock(side_effect=[{'data': []}, {'id': 'actual-id'}])
+        credential_id = deploy_n8n.marketing_credential(env, 'https://n8n.example', 'api-key', request)
+        self.assertEqual(credential_id, 'actual-id')
+        payload = request.call_args.args[4]
+        self.assertEqual(payload['data'], {'name': 'Authorization', 'value': 'Bearer private-marketing-key'})
+        self.assertEqual(payload['type'], 'httpHeaderAuth')
+        request = Mock(side_effect=[{'data': [{'id': 'actual-id', 'name': 'Bun2too Marketing API (qa)', 'type': 'httpHeaderAuth'}]}, {}])
+        self.assertEqual(deploy_n8n.marketing_credential(env, 'https://n8n.example', 'api-key', request), 'actual-id')
+        self.assertEqual(request.call_args.args[2:4], ('/credentials/actual-id', 'PATCH'))
+
+    def test_placeholder_without_key_fails_instead_of_installing_broken_reference(self):
+        with self.assertRaisesRegex(ValueError, 'secret name is not a credential ID'):
+            deploy_n8n.marketing_credential({'N8N_MARKETING_CREDENTIAL_ID': 'MARKETING_API_KEY'}, '', '', Mock())
+
     def env(self):
         return dict(N8N_BASE_URL='https://n8n.example', N8N_API_KEY='secret', CREWAI_BASE_URL='https://crew.example',
                     N8N_MARKETING_CREDENTIAL_ID='credential-id', DEPLOY_ENVIRONMENT='qa', N8N_ACTIVATE_WORKFLOWS='true')
@@ -14,6 +30,8 @@ class WorkflowDeploymentTests(unittest.TestCase):
         saved={}
         def api(base,key,path,method='GET',payload=None):
             calls.append((path,method,payload))
+            if path.startswith('/credentials?'): return {'data': []}
+            if path == '/credentials': return {'id': 'created-header-id'}
             if path.startswith('/workflows?'): return {'data':[]}
             if method=='GET': return saved[path.split('/')[-1]]
             if path.endswith('/activate'):
@@ -24,13 +42,18 @@ class WorkflowDeploymentTests(unittest.TestCase):
                 saved[key]=dict(payload,id=key,active=False)
                 return {'id':key}
             return {}
-        deploy_n8n.deploy(self.env(),api)
+        deploy_n8n.deploy(dict(self.env(), MARKETING_API_KEY='private-marketing-key', N8N_MARKETING_CREDENTIAL_ID='MARKETING_API_KEY'),api)
         creates=[c[2] for c in calls if c[:2]==('/workflows','POST')]
         self.assertEqual(len(creates),2)
         self.assertEqual(creates[1]['settings']['errorWorkflow'],'error-id')
         self.assertEqual([c[0] for c in calls if c[0].endswith('/activate')],['/workflows/main-id/activate'])
         self.assertNotIn('__CREWAI',json.dumps(creates))
         self.assertNotIn('secret',json.dumps(creates))
+        self.assertNotIn('private-marketing-key',json.dumps(creates))
+        for workflow in creates:
+            for node in workflow['nodes']:
+                if 'httpHeaderAuth' in node.get('credentials', {}):
+                    self.assertEqual(node['credentials']['httpHeaderAuth']['id'], 'created-header-id')
         for workflow in creates:
             names={n['name'] for n in workflow['nodes']}
             for source, outputs in workflow['connections'].items():

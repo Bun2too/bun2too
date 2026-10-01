@@ -11,7 +11,7 @@ def check(env):
     if operation != 'deploy':
         return f'{operation}: does not install or activate marketing workflows.'
     missing = [name for name in ('CREWAI_BASE_URL', 'MARKETING_API_KEY', 'N8N_BASE_URL',
-                                 'N8N_API_KEY', 'N8N_MARKETING_CREDENTIAL_ID')
+                                 'N8N_API_KEY')
                if not env.get(name, '').strip()]
     problems = ['Missing GitHub environment settings: ' + ', '.join(missing)] if missing else []
     if env.get('N8N_ACTIVATE_WORKFLOWS', '').lower() != 'true':

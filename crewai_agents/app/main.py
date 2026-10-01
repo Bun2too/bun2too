@@ -322,6 +322,8 @@ def worker_loop(stop):
             return
         store().recover_generation()
         worker_ready.set()
+        store().event('runtime', 'runtime_started', status='ready')
+        telemetry.flush(store())
         while not stop.is_set():
             try:
                 for run in store().queued():
@@ -425,6 +427,11 @@ def automation_metrics():
 @app.get('/automation/status', dependencies=[Depends(authorize)])
 def automation_status():
     return {'runs': store().recent(), 'publications': store().social_recent()}
+
+
+@app.get('/observability/status', dependencies=[Depends(authorize)])
+def observability_status():
+    return telemetry.status(store())
 
 
 class ReconcilePost(BaseModel):
