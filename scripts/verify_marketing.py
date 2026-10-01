@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--terraform', action='store_true', help='Also validate and run Terraform mock-provider tests (requires init)')
     args = parser.parse_args()
     env = dict(os.environ, DD_LLMOBS_ENABLED='0', CREWAI_TRACING_ENABLED='false',
+               DD_TRACE_ENABLED='false', DD_INSTRUMENTATION_TELEMETRY_ENABLED='false',
+               DD_REMOTE_CONFIGURATION_ENABLED='false',
                DD_LOGS_ENABLED='false', WORKER_ENABLED='false', PUBLISHING_ENABLED='false')
     commands = [[sys.executable,'-m','unittest','discover','-s',folder,'-v'] for folder in ('tests','crewai_agents/tests')]
     if args.terraform:

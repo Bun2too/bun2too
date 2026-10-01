@@ -1,7 +1,9 @@
 import asyncio
 import fcntl
 import threading
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import html
 import hashlib
 import json
@@ -10,6 +12,7 @@ import os
 import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
@@ -21,7 +24,7 @@ from pydantic import BaseModel, Field
 from .crews import build_crew
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
-from .observability import redact, workflow_span
+from .observability import redact, workflow_span, error_details, trace_context
 from . import atlassian, marketing, telemetry
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -82,13 +85,17 @@ def execute_run(run_id, social_only=False):
         run = db.update(run_id, expected={"queued"}, status="running", attempts=previous.get('attempts', 0) + 1)
     except ValueError:
         return  # Another local dispatcher claimed the durable job.
-    db.event(run_id, "run_started", operation="Crew.kickoff", model=os.getenv("LLM_MODEL"))
+    started = time.monotonic()
+    operation = 'load_context'
+    correlation = {}
+    context = dict(campaign_key=run.get('campaign_key'), model=os.getenv('LLM_MODEL'), attempt=run['attempts'])
+    db.event(run_id, "run_started", operation=operation, **context)
     try:
         def record_task(role, output, structured=None):
             task_id = run_id + ":" + role
             db.update(run_id, task=redact(dict(task_id=task_id, agent=role, completed_at=now(),
                                              output=output, structured=structured)))
-            db.event(run_id, "task_completed", agent=role, task_id=task_id)
+            db.event(run_id, "task_completed", agent=role, task_id=task_id, **context)
             logger.info("run=%s completed_agent=%s", run_id, role)
 
         brief = dict(run["brief"])
@@ -127,9 +134,13 @@ def execute_run(run_id, social_only=False):
                  confluence_page_ids=brief.get("confluence_page_ids", []),
                  lesson_run_ids=brief.get("lesson_run_ids", []))
         with workflow_span(run_id):
+            correlation = trace_context()
+            operation = 'build_crew'
             crew = build_crew(brief, record_task, social_only=social_only,
                               record_event=lambda kind, **data: db.event(run_id, kind, **data))
+            operation = 'Crew.kickoff'
             result = crew.kickoff()
+        operation = 'validate_artifact'
         artifact = (MarketingArtifact.model_validate(result.pydantic) if result.pydantic
                     else MarketingArtifact.model_validate_json(result.raw))
         allowed = {channel.lower() for channel in run["brief"]["channels"]}
@@ -142,10 +153,15 @@ def execute_run(run_id, social_only=False):
             try:
                 marketing.check_artifact(db.get(run_id), config)
             except ValueError as exc:
-                db.event(run_id, 'automatic_approval_blocked', reason=str(exc))
+                db.update(run_id, publication_blocker=str(exc))
+                db.event(run_id, 'automatic_approval_blocked', status='blocked', reason=str(exc), **context)
             else:
                 if config.get('approval_mode') == 'automatic' and os.getenv('AUTO_APPROVAL_ENABLED', 'false').lower() == 'true':
                     approve(run_id, ApprovalRequest(reviewer='configured-automatic-policy'))
+                else:
+                    reason = 'Automatic approval is disabled; content requires review'
+                    db.update(run_id, publication_blocker=reason)
+                    db.event(run_id, 'automatic_approval_blocked', status='blocked', reason=reason, **context)
         if brief.get("campaign_key") and not run.get('scheduled'):
             try:
                 atlassian.queue_campaign(db, run_id)
@@ -157,10 +173,16 @@ def execute_run(run_id, social_only=False):
         else:
             db.event(run_id, "atlassian_not_published", reason="Set campaign_key for automatic campaign publishing")
     except Exception as exc:
-        # Provider errors can contain credentials or private prompts; do not expose them.
-        logger.error("run=%s generation_failed type=%s", run_id, type(exc).__name__)
-        db.update(run_id, status="failed", error="Generation failed (" + type(exc).__name__ + ")")
-        db.event(run_id, "run_failed", error_type=type(exc).__name__)
+        diagnostic = error_details(exc)
+        logger.error("run=%s operation=%s generation_failed %s", run_id, operation, json.dumps(diagnostic))
+        db.update(run_id, status="failed", error="Generation failed (" + type(exc).__name__ + ")",
+                  error_details=diagnostic)
+        completed = [task['agent'] for task in db.get(run_id).get('tasks', [])]
+        roles = ['researcher', 'writer', 'editor', 'delivery'] if social_only else [
+            'product_owner', 'business_analyst', 'researcher', 'creative', 'writer', 'engineering', 'tester', 'editor', 'delivery']
+        db.event(run_id, "run_failed", status='failed', error_type=type(exc).__name__, error=diagnostic,
+                 operation=operation, agent=next((role for role in roles if role not in completed), None) if operation == 'Crew.kickoff' else None,
+                 duration_ms=round((time.monotonic() - started) * 1000), **context, **correlation)
 
 
 @app.get("/health")
@@ -332,7 +354,12 @@ def worker_loop(stop):
                     execute_run(run['id'])
                 telemetry.flush(store())
             except Exception as exc:
-                logger.error('worker_error type=%s', type(exc).__name__)
+                diagnostic = error_details(exc)
+                logger.error('worker_error %s', json.dumps(diagnostic))
+                try:
+                    store().event('runtime', 'worker_failed', status='failed', error=diagnostic)
+                except Exception:
+                    logger.error('Could not persist worker failure; inspect service logs')
             stop.wait(2)
 
 
@@ -394,8 +421,9 @@ def automation_tick():
         run, created = store().schedule(config['campaign_key'] + ':' + slot, brief,
                                        publish_after=after.isoformat(), publish_before=before.isoformat())
         if created:
-            store().event(run['id'], 'scheduled_run_created', slot=slot)
-        return {'status': run['status'], 'run_id': run['id'], 'created': created}
+            store().event(run['id'], 'scheduled_run_created', slot=slot, campaign_key=config['campaign_key'],
+                          publish_after=run['publish_after'], publish_before=run['publish_before'])
+        return dict(campaign_state(run), created=created)
     except (ValueError, OSError) as exc:
         raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else 'Marketing profile unavailable') from None
 
@@ -410,23 +438,66 @@ def automation_publish():
                 results.append(marketing.publish_one(store(), run['id']))
             except ValueError as exc:
                 results.append({'run_id': run['id'], 'status': 'blocked', 'reason': str(exc)})
-                if str(exc) != 'Publication is not due yet' and run.get('publication_blocker') != str(exc):
+                if str(exc) == 'Publication is not due yet':
+                    results[-1].update(status='not_due', publish_after=run.get('publish_after'), publish_before=run.get('publish_before'))
+                elif run.get('publication_blocker') != str(exc):
                     store().update(run['id'], publication_blocker=str(exc))
                     store().event(run['id'], 'facebook_publication_blocked', status='blocked', reason=str(exc))
-    return {'publications': results}
+    db = store()
+    runs = [db.get(candidate['id']) for candidate in db.recent()]
+    states = [campaign_state(run) for run in runs if run.get('scheduled')]
+    # Report today's unresolved campaigns even when there is nothing approved to send.
+    today = datetime.now(timezone.utc).astimezone(ZoneInfo(marketing.profile().get('timezone', 'America/Chicago'))).date().isoformat()
+    states = [state for state in states if (state.get('publish_before') or '').startswith(today)]
+    return {'publications': results, 'campaigns': states,
+            'status': 'blocked' if any(s['status'] in PROBLEM_STATES for s in states) else
+                      ('published' if any(p['status'] == 'published' for p in results) else 'idle')}
 
 
 @app.post('/automation/metrics', dependencies=[Depends(authorize)])
 def automation_metrics():
     try:
-        return {'results': marketing.collect_metrics(store())}
+        results = marketing.collect_metrics(store())
+        failed = any(result.get('status') == 'failed' for result in results)
+        return {'results': results, 'status': 'failed' if failed else 'completed',
+                'reason': 'Facebook metrics collection failed; inspect facebook_metrics_failed events' if failed else None}
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
 
 
 @app.get('/automation/status', dependencies=[Depends(authorize)])
 def automation_status():
-    return {'runs': store().recent(), 'publications': store().social_recent()}
+    return {'runs': [campaign_state(store().get(run['id'])) for run in store().recent()],
+            'publications': store().social_recent()}
+
+
+PROBLEM_STATES = {'failed', 'awaiting_review', 'publication_failed', 'publication_unknown', 'expired', 'blocked', 'unknown'}
+
+
+def campaign_state(run):
+    return dict(run_id=run['id'], id=run['id'], status=run['status'], campaign_key=run.get('campaign_key'),
+                created_at=run['created_at'], attempt=run.get('attempts', 0),
+                publish_after=run.get('publish_after'), publish_before=run.get('publish_before'),
+                reason=run.get('publication_blocker') or run.get('error'), error=run.get('error_details'))
+
+
+class GenerationRetry(BaseModel):
+    reviewer: str = Field(min_length=1, max_length=200)
+
+
+@app.post('/runs/{run_id}/retry-generation', dependencies=[Depends(authorize)], status_code=202)
+def retry_generation(run_id: str, payload: GenerationRetry):
+    if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() != 'true':
+        raise HTTPException(409, 'Scheduled marketing is disabled')
+    try:
+        marketing.delivery_config()
+        if not os.getenv('LLM_MODEL'):
+            raise ValueError('LLM_MODEL is not configured')
+        return campaign_state(store().retry_generation(run_id, payload.reviewer))
+    except KeyError:
+        raise HTTPException(404, 'Run not found') from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 @app.get('/observability/status', dependencies=[Depends(authorize)])
@@ -487,14 +558,58 @@ def article(run_id: str):
                         headers={'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'"})
 
 
+class OperationOutcome(BaseModel):
+    run_id: str | None = Field(default=None, max_length=100)
+    status: str | None = Field(default=None, max_length=100)
+    reason: str | None = Field(default=None, max_length=2000)
+    publish_after: str | None = Field(default=None, max_length=100)
+    publish_before: str | None = Field(default=None, max_length=100)
+    remote_id: str | None = Field(default=None, max_length=100)
+
+
+class AutomationResult(OperationOutcome):
+    campaigns: list[OperationOutcome] = Field(default_factory=list, max_length=100)
+    publications: list[OperationOutcome] = Field(default_factory=list, max_length=100)
+    results: list[OperationOutcome] = Field(default_factory=list, max_length=100)
+
+
 class WorkflowEvent(BaseModel):
     execution_id: str = Field(max_length=100)
     workflow_name: str = Field(max_length=200)
     status: str = Field(pattern=r'^(failed|started|completed)$')
+    operation: str | None = Field(default=None, max_length=200)
+    node: str | None = Field(default=None, max_length=200)
+    execution_url: str | None = Field(default=None, max_length=500)
+    error_message: str | None = Field(default=None, max_length=2000)
+    result: AutomationResult | None = None
 
 
 @app.post('/automation/events', dependencies=[Depends(authorize)])
 def workflow_event(payload: WorkflowEvent):
-    store().event('n8n:' + payload.execution_id, 'n8n_execution_' + payload.status,
-                  workflow_name=payload.workflow_name, status=payload.status)
-    return {'recorded': True}
+    db = store()
+    outcomes = []
+    if payload.result:
+        outcomes = [payload.result, *payload.result.campaigns, *payload.result.publications, *payload.result.results]
+    failed = payload.status == 'failed' or any(item.status in PROBLEM_STATES for item in outcomes)
+    status = 'failed' if failed else payload.status
+    metadata = dict(execution_id=payload.execution_id, workflow_name=payload.workflow_name,
+                    operation=payload.operation, node=payload.node, execution_url=payload.execution_url)
+    reason = redact(payload.error_message) if payload.error_message else None
+    if not reason:
+        reason = next((item.reason or 'Campaign outcome: ' + str(item.status)
+                       for item in outcomes if item.status in PROBLEM_STATES), None)
+    run_ids = list(dict.fromkeys(item.run_id for item in outcomes if item.run_id))
+    for run_id in run_ids:
+        try:
+            state = campaign_state(db.get(run_id))
+        except KeyError:
+            continue
+        state.pop('run_id')
+        state.pop('id')
+        db.event(run_id, 'n8n_campaign_observed', **state, **metadata)
+    db.event('n8n:' + payload.execution_id, 'n8n_execution_' + status,
+             status=status, reason=reason, run_ids=run_ids,
+             outcome=payload.result.status if payload.result else status,
+             outcomes=[item.model_dump(exclude_none=True, exclude={'campaigns', 'publications', 'results'}) for item in outcomes],
+             **metadata)
+    return {'recorded': True, 'failed': failed, 'reason': reason, 'run_ids': run_ids}

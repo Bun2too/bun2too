@@ -81,8 +81,8 @@ class Store:
                 for run in (json.loads(row[0]) for row in rows)]
 
     def event(self, run_id, kind, **details):
-        from .observability import redact
-        data = redact(dict(kind=kind, at=now(), **details))
+        from .observability import redact, trace_context
+        data = redact(dict(kind=kind, at=now(), **trace_context(), **details))
         with self.connect() as db:
             db.execute("INSERT INTO events (run_id, data) VALUES (?, ?)", (run_id, json.dumps(data)))
 
@@ -170,6 +170,31 @@ class Store:
         with self.connect() as db:
             runs = [json.loads(row[0]) for row in db.execute('SELECT data FROM runs ORDER BY rowid')]
         return [run for run in runs if run['status'] == 'queued' and run.get('scheduled')]
+
+    def retry_generation(self, run_id, reviewer):
+        """Explicit, atomic recovery of generation only; never retries a social send."""
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT data FROM runs WHERE id = ?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            run = json.loads(row[0])
+            if run['status'] != 'failed' or not run.get('scheduled'):
+                raise ValueError('Only failed scheduled generation can be retried')
+            if db.execute('SELECT 1 FROM social_posts WHERE run_id = ?', (run_id,)).fetchone():
+                raise ValueError('A publication attempt exists; reconcile it instead of regenerating')
+            deadline = run.get('publish_before')
+            if not deadline or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc):
+                raise ValueError('Publication window has expired; wait for the next daily campaign')
+            run.update(status='queued', tasks=[], artifact=None, approval=None, error=None,
+                       error_details=None, publication_blocker=None, updated_at=now())
+            db.execute('UPDATE runs SET data = ? WHERE id = ?', (json.dumps(run), run_id))
+            from .observability import redact
+            event = redact(dict(kind='generation_retry_requested', at=now(), reviewer=reviewer,
+                                status='queued', attempt=run.get('attempts', 0) + 1,
+                                campaign_key=run['campaign_key']))
+            db.execute('INSERT INTO events (run_id, data) VALUES (?, ?)', (run_id, json.dumps(event)))
+        return run
 
     def recover_generation(self):
         # Called only after obtaining the exclusive worker lock for this mounted store.

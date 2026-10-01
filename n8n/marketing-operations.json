@@ -152,7 +152,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Generate daily campaign\", node: \"Generate daily campaign\", result: $json}) }}",
         "options": {
           "timeout": 30000
         }
@@ -180,7 +180,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Publish approved content\", node: \"Publish approved content\", result: $json}) }}",
         "options": {
           "timeout": 30000
         }
@@ -208,7 +208,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\"}) }}",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Collect Facebook results\", node: \"Collect Facebook results\", result: $json}) }}",
         "options": {
           "timeout": 30000
         }
@@ -218,6 +218,45 @@
           "id": "__MARKETING_CREDENTIAL_ID__",
           "name": "Marketing API"
         }
+      }
+    },
+    {
+      "id": "check-outcome-0",
+      "name": "Check Generate daily campaign outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "check-outcome-1",
+      "name": "Check Publish approved content outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        240
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "check-outcome-2",
+      "name": "Check Collect Facebook results outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
       }
     }
   ],
@@ -282,6 +321,39 @@
         [
           {
             "node": "Record Collect Facebook results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Generate daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Check Generate daily campaign outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Publish approved content": {
+      "main": [
+        [
+          {
+            "node": "Check Publish approved content outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Collect Facebook results": {
+      "main": [
+        [
+          {
+            "node": "Check Collect Facebook results outcome",
             "type": "main",
             "index": 0
           }

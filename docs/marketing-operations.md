@@ -135,13 +135,42 @@ curl --silent --show-error --fail \
 
 Use the returned run ID in `/docs` to inspect `/runs/{run_id}` and `/runs/{run_id}/work`. Verify all role outputs, source snapshots, article, approved hash, target window and actual publication outcome. A scheduled tick returns immediately; generation can take minutes. Polling is expected. An HTTP 200 from `/automation/publish` can contain `blocked` entries, so inspect its body and run events.
 
-After a real publication, verify the Page displays the exact approved message and article link. `published` requires a returned remote post ID; a draft, approved run or successful n8n HTTP call is not evidence of a live post. Open the public article URL without authentication to confirm it is reachable from Facebook.
+The status and tick responses include `publish_after`, `publish_before`, `attempt`, `reason` and sanitized `error` details. `publish_after` is the stable daily randomized target inside the configured window, not necessarily 08:00. Before that target the publisher reports `not_due`; this is normal. A successful HTTP request alone is not evidence of generation or publication. The installed workflow now records each operation's result, then checks it: failed generation, held review, blocked/expired release, failed metrics and failed/uncertain publication make the n8n execution fail. Asynchronous generation failures become visible on the next five-minute poll. Empty publish polls still report today's campaign states.
+
+After a real publication, verify the Page displays the exact approved message and article link. `published` requires a returned remote post ID; a draft or approved run is not evidence of a live post. Open the public article URL without authentication to confirm it is reachable from Facebook.
+
+### Recover failed generation after fixing its cause
+
+The October 1 production failure came from a model rejecting the hardcoded `temperature=0.3`. The application now omits temperature and uses the provider default. Deploy the updated CrewAI application **and** reinstall the updated n8n templates using the normal deployment pipeline. Reinstalling only workflows cannot fix a model request in the worker.
+
+Deployment does not silently replay failed campaigns. After deployment, inspect `/automation/status`. To retry a failed scheduled generation whose release window is still open, use the authenticated `POST /runs/{run_id}/retry-generation` endpoint in `/docs` with this body:
+
+```json
+{"reviewer": "operator-name"}
+```
+
+It returns 202 and queues generation for the worker. It keeps the same run ID, schedule slot, release window, attempt counter and event journal while clearing incomplete task outputs and the failed artifact. Repeated/concurrent requests cannot queue it twice. It refuses expired windows, nonfailed generation and **any previous Facebook publication attempt**. When the window has closed, let the next daily campaign run. Never delete the database or retry a Facebook send to recover generation.
 
 The next metrics collection should record actual available counts and observation time. Check a later run's model context/deliverables for measured retrospective findings and a new hypothesis. A missing metric is not zero, and engagement is not proof of revenue.
 
 ## 7. Datadog and emergency operations
 
 In Datadog Logs search `service:bun2too-marketing-api env:production`, then the run ID. Deployment logs use `service:bun2too-deployment`; n8n execution records use the same app service with `@kind:n8n_execution_failed`/`completed`. For agent/model spans use LLM Observability, app `bun2too-marketing-crew-team`, matching run/session ID. The production configuration must actually include the keys/flags; markdown instructions alone do not transmit logs.
+
+Operational log `status` now contains a Datadog severity (`info`, `warning`, `error`); business states live in `outcome`. Successful schedule polls are informational. Root-cause records retain `operation`, `model`, `agent`, `attempt`, `campaign_key`, `duration_ms`, and sanitized `error.message`, `error.kind`, `error.stack`, and `error.causes` (including provider HTTP status, error code, parameter and request ID when available). Stack diagnostics contain frame locations without local variables or source lines. Prompt, artifact, tool-input and raw request/response fields are excluded. Publication failures retain Meta error details when available, including its trace ID. Events use their original timestamp even when export is retried.
+
+n8n records carry `execution_id`, workflow/node/operation and business outcomes. `n8n_campaign_observed` records attach that execution to the actual campaign `run_id`, error and release window. Error-handler records also include the execution link and sanitized node error. Active Datadog spans contribute `dd.trace_id`/`dd.span_id`; worker failures retain the workflow trace correlation after unwinding. These IDs appear only when a real active span exists. Logging does not create Datadog monitors or change existing severity-remapping pipelines: if an informational completion still appears Critical, inspect that pipeline's status remapper.
+
+Useful filters after deploying:
+
+```text
+service:bun2too-marketing-api env:production status:error
+service:bun2too-marketing-api @kind:run_failed
+service:bun2too-marketing-api @run_id:<campaign-run-id>
+service:bun2too-marketing-api @execution_id:516
+```
+
+Old exported events are not rewritten or reclassified. Use fresh executions to verify the new fields, and `/observability/status` to verify intake acceptance and pending export count.
 
 Confirm a recent `task_completed`, `facebook_publish_finished`, n8n execution event and deployment outcome in intake. The exporter omits prompt content from operational logs; LLM span capture is separate and optional. No infrastructure CPU/memory integration or alert monitor is installed by this change.
 

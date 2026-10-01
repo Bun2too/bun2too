@@ -28,7 +28,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({execution_id: String($json.execution?.id || \"trigger\"), workflow_name: $json.workflow?.name || \"marketing\", status: \"failed\"}) }}",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($json.execution?.id || \"trigger\"), workflow_name: $json.workflow?.name || \"marketing\", status: \"failed\", node: $json.execution?.lastNodeExecuted || $json.trigger?.error?.node?.name || null, execution_url: $json.execution?.url || null, error_message: String($json.execution?.error?.message || $json.trigger?.error?.message || \"Workflow failed; inspect execution\").slice(0, 2000)}) }}",
         "options": {
           "timeout": 30000
         }

@@ -4,11 +4,38 @@ import os
 from datetime import datetime, timezone
 
 import httpx
+from .observability import redact
 
 SITES = {'datadoghq.com', 'us3.datadoghq.com', 'us5.datadoghq.com', 'datadoghq.eu',
          'ap1.datadoghq.com', 'ap2.datadoghq.com', 'ddog-gov.com'}
 
 LAST_EXPORT = {'status': 'not_attempted'}
+
+
+def log_entry(item):
+    event = item['event']
+    outcome = event.get('outcome', event.get('status'))
+    kind = event['kind']
+    severity = 'error' if event.get('status') == 'failed' or outcome in {'failed', 'unknown', 'publication_failed', 'publication_unknown'} or kind.endswith('_failed') else (
+        'warning' if outcome in {'blocked', 'awaiting_review', 'expired'} or kind.endswith('_blocked') else 'info')
+    # An allowlist keeps prompts, artifacts, tool inputs and response bodies out.
+    fields = ('kind', 'at', 'agent', 'error_type', 'error', 'remote_id', 'metrics', 'workflow_name',
+              'operation', 'model', 'campaign_key', 'attempt', 'duration_ms', 'reason', 'task_id',
+              'publication_id', 'page_id', 'publish_after', 'publish_before', 'slot', 'reviewer',
+              'execution_id', 'execution_url', 'node', 'run_ids', 'outcomes', 'http_status',
+              'dd.trace_id', 'dd.span_id')
+    metadata = {key: event[key] for key in fields if key in event}
+    diagnostic = event.get('error')
+    detail = diagnostic.get('message') if isinstance(diagnostic, dict) else None
+    detail = detail or event.get('reason')
+    context = ' '.join(f'{key}={event[key]}' for key in ('operation', 'agent', 'model', 'attempt') if event.get(key) is not None)
+    message = f"{kind} run={item['run_id']} {context}".strip()
+    if detail:
+        message += ': ' + str(detail)
+    return redact({'ddsource': 'crewai', 'service': os.getenv('DD_SERVICE', 'bun2too-marketing-api'),
+                   'ddtags': 'env:' + os.getenv('DD_ENV', 'production'),
+                   'timestamp': event['at'], 'status': severity, 'outcome': outcome,
+                   'message': message, 'run_id': item['run_id'], 'event_id': item['id'], **metadata})
 
 
 def status(db):
@@ -34,14 +61,7 @@ def flush(db):
         return
     LAST_EXPORT.clear()
     LAST_EXPORT.update(status='sending', attempted_at=datetime.now(timezone.utc).isoformat())
-    entries = []
-    for item in batch:
-        event = item['event']
-        # Export operational metadata, not prompts, source content or credentials.
-        metadata = {key: event[key] for key in ('kind', 'at', 'agent', 'status', 'error_type', 'remote_id', 'metrics', 'workflow_name') if key in event}
-        entries.append({'ddsource': 'crewai', 'service': os.getenv('DD_SERVICE', 'bun2too-marketing-api'),
-                        'ddtags': 'env:' + os.getenv('DD_ENV', 'production'), 'message': event['kind'],
-                        'run_id': item['run_id'], 'event_id': item['id'], **metadata})
+    entries = [log_entry(item) for item in batch]
     try:
         response = httpx.post(f'https://http-intake.logs.{site}/api/v2/logs',
                               headers={'DD-API-KEY': key}, json=entries, timeout=10)

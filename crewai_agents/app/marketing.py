@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+from .observability import error_details
 
 
 class ProfileError(ValueError):
@@ -194,7 +195,12 @@ def publish_one(db, run_id):
                               data={'message': artifact['posts'][0]['text'], 'link': base + '/articles/' + run_id},
                               timeout=30, follow_redirects=False)
         if response.status_code >= 400 and response.status_code < 500:
-            result = db.finish_social(publication['id'], 'failed', error=f'Facebook HTTP {response.status_code}')
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                diagnostic = error_details(exc)
+            result = db.finish_social(publication['id'], 'failed', error=f'Facebook HTTP {response.status_code}',
+                                      error_details=diagnostic)
         else:
             response.raise_for_status()
             remote = response.json().get('id', '')
@@ -202,9 +208,10 @@ def publish_one(db, run_id):
                 raise ValueError('Unexpected Facebook post ID')
             result = db.finish_social(publication['id'], 'published', remote_id=remote)
     except Exception as exc:
-        result = db.finish_social(publication['id'], 'unknown', error=type(exc).__name__)
+        result = db.finish_social(publication['id'], 'unknown', error=type(exc).__name__, error_details=error_details(exc))
     db.event(run_id, 'facebook_publish_finished', publication_id=result['id'],
-             status=result['status'], remote_id=result.get('remote_id'))
+             status=result['status'], remote_id=result.get('remote_id'), page_id=page,
+             operation='facebook.publish', error=result.get('error_details'), reason=result.get('error'))
     return result
 
 
@@ -233,5 +240,8 @@ def collect_metrics(db):
             db.event(publication['run_id'], 'facebook_metrics_collected', metrics=metrics)
             collected.append({'publication_id': publication['id'], 'metrics': metrics})
         except Exception as exc:
-            db.event(publication['run_id'], 'facebook_metrics_failed', error_type=type(exc).__name__)
+            db.event(publication['run_id'], 'facebook_metrics_failed', status='failed', error_type=type(exc).__name__,
+                     error=error_details(exc), publication_id=publication['id'], remote_id=remote,
+                     operation='facebook.metrics')
+            collected.append({'publication_id': publication['id'], 'run_id': publication['run_id'], 'status': 'failed'})
     return collected

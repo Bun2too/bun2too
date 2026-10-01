@@ -1,10 +1,37 @@
 import json
 import unittest
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import Mock, MagicMock
 from scripts import deploy_n8n, report_deployment, check_deployment_scope
 
 
 class WorkflowDeploymentTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is required to execute n8n code nodes offline')
+    def test_workflow_passes_results_then_fails_on_business_failure(self):
+        workflow = json.loads((Path(__file__).resolve().parents[1] / 'n8n/marketing-operations.json').read_text())
+        for operation in ('Generate daily campaign', 'Publish approved content', 'Collect Facebook results'):
+            recorder = next(n for n in workflow['nodes'] if n['name'] == 'Record ' + operation)
+            guard = next(n for n in workflow['nodes'] if n['name'] == 'Check ' + operation + ' outcome')
+            expression = recorder['parameters']['jsonBody'][3:-3].strip()
+            program = '''
+const assert = require('node:assert/strict');
+const data = JSON.parse(process.argv[1]);
+const record = new Function('$json', '$execution', '$workflow', 'return (' + data.expression + ')');
+const body = JSON.parse(record({status:'failed', run_id:'campaign-1'}, {id:516}, {name:'Marketing'}));
+assert.equal(body.result.run_id, 'campaign-1');
+assert.equal(body.result.status, 'failed');
+assert.equal(body.operation, data.operation);
+const guard = new Function('$input', data.code);
+const input = result => ({first:()=>({json:result}), all:()=>[{json:result}]});
+assert.throws(()=>guard(input({failed:true, reason:'Generation failed', run_ids:['campaign-1']})), /Generation failed.*campaign-1/);
+assert.equal(guard(input({failed:false})).length, 1);
+'''
+            result = subprocess.run(['node', '-e', program, json.dumps({'expression': expression,
+                'operation': operation, 'code': guard['parameters']['jsCode']})], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_credential_is_created_with_actual_key_and_reused_on_next_deploy(self):
         env = dict(self.env(), MARKETING_API_KEY='private-marketing-key', N8N_MARKETING_CREDENTIAL_ID='MARKETING_API_KEY')
         request = Mock(side_effect=[{'data': []}, {'id': 'actual-id'}])

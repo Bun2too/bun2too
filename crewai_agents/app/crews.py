@@ -12,7 +12,8 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     model = os.environ.get("LLM_MODEL")
     if not model:
         raise ValueError("LLM_MODEL must be configured")
-    llm = LLM(model=model, temperature=0.3, timeout=90)
+    # Let the provider use its supported default; some models reject temperature.
+    llm = LLM(model=model, timeout=90)
     config = json.loads(Path(__file__).with_name("agents.json").read_text())
     roles = (["researcher", "writer", "editor", "delivery"] if social_only else
              ["product_owner", "business_analyst", "researcher", "creative",
