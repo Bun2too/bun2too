@@ -74,7 +74,7 @@ Open `http://localhost:8000/docs`, authorize with the marketing key and use `/ca
 Edit the packaged `crewai_agents/config/marketing.json`:
 
 - Fill the intended audience and approved business facts; describe the actual products/services and value proposition.
-- Supply approved public HTTPS source pages, at most five. Use direct pages without redirects, credentials or private-network addresses. Very large pages are rejected; provide smaller evidence pages.
+- Configure one to eight public HTTPS RSS/Atom technology feeds. Scheduled runs collect recent entries, retain publication dates, prefer source diversity and pass the bounded evidence to CrewAI for topic selection. `research_max_age_days` and `research_item_limit` bound freshness and prompt size. Optional `source_urls` remain available for evergreen background facts.
 - Add brand rules and forbidden phrases for claims/offers that should never be published.
 - Retain `approval_mode=automatic`, `timezone=America/Chicago`, window `08:00`–`22:30`, daily cadence and a maximum one publication attempt per day, as requested.
 
@@ -143,13 +143,21 @@ After a real publication, verify the Page displays the exact approved message an
 
 The October 1 production failure came from a model rejecting the hardcoded `temperature=0.3`. The application now omits temperature and uses the provider default. Deploy the updated CrewAI application **and** reinstall the updated n8n templates using the normal deployment pipeline. Reinstalling only workflows cannot fix a model request in the worker.
 
-Deployment does not silently replay failed campaigns. After deployment, inspect `/automation/status`. To retry a failed scheduled generation whose release window is still open, use the authenticated `POST /runs/{run_id}/retry-generation` endpoint in `/docs` with this body:
+Scheduled ticks now recover eligible generation timeouts and temporary provider errors after a ten-minute backoff, with at most three generation attempts per daily run. They also recover the existing pre-fix timeout record once the new code is deployed and Facebook validation passes. Authentication/policy failures and any previous social send are never automatically retried. Recovery keeps the original release window; expired days are not replayed. After deployment, inspect `/automation/status` (`retried` is also returned by `/automation/tick`). To explicitly retry a failed scheduled generation whose release window is still open, use the authenticated `POST /runs/{run_id}/retry-generation` endpoint in `/docs` with this body:
 
 ```json
 {"reviewer": "operator-name"}
 ```
 
 It returns 202 and queues generation for the worker. It keeps the same run ID, schedule slot, release window, attempt counter and event journal while clearing incomplete task outputs and the failed artifact. Repeated/concurrent requests cannot queue it twice. It refuses expired windows, nonfailed generation and **any previous Facebook publication attempt**. When the window has closed, let the next daily campaign run. Never delete the database or retry a Facebook send to recover generation.
+
+### October 2 timeout and Facebook credential fixes
+
+The old October 1 response with `created: false` was a readback of that day's failed run, not a new model call. October 2 did create a new run, which failed when OpenAI timed out under the old 90-second request/180-second agent limits. Defaults are now 240 seconds per model request, 900 seconds per agent, no hidden SDK or agent retries, a 6,000-token completion cap, and low reasoning effort for GPT model generations 5 and later. Optional runtime overrides are `LLM_REQUEST_TIMEOUT_SECONDS`, `AGENT_MAX_EXECUTION_SECONDS`, `LLM_MAX_COMPLETION_TOKENS`, and `LLM_REASONING_EFFORT`. Other model families retain their reasoning defaults unless explicitly configured. Invalid budgets fail before a model request. Persisted run settings and timeout events expose the actual limits used.
+
+The deployed Facebook secret was a user token with existing Page-management grants. The publisher now resolves an authorized user token to the **exact configured Page's** access token, verifies `/me` matches `FACEBOOK_PAGE_ID`, and checks that Page's own `/posts` read access. Direct Page tokens also work. Tokens stay in memory and are never returned by status endpoints. Validation is cached for five minutes and invalidated by a credential/configuration change. The broader `/feed` read endpoint includes other users' content and was rejected even while `/posts` and `/published_posts` succeeded; it is not used for the read-only validation. Publishing still uses `POST /{page_id}/feed`.
+
+Use authenticated `GET /automation/delivery-check` for a read-only destination test. It returns the Page ID/name and completed checks, or an actionable provider error. `GET /automation/research-check` reports current item counts, source domains, newest publication time and bounded feed failures without exposing article text. CI calls both endpoints after Railway deploys and before installing the n8n schedules. The delivery check cannot prove write permission; only a successful real post can. Scheduled ticks validate delivery before consuming a daily slot, and the worker rechecks before model spending. Invalid or revoked Meta access therefore fails promptly instead of generating content that has no usable destination.
 
 The next metrics collection should record actual available counts and observation time. Check a later run's model context/deliverables for measured retrospective findings and a new hypothesis. A missing metric is not zero, and engagement is not proof of revenue.
 
@@ -187,3 +195,7 @@ For `publication_unknown` or a stuck `publishing`/`sending` record, inspect Face
 5. Verified preservation/migration of the current n8n data and encryption key before attaching its volume.
 
 These are the remaining prerequisites for live automatic operation; the repository changes and offline tests cannot substitute for them.
+
+The daily content contract supplies reviewers with the actual article URL, verified Page identity, automatic release policy and persisted window. Reviewers still require factual evidence and safe copy; they do not require an already-public draft, prior publication, infrastructure tickets, analytics instrumentation or an additional human signoff under automatic policy. All nine roles still run. The packaged profile gathers recent entries from GitHub Changelog, Cloudflare Blog and AWS News feeds; CrewAI selects a timely topic and cites only retrieved entry URLs.
+
+Facebook can allow Page-owned post access while denying comments and reactions without `pages_read_user_content`. Metrics are now fetched independently: permitted counts are retained, unavailable counts have explicit `missing_metrics` diagnostics, and missing values are never recorded as zero. Partial collection produces a warning and `status: partial`; complete request failure remains an error. Add the missing Meta permission and reauthorize the configured token to collect those counters. This does not block posting.

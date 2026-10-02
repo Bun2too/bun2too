@@ -105,7 +105,7 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `PUBLIC_API_BASE_URL` | Required public article origin; match `CREWAI_BASE_URL`. Facebook links point to `/articles/{run_id}` here |
 | `FACEBOOK_PAGE_ID` | Required numeric ID for the authorized target Page. The `bun2too` handle or profile URL does not resolve this ID automatically |
 | `FACEBOOK_GRAPH_VERSION` | Required supported version formatted `v<number>.<number>`; configure the version used by your Meta app |
-| `FACEBOOK_PAGE_ACCESS_TOKEN` | Required Page access token authorized to publish to that ID; not an app token, Railway token or n8n token |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | Required authorized Page token, or an authorized user token with existing grants to obtain that exact Page's token. Runtime verifies the resolved Page identity and own-post read access; never use an app token, Railway token or n8n token |
 | `MARKETING_AUTOMATION_ENABLED` | `true` enables scheduled job creation |
 | `AUTO_APPROVAL_ENABLED` | `true` allows policy-based approval when the business profile also selects automatic mode |
 | `PUBLISHING_ENABLED` | `true` enables real publication. Scheduled generation/readiness rejects disabled or missing delivery configuration |

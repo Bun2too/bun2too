@@ -9,6 +9,21 @@ from scripts import check_marketing_runtime as runtime
 
 
 class RuntimeChecks(unittest.TestCase):
+    @staticmethod
+    def response(result):
+        response = Mock()
+        response.__enter__ = Mock(return_value=io.StringIO(json.dumps(result)))
+        response.__exit__ = Mock(return_value=False)
+        return response
+
+    def healthy_responses(self):
+        return [
+            self.response({'missing_configuration': [], 'model_configured': True,
+                           'worker_ready': True, 'automation_enabled': 'true'}),
+            self.response({'status': 'ready'}),
+            self.response({'status': 'ready', 'recent_item_count': 3}),
+        ]
+
     def test_profile_failure_points_to_file_instead_of_secrets(self):
         problems = runtime.configuration_problems({
             'model_configured': True, 'automation_enabled': 'true',
@@ -22,11 +37,8 @@ class RuntimeChecks(unittest.TestCase):
     def test_reported_configuration_failure_is_actionable_and_not_retried(self):
         result = {'automation_enabled': 'false', 'model_configured': False,
                   'worker_ready': True, 'storage': 'ok', 'missing_configuration': []}
-        response = Mock()
-        response.__enter__ = Mock(return_value=io.StringIO(json.dumps(result)))
-        response.__exit__ = Mock(return_value=False)
         opener = Mock()
-        opener.open.return_value = response
+        opener.open.return_value = self.response(result)
         with patch.dict(runtime.os.environ, CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='secret'), \
                 patch.object(runtime, 'build_opener', return_value=opener), \
                 patch.object(runtime.time, 'sleep') as sleep, \
@@ -38,21 +50,32 @@ class RuntimeChecks(unittest.TestCase):
         sleep.assert_not_called()
 
     def test_readiness_identifies_client_and_keeps_authentication(self):
-        response = Mock()
-        response.__enter__ = Mock(return_value=io.StringIO(json.dumps({
-            'missing_configuration': [], 'model_configured': True,
-            'worker_ready': True, 'automation_enabled': 'true',
-        })))
-        response.__exit__ = Mock(return_value=False)
         opener = Mock()
-        opener.open.return_value = response
+        opener.open.side_effect = self.healthy_responses()
         with patch.dict(runtime.os.environ, CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='secret'), \
                 patch.object(runtime, 'build_opener', return_value=opener):
             runtime.check()
-        request = opener.open.call_args.args[0]
+        request = opener.open.call_args_list[0].args[0]
         self.assertEqual(request.get_header('User-agent'), runtime.API_USER_AGENT)
         self.assertEqual(request.get_header('Authorization'), 'Bearer secret')
         self.assertEqual(request.get_header('Accept'), 'application/json')
+        self.assertEqual([call.args[0].full_url for call in opener.open.call_args_list], [
+            'https://crew.example/ready',
+            'https://crew.example/automation/delivery-check',
+            'https://crew.example/automation/research-check',
+        ])
+
+    def test_research_failure_stops_deployment(self):
+        opener = Mock()
+        responses = []
+        for _ in range(12):
+            responses.extend(self.healthy_responses()[:2])
+            responses.append(self.response({'status': 'ready', 'recent_item_count': 0}))
+        opener.open.side_effect = responses
+        with patch.dict(runtime.os.environ, CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='secret'), \
+                patch.object(runtime, 'build_opener', return_value=opener), \
+                patch.object(runtime.time, 'sleep'), self.assertRaises(RuntimeError):
+            runtime.check()
 
     def test_cloudflare_diagnostics_are_bounded_and_redacted(self):
         error = HTTPError('https://crew.example/ready', 403, 'Forbidden', {

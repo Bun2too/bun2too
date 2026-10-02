@@ -6,7 +6,11 @@ import json
 import os
 import re
 import socket
+import time
+import xml.etree.ElementTree as ET
+from functools import lru_cache
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -48,6 +52,14 @@ def profile():
     if not isinstance(data.get('source_urls', []), list) or len(data.get('source_urls', [])) > 5 or any(
             not isinstance(url, str) for url in data.get('source_urls', [])):
         raise ValueError('Configure at most five approved source URLs')
+    if not isinstance(data.get('research_feeds', []), list) or not data.get('research_feeds') or len(data['research_feeds']) > 8 or any(
+            not isinstance(url, str) for url in data['research_feeds']):
+        raise ValueError('Configure one to eight public HTTPS research_feeds')
+    for key, default, low, high in [('research_max_age_days', 14, 1, 90), ('research_item_limit', 8, 3, 20)]:
+        value = data.get(key, default)
+        if type(value) is not int or not low <= value <= high:
+            raise ValueError(f'Invalid marketing profile field {key}')
+        data[key] = value
     for key in ('publish_window_start', 'publish_window_end'):
         if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', data.get(key, '')):
             raise ValueError('Configure ' + key + ' as HH:MM')
@@ -88,32 +100,110 @@ def schedule_slot(config, instant=None):
     return str(bucket)
 
 
-def source_context(config):
-    """Fetch only operator-configured public HTTPS URLs; never follow model-provided URLs."""
-    sources = []
+def _public_https(url):
+    parsed = urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise ValueError('Research URLs must use public HTTPS without credentials')
+    addresses = socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
+    if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
+        raise ValueError('Research URL resolves to a private/reserved network')
+
+
+def _download(url, limit):
+    _public_https(url)
+    with httpx.stream('GET', url, timeout=25, follow_redirects=False,
+                      headers={'User-Agent': 'bun2too-marketing-research/1.0'}) as response:
+        response.raise_for_status()
+        if response.is_redirect:
+            raise ValueError('Research redirects must be resolved in the operator configuration')
+        content = bytearray()
+        for chunk in response.iter_bytes():
+            content.extend(chunk)
+            if len(content) > limit:
+                raise ValueError('Research source exceeds size limit')
+    return bytes(content)
+
+
+def _plain_text(value, limit=8000):
+    value = re.sub(r'<(script|style)\b[^>]*>.*?</\1>', '', value or '', flags=re.S | re.I)
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', value))).strip()[:limit]
+
+
+def _date(value):
+    if not value:
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _feed_items(feed_url, retrieved_at):
+    """Return recent RSS/Atom entries as bounded, untrusted evidence records."""
+    try:
+        root = ET.fromstring(_download(feed_url, 750000))
+    except ET.ParseError:
+        raise ValueError('Research feed is not valid XML') from None
+    records = []
+    for item in root.iter():
+        if item.tag.rsplit('}', 1)[-1] not in {'item', 'entry'}:
+            continue
+        values, links = {}, []
+        for child in item:
+            name = child.tag.rsplit('}', 1)[-1]
+            if name == 'link':
+                link = child.attrib.get('href') or (child.text or '').strip()
+                if link and child.attrib.get('rel', 'alternate') in {'alternate', ''}:
+                    links.append(link)
+            elif name in {'title', 'description', 'summary', 'content', 'pubDate', 'published', 'updated'}:
+                values.setdefault(name, ''.join(child.itertext()))
+        published = _date(values.get('pubDate') or values.get('published') or values.get('updated'))
+        url = next((link for link in links if link.startswith('https://')), '')
+        title = _plain_text(values.get('title'), 300)
+        summary = _plain_text(values.get('content') or values.get('description') or values.get('summary'))
+        if url and title and summary:
+            _public_https(url)
+            records.append({'url': url, 'feed_url': feed_url, 'title': title,
+                            'published_at': published.isoformat() if published else None,
+                            'retrieved_at': retrieved_at.isoformat(), 'text': summary})
+    return records
+
+
+def source_context(config, instant=None):
+    """Gather current topics from configured feeds plus optional evergreen references."""
+    retrieved_at = instant or datetime.now(timezone.utc)
+    cutoff = retrieved_at.timestamp() - config.get('research_max_age_days', 14) * 86400
+    recent = []
+    failures = []
+    for feed_url in config.get('research_feeds', []):
+        try:
+            recent.extend(item for item in _feed_items(feed_url, retrieved_at)
+                          if item['published_at'] and datetime.fromisoformat(item['published_at']).timestamp() >= cutoff)
+        except (ValueError, OSError, httpx.HTTPError) as exc:
+            failures.append({'feed_url': feed_url, 'error_type': type(exc).__name__})
+    recent.sort(key=lambda item: item['published_at'], reverse=True)
+    # Keep source diversity before filling remaining slots by recency.
+    selected, seen_feeds, seen_urls = [], set(), set()
+    for item in recent:
+        if item['feed_url'] not in seen_feeds:
+            selected.append(item); seen_feeds.add(item['feed_url']); seen_urls.add(item['url'])
+    for item in recent:
+        if item['url'] not in seen_urls:
+            selected.append(item); seen_urls.add(item['url'])
+    selected = selected[:config.get('research_item_limit', 8)]
+    if not selected:
+        raise ValueError('No recent research items were available from configured feeds')
     for url in config.get('source_urls', []):
-        parsed = urlsplit(url)
-        if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None, 443):
-            raise ValueError('Source URLs must use public HTTPS without credentials')
-        addresses = socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
-        if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
-            raise ValueError('Source URL resolves to a private/reserved network')
-        with httpx.stream('GET', url, timeout=20, follow_redirects=False,
-                          headers={'User-Agent': 'bun2too-marketing-research/1.0'}) as response:
-            response.raise_for_status()
-            if response.is_redirect:
-                raise ValueError('Source redirects must be resolved in the operator configuration')
-            content = bytearray()
-            for chunk in response.iter_bytes():
-                content.extend(chunk)
-                if len(content) > 250000:
-                    raise ValueError('Source exceeds size limit')
-        text = content.decode('utf-8', errors='replace')
-        text = re.sub(r'<(script|style)\b[^>]*>.*?</\1>', '', text, flags=re.S | re.I)
-        text = html.unescape(re.sub(r'<[^>]+>', ' ', text))
-        text = re.sub(r'\s+', ' ', text)[:8000]
-        sources.append({'url': url, 'retrieved_at': datetime.now(timezone.utc).isoformat(), 'text': text})
-    return sources
+        selected.append({'url': url, 'feed_url': None, 'title': 'Evergreen reference',
+                         'published_at': None, 'retrieved_at': retrieved_at.isoformat(),
+                         'text': _plain_text(_download(url, 250000).decode('utf-8', errors='replace'))})
+    return selected, failures
 
 
 def check_artifact(run, config=None):
@@ -163,8 +253,49 @@ def delivery_config():
     return version, page, token, base
 
 
+@lru_cache(maxsize=4)
+def _facebook_destination(version, page, configured_token, time_bucket):
+    """Read-only checks; returned credentials stay in process memory only."""
+    base = f'https://graph.facebook.com/{version}'
+    def get(path, token, **params):
+        response = httpx.get(base + path, headers={'Authorization': 'Bearer ' + token},
+                             params=params, timeout=20, follow_redirects=False)
+        response.raise_for_status()
+        return response.json()
+    identity = get('/me', configured_token, fields='id,name')
+    page_token = configured_token
+    if identity.get('id') != page:
+        # A user token with existing Page management grants can obtain the token
+        # for this exact configured Page. Never choose the first managed Page.
+        selected = get('/' + page, configured_token, fields='id,access_token')
+        if selected.get('id') != page or not selected.get('access_token'):
+            raise ValueError('The configured Facebook credential cannot obtain the target Page token')
+        page_token = selected['access_token']
+        identity = get('/me', page_token, fields='id,name')
+    if identity.get('id') != page:
+        raise ValueError('Facebook token identity does not match FACEBOOK_PAGE_ID')
+    # /feed includes content by other users and can require permissions beyond
+    # this publisher. Validate the Page's own posts, which is what we manage.
+    get('/' + page + '/posts', page_token, fields='id', limit=1)
+    return page_token, identity.get('name', '')
+
+
+def facebook_destination():
+    version, page, token = graph_config()
+    page_token, name = _facebook_destination(version, page, token, int(time.time() // 300))
+    return version, page, page_token, name
+
+
+def verify_delivery():
+    delivery_config()
+    _, page, _, name = facebook_destination()
+    return {'status': 'ready', 'page_id': page, 'page_name': name,
+            'checks': ['page_identity', 'page_posts_read'], 'publishing_permission_verified': False}
+
+
 def publish_one(db, run_id):
     version, page, token, base = delivery_config()
+    version, page, token, _ = facebook_destination()
     config = profile()
     run = db.get(run_id)
     artifact = check_artifact(run, config)
@@ -216,32 +347,41 @@ def publish_one(db, run_id):
 
 
 def collect_metrics(db):
-    version, page, token = graph_config()
+    version, page, token, _ = facebook_destination()
     collected = []
     for publication in db.social_recent():
         remote = publication.get('remote_id')
         if publication['status'] != 'published' or publication['page_id'] != page or not remote:
             continue
-        try:
-            response = httpx.get(f'https://graph.facebook.com/{version}/{remote}',
-                                 params={'fields': 'id,shares,comments.limit(0).summary(true),reactions.limit(0).summary(true)'},
-                                 headers={'Authorization': 'Bearer ' + token}, timeout=20)
-            response.raise_for_status()
-            data = response.json()
-            metrics = {}
-            for name in ('comments', 'reactions'):
-                value = (data.get(name) or {}).get('summary', {}).get('total_count')
+        metrics, unavailable, successful_requests = {}, {}, 0
+        fields = {'shares': 'shares', 'comments': 'comments.limit(0).summary(true)',
+                  'reactions': 'reactions.limit(0).summary(true)'}
+        for name, field in fields.items():
+            try:
+                response = httpx.get(f'https://graph.facebook.com/{version}/{remote}',
+                                     params={'fields': 'id,' + field},
+                                     headers={'Authorization': 'Bearer ' + token}, timeout=20,
+                                     follow_redirects=False)
+                response.raise_for_status()
+                successful_requests += 1
+                data = response.json().get(name) or {}
+                value = data.get('count') if name == 'shares' else data.get('summary', {}).get('total_count')
                 if type(value) is int and value >= 0:
                     metrics[name] = value
-            shares = (data.get('shares') or {}).get('count')
-            if type(shares) is int and shares >= 0:
-                metrics['shares'] = shares
-            db.social_metrics(publication['id'], metrics)
-            db.event(publication['run_id'], 'facebook_metrics_collected', metrics=metrics)
-            collected.append({'publication_id': publication['id'], 'metrics': metrics})
-        except Exception as exc:
-            db.event(publication['run_id'], 'facebook_metrics_failed', status='failed', error_type=type(exc).__name__,
-                     error=error_details(exc), publication_id=publication['id'], remote_id=remote,
-                     operation='facebook.metrics')
-            collected.append({'publication_id': publication['id'], 'run_id': publication['run_id'], 'status': 'failed'})
+                else:
+                    unavailable[name] = {'message': 'Facebook did not return this count'}
+            except Exception as exc:
+                unavailable[name] = error_details(exc)
+        status = 'failed' if not successful_requests else ('partial' if unavailable else 'completed')
+        # A missing or unauthorized count is never zero. Persist permitted counts
+        # independently so one restricted field cannot discard all observations.
+        if successful_requests:
+            db.social_metrics(publication['id'], metrics, unavailable=unavailable)
+        reason = 'Unavailable Facebook metrics: ' + ', '.join(unavailable) if unavailable else None
+        kind = 'facebook_metrics_failed' if status == 'failed' else ('facebook_metrics_partial' if unavailable else 'facebook_metrics_collected')
+        db.event(publication['run_id'], kind, status=status, metrics=metrics, reason=reason,
+                 missing_metrics=unavailable, error=next(iter(unavailable.values()), None) if status == 'failed' else None,
+                 publication_id=publication['id'], remote_id=remote, operation='facebook.metrics')
+        collected.append({'publication_id': publication['id'], 'run_id': publication['run_id'],
+                          'status': status, 'metrics': metrics, 'missing_metrics': unavailable, 'reason': reason})
     return collected

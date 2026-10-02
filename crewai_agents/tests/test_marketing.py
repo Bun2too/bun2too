@@ -21,7 +21,8 @@ def config():
     return dict(business_name='Bun2too', campaign_key='bun2too-daily', brief='Help our audience',
                 business_facts='Verified facts', audience='Business owners', timezone='America/Chicago',
                 daily_hour=8, daily_minute=0, cadence_minutes=1440, max_posts_per_day=1,
-                publish_window_start='08:00', publish_window_end='22:30', approval_mode='automatic', source_urls=[])
+                publish_window_start='08:00', publish_window_end='22:30', approval_mode='automatic', source_urls=[],
+                research_feeds=['https://news.example/feed'], research_max_age_days=14, research_item_limit=8)
 
 
 def artifact():
@@ -69,6 +70,8 @@ class MarketingTests(unittest.TestCase):
         self.env.start(); self.addCleanup(self.env.stop)
         self.profile = patch.object(marketing, 'profile', return_value=config())
         self.profile.start(); self.addCleanup(self.profile.stop)
+        destination = patch.object(marketing, 'facebook_destination', return_value=('v99.0', '123', 'test-page-secret', 'Bun2too'))
+        destination.start(); self.addCleanup(destination.stop)
         data = patch.object(main, 'DATA_DIR', Path(self.directory.name))
         data.start(); self.addCleanup(data.stop)
         self.client = TestClient(main.app)
@@ -172,9 +175,57 @@ class MarketingTests(unittest.TestCase):
         self.assertEqual(self.db.get(run['id'])['status'], 'failed')
 
     def test_source_fetch_rejects_local_network_and_non_https(self):
-        with self.assertRaises(ValueError): marketing.source_context({'source_urls':['http://example.com']})
+        with self.assertRaises(ValueError): marketing.source_context({'research_feeds':['http://example.com']})
         with patch.object(marketing.socket, 'getaddrinfo', return_value=[(2,1,6,'',('127.0.0.1',443))]):
-            with self.assertRaises(ValueError): marketing.source_context({'source_urls':['https://example.com']})
+            with self.assertRaises(ValueError): marketing.source_context({'research_feeds':['https://example.com']})
+
+    def test_recent_feed_research_is_sorted_diverse_and_bounded(self):
+        now = datetime(2026, 10, 2, 18, tzinfo=timezone.utc)
+        feeds = {
+            'https://one.example/feed': b'''<rss><channel>
+              <item><title>Newest one</title><link>https://one.example/new</link><pubDate>Thu, 02 Oct 2026 17:00:00 GMT</pubDate><description>New technical release details.</description></item>
+              <item><title>Older one</title><link>https://one.example/old</link><pubDate>Wed, 01 Oct 2026 17:00:00 GMT</pubDate><description>Earlier details.</description></item>
+              <item><title>Stale</title><link>https://one.example/stale</link><pubDate>Mon, 01 Sep 2026 17:00:00 GMT</pubDate><description>Too old.</description></item>
+            </channel></rss>''',
+            'https://two.example/feed': b'''<feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><title>Newest two</title><link href="https://two.example/new"/><updated>2026-10-02T16:00:00Z</updated><summary>Another current topic.</summary></entry>
+            </feed>''',
+        }
+        settings = dict(research_feeds=list(feeds), source_urls=[], research_max_age_days=7, research_item_limit=3)
+        with patch.object(marketing, '_download', side_effect=lambda url, limit: feeds[url]), \
+                patch.object(marketing, '_public_https'):
+            sources, failures = marketing.source_context(settings, now)
+        self.assertEqual([source['title'] for source in sources], ['Newest one', 'Newest two', 'Older one'])
+        self.assertEqual(failures, [])
+        self.assertNotIn('Stale', json.dumps(sources))
+
+    def test_research_uses_healthy_feeds_and_reports_failed_ones(self):
+        now = datetime(2026, 10, 2, 18, tzinfo=timezone.utc)
+        feed = b'''<rss><channel><item><title>Current</title><link>https://good.example/item</link>
+          <pubDate>Thu, 02 Oct 2026 17:00:00 GMT</pubDate><description>Current evidence.</description></item></channel></rss>'''
+        def download(url, limit):
+            if 'bad' in url: raise httpx.ConnectError('unavailable')
+            return feed
+        settings = dict(research_feeds=['https://bad.example/feed','https://good.example/feed'], source_urls=[],
+                        research_max_age_days=7, research_item_limit=3)
+        with patch.object(marketing, '_download', side_effect=download), patch.object(marketing, '_public_https'):
+            sources, failures = marketing.source_context(settings, now)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(failures, [{'feed_url':'https://bad.example/feed','error_type':'ConnectError'}])
+
+    def test_research_check_reports_current_sources_without_article_text(self):
+        now = datetime.now(timezone.utc)
+        sources = [dict(url='https://news.example/current', feed_url='https://news.example/feed',
+                        title='Private response title', published_at=now.isoformat(),
+                        retrieved_at=now.isoformat(), text='Private response article text')]
+        with patch.object(marketing, 'source_context', return_value=(sources, [])):
+            response = self.client.get('/automation/research-check')
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(result['recent_item_count'], 1)
+        self.assertEqual(result['source_domains'], ['news.example'])
+        self.assertNotIn('Private response', response.text)
 
     def test_scheduled_cycle_generation_approval_publication_and_metrics(self):
         now = datetime.now(timezone.utc)
@@ -190,9 +241,16 @@ class MarketingTests(unittest.TestCase):
                     record(role, 'Evidence', {'approved_for_publication': role in ('tester','editor')})
                 return SimpleNamespace(pydantic=MarketingArtifact.model_validate(artifact()))
             return SimpleNamespace(kickoff=kickoff)
-        with patch.object(main, 'build_crew', side_effect=build): main.execute_run(first['run_id'])
+        recent = [dict(url='https://news.example/item', feed_url='https://news.example/feed', title='Current topic',
+                       published_at=now.isoformat(), retrieved_at=now.isoformat(), text='Current verified evidence')]
+        with patch.object(marketing, 'source_context', return_value=(recent, [])), \
+                patch.object(main, 'build_crew', side_effect=build): main.execute_run(first['run_id'])
         self.assertEqual(self.db.get(first['run_id'])['status'], 'approved')
         self.assertIn('observed_results', captured)
+        self.assertIn('recent_research', captured['source_material'])
+        self.assertTrue(captured['publishing_context']['page_identity_verified'])
+        self.assertTrue(captured['publishing_context']['automatic_approval_enabled'])
+        self.assertEqual(captured['publishing_context']['article_url'], 'https://crew.example/articles/' + first['run_id'])
         response = httpx.Response(200, json={'id':'123_456'}, request=httpx.Request('POST','https://graph.facebook.com'))
         with patch.object(marketing.httpx, 'post', return_value=response):
             published = self.client.post('/automation/publish').json()['publications'][0]
@@ -216,7 +274,12 @@ class MarketingTests(unittest.TestCase):
         import time
         run, _ = self.db.schedule('worker-test', {'campaign_key': 'bun2too-daily', 'channels': ['facebook']})
         crew = SimpleNamespace(kickoff=lambda: SimpleNamespace(pydantic=MarketingArtifact.model_validate(artifact())))
-        with patch.dict(os.environ, {'WORKER_ENABLED': 'true', 'DD_LOGS_ENABLED': 'false'}), patch.object(main, 'build_crew', return_value=crew):
+        recent = [dict(url='https://news.example/item', feed_url='https://news.example/feed', title='Current topic',
+                       published_at=datetime.now(timezone.utc).isoformat(),
+                       retrieved_at=datetime.now(timezone.utc).isoformat(), text='Current evidence')]
+        with patch.dict(os.environ, {'WORKER_ENABLED': 'true', 'DD_LOGS_ENABLED': 'false'}), \
+                patch.object(marketing, 'source_context', return_value=(recent, [])), \
+                patch.object(main, 'build_crew', return_value=crew):
             with TestClient(main.app) as client:
                 for _ in range(100):
                     if self.db.get(run['id'])['status'] == 'awaiting_review': break

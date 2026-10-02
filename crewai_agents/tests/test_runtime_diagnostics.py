@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from openai import BadRequestError
 
 from crewai_agents.app import main, marketing, telemetry
-from crewai_agents.app.crews import build_crew
+from crewai_agents.app.crews import build_crew, generation_settings
 from crewai_agents.app.observability import error_details
 from crewai_agents.tests.test_marketing import config
 
@@ -25,6 +25,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         for p in [patch.object(main, 'DATA_DIR', Path(directory.name)),
                   patch.object(marketing, 'profile', return_value=config()),
+                  patch.object(marketing, 'facebook_destination', return_value=('v99.0', '123', 'test-page-secret', 'Bun2too')),
                   patch.dict(os.environ, MARKETING_API_KEY='test-key', LLM_MODEL='gpt-6.1-sol',
                              CREWAI_STORAGE_DIR=directory.name, OTEL_SDK_DISABLED='true',
                              OPENAI_API_KEY='test-provider-secret', MARKETING_AUTOMATION_ENABLED='true',
@@ -52,6 +53,55 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         for params in (llm._prepare_completion_params(messages), llm._prepare_responses_params(messages)):
             self.assertNotIn('temperature', params)
             self.assertEqual(params['model'], 'gpt-6.1-sol')
+        self.assertEqual(llm._prepare_completion_params(messages)['reasoning_effort'], 'low')
+        self.assertEqual(llm.max_retries, 0)
+        self.assertGreaterEqual(crew.agents[0].max_execution_time, 2 * llm.timeout)
+        self.assertEqual(crew.agents[0].max_retry_limit, 0)
+
+    def test_generation_budgets_are_validated_and_other_models_keep_defaults(self):
+        with patch.dict(os.environ, LLM_MODEL='gpt-4.1', LLM_REASONING_EFFORT=''):
+            self.assertIsNone(generation_settings()['reasoning_effort'])
+        with patch.dict(os.environ, LLM_REQUEST_TIMEOUT_SECONDS='600', AGENT_MAX_EXECUTION_SECONDS='180'):
+            with self.assertRaisesRegex(ValueError, 'two model requests'):
+                generation_settings()
+
+    def test_remote_delivery_failure_does_not_reserve_slot_or_call_model(self):
+        response = httpx.Response(400, json={'error':{'message':'Page permission denied','code':10}},
+                                  request=httpx.Request('GET','https://graph.facebook.com'))
+        failure = httpx.HTTPStatusError('Permission denied', request=response.request, response=response)
+        with patch.object(marketing, 'schedule_slot', return_value='today'), \
+                patch.object(marketing, 'verify_delivery', side_effect=failure), patch.object(main, 'build_crew') as build:
+            result = self.client.post('/automation/tick')
+        self.assertEqual(result.status_code, 409)
+        self.assertIn('Page permission denied', result.text)
+        self.assertEqual(self.db.recent(), [])
+        build.assert_not_called()
+
+    def test_automatic_recovery_obeys_backoff_cap_and_reuses_slot(self):
+        run = self.run_record()
+        self.db.update(run['id'], retryable=True, generation_settings={'model':'test'},
+                       retry_after=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat())
+        with self.assertRaisesRegex(ValueError, 'backoff'):
+            self.db.retry_generation(run['id'], 'automatic', automatic=True)
+        self.db.update(run['id'], retry_after=(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat())
+        recovered = self.db.retry_generation(run['id'], 'automatic', automatic=True)
+        self.assertEqual(recovered['status'], 'queued')
+        self.assertEqual(recovered['attempts'], 1)
+        self.assertFalse(self.db.schedule('slot', {'campaign_key':'bun2too-daily'})[1])
+        self.db.update(run['id'], status='failed', retryable=True, attempts=3)
+        with self.assertRaisesRegex(ValueError, 'attempt limit'):
+            self.db.retry_generation(run['id'], 'automatic', automatic=True)
+
+    def test_tick_recovers_legacy_timeout_once_without_changing_publication_window(self):
+        run = self.run_record()
+        self.db.update(run['id'], error_details={'kind':'TimeoutError'})
+        with patch.object(marketing, 'schedule_slot', return_value='slot'), \
+                patch.object(main.Store, 'schedule', return_value=(self.db.get(run['id']), False)):
+            result = self.client.post('/automation/tick').json()
+        self.assertTrue(result['retried'])
+        self.assertFalse(result['created'])
+        self.assertEqual(result['status'], 'queued')
+        self.assertEqual(result['publish_after'], run['publish_after'])
 
     def test_provider_root_cause_survives_wrapper_and_export(self):
         run = self.run_record('queued')
@@ -65,7 +115,11 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                           'request': 'Private prompt'})
             except BadRequestError as exc:
                 raise RuntimeError('wrapper Private prompt') from exc
-        with patch.object(main, 'build_crew', return_value=SimpleNamespace(kickoff=kickoff)):
+        recent = [dict(url='https://news.example/item', feed_url='https://news.example/feed', title='Current topic',
+                       published_at=datetime.now(timezone.utc).isoformat(),
+                       retrieved_at=datetime.now(timezone.utc).isoformat(), text='Current evidence')]
+        with patch.object(marketing, 'source_context', return_value=(recent, [])), \
+                patch.object(main, 'build_crew', return_value=SimpleNamespace(kickoff=kickoff)):
             main.execute_run(run['id'])
         item = next(item for item in self.db.log_batch() if item['event']['kind'] == 'run_failed')
         entry = telemetry.log_entry(item)
@@ -195,6 +249,27 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertEqual(entry['status'], 'error')
         self.assertIn('Page permission denied', entry['message'])
         self.assertIn('meta-trace', json.dumps(entry))
+
+    def test_missing_metric_permission_preserves_available_counts_without_zeroes(self):
+        run = self.run_record('approved')
+        publication = self.db.claim_social(run['id'], '123', 'today', 1)
+        self.db.finish_social(publication['id'], 'published', remote_id='123_456')
+        def response(*args, **kwargs):
+            if kwargs['params']['fields'] == 'id,shares':
+                return httpx.Response(200, json={'shares':{'count':2}}, request=httpx.Request('GET',args[0]))
+            return httpx.Response(400, json={'error':{'message':'pages_read_user_content required', 'code':10}},
+                                  request=httpx.Request('GET',args[0]))
+        with patch.object(marketing.httpx, 'get', side_effect=response):
+            result = self.client.post('/automation/metrics').json()
+        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['results'][0]['metrics'], {'shares':2})
+        saved = self.db.social(publication['id'])
+        self.assertEqual(saved['metrics'], {'shares':2})
+        self.assertEqual(set(saved['missing_metrics']), {'comments','reactions'})
+        item = next(item for item in self.db.log_batch() if item['event']['kind'] == 'facebook_metrics_partial')
+        entry = telemetry.log_entry(item)
+        self.assertEqual(entry['status'], 'warning')
+        self.assertIn('pages_read_user_content', json.dumps(entry))
 
 
 if __name__ == '__main__':

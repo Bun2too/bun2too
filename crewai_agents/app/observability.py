@@ -1,13 +1,14 @@
 """Datadog spans and defensive redaction for locally saved/exported audit records."""
 import os
 import re
+import sys
 import traceback
 from contextlib import contextmanager
 
 
 def redact(value):
     if isinstance(value, dict):
-        return {k: ("[REDACTED]" if re.search(r"password|api[_-]?key|token|authorization|secret", k, re.I)
+        return {k: ("[REDACTED]" if k not in {'max_output_tokens'} and re.search(r"password|api[_-]?key|token|authorization|secret", k, re.I)
                     else redact(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v) for v in value]
@@ -77,14 +78,51 @@ def trace_context():
 
 
 @contextmanager
+def _optional_llmobs_span(context_factory, annotation):
+    """Keep Datadog setup/export failures outside the campaign control path."""
+    context = None
+    try:
+        context = context_factory()
+        context.__enter__()
+        annotation()
+    except Exception:
+        if context is not None:
+            try:
+                context.__exit__(*sys.exc_info())
+            except Exception:
+                pass
+        yield
+        return
+    try:
+        yield
+    except BaseException:
+        details = sys.exc_info()
+        try:
+            context.__exit__(*details)
+        except Exception:
+            pass
+        raise
+    else:
+        try:
+            context.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+@contextmanager
 def workflow_span(run_id):
     if os.getenv("DD_LLMOBS_ENABLED", "0").lower() not in {"1", "true"}:
         yield
         return
     from ddtrace.llmobs import LLMObs
-    LLMObs.register_processor(redact_span)
-    with LLMObs.workflow(name="bun2too.marketing.run", session_id=run_id):
-        LLMObs.annotate(tags={"run_id": run_id})
+    try:
+        LLMObs.register_processor(redact_span)
+    except Exception:
+        yield
+        return
+    with _optional_llmobs_span(
+            lambda: LLMObs.workflow(name="bun2too.marketing.run", session_id=run_id),
+            lambda: LLMObs.annotate(tags={"run_id": run_id})):
         yield
 
 
@@ -101,7 +139,12 @@ def action_span(run_id, name, details):
         yield
         return
     from ddtrace.llmobs import LLMObs
-    LLMObs.register_processor(redact_span)
-    with LLMObs.tool(name=name, session_id=run_id):
-        LLMObs.annotate(input_data=redact(details), tags={"run_id": run_id})
+    try:
+        LLMObs.register_processor(redact_span)
+    except Exception:
+        yield
+        return
+    with _optional_llmobs_span(
+            lambda: LLMObs.tool(name=name, session_id=run_id),
+            lambda: LLMObs.annotate(input_data=redact(details), tags={"run_id": run_id})):
         yield

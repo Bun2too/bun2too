@@ -3,7 +3,7 @@ import fcntl
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import html
 import hashlib
 import json
@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from .crews import build_crew
+from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
@@ -102,17 +102,42 @@ def execute_run(run_id, social_only=False):
         if run.get('scheduled'):
             # Recheck queued jobs too: delivery may have been disabled since creation.
             marketing.delivery_config()
+            operation = 'facebook.preflight'
+            destination = marketing.verify_delivery()
+            db.event(run_id, 'facebook_delivery_verified', **destination)
+            operation = 'load_context'
             config = marketing.profile()
-            sources = marketing.source_context(config)
+            sources, source_failures = marketing.source_context(config)
             db.update(run_id, source_snapshots=sources)
-            brief['source_material'] = json.dumps({'business_facts': config['business_facts'], 'sources': sources})
+            brief['source_material'] = json.dumps({'business_facts': config['business_facts'],
+                                                   'recent_research': sources})
             brief['observed_results'] = db.feedback_context()
             brief['retrospective_instruction'] = ('Compare observed post results, distinguish missing metrics from zero, '
                 'propose one evidence-backed improvement for this cycle; do not claim causality or invented results.')
-            brief['required_output'] = 'Exactly one original article in articles and one Facebook post linking to it.'
+            brief['required_output'] = ('Select one timely technical topic from recent_research. Produce exactly one '
+                                        'original article in articles and one Facebook post linking to it.')
             brief['publishing_rules'] = {'forbidden_phrases': config.get('forbidden_phrases', []),
                                         'links': 'No URLs in prose. Put retrieved citations in article.source_urls.'}
-            db.event(run_id, 'research_collected', source_urls=[item['url'] for item in sources])
+            brief['publishing_context'] = {
+                'scheduled': True,
+                'approval_mode': config.get('approval_mode'),
+                'automatic_approval_enabled': os.getenv('AUTO_APPROVAL_ENABLED', 'false').lower() == 'true',
+                'page_id': destination.get('page_id'),
+                'page_identity_verified': destination.get('status') == 'ready',
+                'article_url': os.environ['PUBLIC_API_BASE_URL'].rstrip('/') + '/articles/' + run_id,
+                'publish_after': run.get('publish_after'), 'publish_before': run.get('publish_before'),
+                'review_scope': ('Review factual evidence, article and Facebook copy, brand rules and source citations. '
+                    'The publisher adds article_url as Facebook link after approval; never insert it into prose. '
+                    'The draft article endpoint is intentionally private before dispatch. '
+                    'Do not require a live preview or prior post, analytics/infrastructure tests, images, '
+                    'Jira tasks, or an extra human approval when automatic policy is enabled. '
+                    'The application enforces release timing, approved-content hashing and duplicate-send protection. '
+                    'Do not claim tests were run. Missing metrics are not content blockers. '
+                    'Reject unsupported factual claims or rewrite them using the supplied sources.'),
+            }
+            db.event(run_id, 'research_collected', source_urls=[item['url'] for item in sources],
+                     recent_item_count=sum(bool(item.get('published_at')) for item in sources),
+                     feed_failures=source_failures)
         previous_publications = db.publications(run_id)
         brief["existing_campaign_backlog"] = [
             {"work_key": p["content"].get("work_key"), "title": p["content"].get("title"), "reference": p["remote"]}
@@ -136,6 +161,9 @@ def execute_run(run_id, social_only=False):
         with workflow_span(run_id):
             correlation = trace_context()
             operation = 'build_crew'
+            settings = generation_settings()
+            db.update(run_id, generation_settings=settings)
+            db.event(run_id, 'generation_configured', **settings, attempt=run['attempts'])
             crew = build_crew(brief, record_task, social_only=social_only,
                               record_event=lambda kind, **data: db.event(run_id, kind, **data))
             operation = 'Crew.kickoff'
@@ -174,14 +202,24 @@ def execute_run(run_id, social_only=False):
             db.event(run_id, "atlassian_not_published", reason="Set campaign_key for automatic campaign publishing")
     except Exception as exc:
         diagnostic = error_details(exc)
+        if operation == 'Crew.kickoff' and diagnostic['kind'] == 'TimeoutError':
+            diagnostic['message'] = ('Generation exceeded its execution budget; '
+                f"model request timeout={settings['request_timeout_seconds']}s, "
+                f"agent timeout={settings['agent_timeout_seconds']}s, reasoning_effort={settings['reasoning_effort']}")
+        transient_types = {'TimeoutError', 'ReadTimeout', 'ConnectTimeout', 'APITimeoutError', 'APIConnectionError', 'ConnectError'}
+        retryable = operation in {'Crew.kickoff', 'facebook.preflight', 'load_context'} and any(
+            cause['type'] in transient_types or cause.get('status_code') in {'429', '500', '502', '503', '504'}
+            for cause in diagnostic['causes'])
+        retry_after = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat() if retryable else None
         logger.error("run=%s operation=%s generation_failed %s", run_id, operation, json.dumps(diagnostic))
         db.update(run_id, status="failed", error="Generation failed (" + type(exc).__name__ + ")",
-                  error_details=diagnostic)
+                  error_details=diagnostic, retryable=retryable, retry_after=retry_after)
         completed = [task['agent'] for task in db.get(run_id).get('tasks', [])]
         roles = ['researcher', 'writer', 'editor', 'delivery'] if social_only else [
             'product_owner', 'business_analyst', 'researcher', 'creative', 'writer', 'engineering', 'tester', 'editor', 'delivery']
         db.event(run_id, "run_failed", status='failed', error_type=type(exc).__name__, error=diagnostic,
                  operation=operation, agent=next((role for role in roles if role not in completed), None) if operation == 'Crew.kickoff' else None,
+                 retryable=retryable, retry_after=retry_after,
                  duration_ms=round((time.monotonic() - started) * 1000), **context, **correlation)
 
 
@@ -414,6 +452,9 @@ def automation_tick():
         slot = marketing.schedule_slot(config)
         if slot is None:
             return {'status': 'not_due'}
+        # Reject a broken destination before reserving a daily slot or spending
+        # on the model. A corrected Meta grant can then recover on the next poll.
+        marketing.verify_delivery()
         brief = CampaignRequest(campaign_key=config['campaign_key'], brief=config['brief'], audience=config['audience'],
                                 channels=['facebook'], brand_guidelines=config.get('brand_guidelines', ''),
                                 source_material=config['business_facts']).model_dump()
@@ -423,7 +464,19 @@ def automation_tick():
         if created:
             store().event(run['id'], 'scheduled_run_created', slot=slot, campaign_key=config['campaign_key'],
                           publish_after=run['publish_after'], publish_before=run['publish_before'])
-        return dict(campaign_state(run), created=created)
+        retried = False
+        if run['status'] == 'failed':
+            try:
+                run = store().retry_generation(run['id'], 'bounded-automatic-recovery', automatic=True)
+                retried = True
+            except ValueError:
+                pass  # Preserve the failure and diagnostics when recovery is ineligible.
+        return dict(campaign_state(run), created=created, retried=retried)
+    except httpx.HTTPError as exc:
+        diagnostic = error_details(exc)
+        store().event('runtime', 'facebook_delivery_check_failed', status='failed',
+                      operation='facebook.preflight', error=diagnostic)
+        raise HTTPException(409, {'reason': 'Facebook Page validation failed before generation', 'error': diagnostic}) from None
     except (ValueError, OSError) as exc:
         raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else 'Marketing profile unavailable') from None
 
@@ -459,8 +512,10 @@ def automation_metrics():
     try:
         results = marketing.collect_metrics(store())
         failed = any(result.get('status') == 'failed' for result in results)
-        return {'results': results, 'status': 'failed' if failed else 'completed',
-                'reason': 'Facebook metrics collection failed; inspect facebook_metrics_failed events' if failed else None}
+        partial = any(result.get('status') == 'partial' for result in results)
+        return {'results': results, 'status': 'failed' if failed else ('partial' if partial else 'completed'),
+                'reason': 'Facebook metrics collection failed; inspect facebook_metrics_failed events' if failed else
+                          ('Some metrics unavailable; inspect missing_metrics and Meta permissions' if partial else None)}
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
 
@@ -478,7 +533,38 @@ def campaign_state(run):
     return dict(run_id=run['id'], id=run['id'], status=run['status'], campaign_key=run.get('campaign_key'),
                 created_at=run['created_at'], attempt=run.get('attempts', 0),
                 publish_after=run.get('publish_after'), publish_before=run.get('publish_before'),
-                reason=run.get('publication_blocker') or run.get('error'), error=run.get('error_details'))
+                reason=run.get('publication_blocker') or run.get('error'), error=run.get('error_details'),
+                retryable=run.get('retryable', False), retry_after=run.get('retry_after'),
+                generation_settings=run.get('generation_settings'))
+
+
+@app.get('/automation/delivery-check', dependencies=[Depends(authorize)])
+def delivery_check():
+    try:
+        return marketing.verify_delivery()
+    except (ValueError, httpx.HTTPError) as exc:
+        diagnostic = error_details(exc)
+        store().event('runtime', 'facebook_delivery_check_failed', status='failed',
+                      operation='facebook.preflight', error=diagnostic)
+        raise HTTPException(409, {'reason': 'Facebook Page validation failed', 'error': diagnostic}) from None
+
+
+@app.get('/automation/research-check', dependencies=[Depends(authorize)])
+def research_check():
+    """Verify that current source material is reachable without exposing article text."""
+    try:
+        sources, failures = marketing.source_context(marketing.profile())
+        published = [item['published_at'] for item in sources if item.get('published_at')]
+        domains = sorted({urlsplit(item['url']).hostname for item in sources if urlsplit(item['url']).hostname})
+        return {'status': 'ready', 'item_count': len(sources), 'recent_item_count': len(published),
+                'newest_published_at': max(published) if published else None,
+                'source_domains': domains, 'feed_failures': failures}
+    except (ValueError, OSError, httpx.HTTPError) as exc:
+        diagnostic = error_details(exc)
+        store().event('runtime', 'research_check_failed', status='failed',
+                      operation='research.preflight', error=diagnostic)
+        raise HTTPException(409, {'reason': 'Current-topic research validation failed',
+                                  'error': diagnostic}) from None
 
 
 class GenerationRetry(BaseModel):

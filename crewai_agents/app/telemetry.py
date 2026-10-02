@@ -17,12 +17,16 @@ def log_entry(item):
     outcome = event.get('outcome', event.get('status'))
     kind = event['kind']
     severity = 'error' if event.get('status') == 'failed' or outcome in {'failed', 'unknown', 'publication_failed', 'publication_unknown'} or kind.endswith('_failed') else (
-        'warning' if outcome in {'blocked', 'awaiting_review', 'expired'} or kind.endswith('_blocked') else 'info')
+        'warning' if outcome in {'blocked', 'awaiting_review', 'expired', 'partial'} or kind.endswith('_blocked') else 'info')
     # An allowlist keeps prompts, artifacts, tool inputs and response bodies out.
     fields = ('kind', 'at', 'agent', 'error_type', 'error', 'remote_id', 'metrics', 'workflow_name',
               'operation', 'model', 'campaign_key', 'attempt', 'duration_ms', 'reason', 'task_id',
               'publication_id', 'page_id', 'publish_after', 'publish_before', 'slot', 'reviewer',
               'execution_id', 'execution_url', 'node', 'run_ids', 'outcomes', 'http_status',
+              'retryable', 'retry_after', 'generation_settings', 'reasoning_effort',
+              'request_timeout_seconds', 'agent_timeout_seconds', 'max_output_tokens',
+              'missing_metrics',
+              'recent_item_count', 'feed_failures',
               'dd.trace_id', 'dd.span_id')
     metadata = {key: event[key] for key in fields if key in event}
     diagnostic = event.get('error')

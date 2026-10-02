@@ -97,7 +97,7 @@ A CrewAI cloud account is not needed for this self-hosted runtime. There is no s
 
 Keep environment and region identity in deployment configuration, not agent prompts. Existing production uses organization `Bun2tooinc`, workspace `code-monkey-army`; there is no need to rename it. Other projects can use `<product>-<environment>[-<region>]` workspace names. HCP projects group workspaces but do not give duplicate workspace names separate namespaces. One workspace must own each shared Railway project/service resource. QA owns its environment variables and must use separate volumes and test credentials.
 
-`MARKETING_PROFILE_PATH` optionally points to another profile. Default is the packaged `config/marketing.json`, both locally and in Docker. The profile includes business facts, audience, brand guidelines, curated source URLs, forbidden phrases, approval mode, cadence, timezone, generation hour and posting window. Do not put tokens in it. A profile/code change requires redeployment; runtime secrets are service variables.
+`MARKETING_PROFILE_PATH` optionally points to another profile. Default is the packaged `config/marketing.json`, both locally and in Docker. The profile includes business facts, audience, brand guidelines, curated current-topic RSS/Atom feeds, optional evergreen source URLs, forbidden phrases, approval mode, cadence, timezone, generation hour and posting window. Do not put tokens in it. A profile/code change requires redeployment; runtime secrets are service variables.
 
 ## 4. Agent specifications
 
@@ -107,7 +107,7 @@ All roles receive the approved brief and preceding deliverables. Scheduled runs 
 | --- | --- | --- |
 | **Product Owner** | Business objective, approved facts, prior results; chooses a bounded daily objective and priority | Campaign charter, success hypothesis, assumptions and up to six prioritized stories. Cannot approve spend or fabricate offers |
 | **Business Analyst** | Charter, audience and observed outcomes; translates objective into requirements and performs retrospective | Acceptance criteria, audience/funnel hypotheses, KPI definitions, measured-vs-missing analysis and one proposed improvement. No invented conversion results |
-| **Researcher** | Approved facts and bounded source snapshots fetched by the application | Evidence summary, source attribution, relevant themes and unsupported-claim flags. It cannot claim an independent browser search |
+| **Researcher** | Approved facts and recent RSS/Atom entries fetched from configured public technology sources | Compares current topics, selects evidence, attributes sources and dates, and flags unsupported claims |
 | **Creative** | Evidence and audience requirements | Concept, tone, layout/accessibility direction and optional asset brief. Explicitly labels unrendered assets |
 | **Writer** | Approved evidence, creative brief, prior published content | Original article title/body/citations and one Facebook post. Avoid repetitive content, fabricated facts and copying entire source articles |
 | **Engineering** | Accepted concept and delivery requirements | Implementation/tracking specifications and dependencies. No shell, deployment, arbitrary HTTP or code execution tool is attached |
@@ -117,7 +117,7 @@ All roles receive the approved brief and preceding deliverables. Scheduled runs 
 
 Intermediate roles return `AgentDeliverable`: summary, decisions, evidence, assumptions, risks, concrete work items, deliverable and an approval boolean (only Tester/Editor use it). Delivery returns `MarketingArtifact`. Each completed task is saved with role, task ID and completion time; failed runs keep completed work for diagnosis.
 
-The runtime uses a sequential Crew, context from previous tasks, configurable `LLM_MODEL`, temperature 0.3, request timeout 90 seconds, maximum eight agent iterations and 180 seconds per agent. No arbitrary delegation, code execution or agent-owned credentials. These are execution bounds, not a dollar budget or guaranteed whole-run timeout. Use model-provider spending limits and monitor costs. Provider failures produce an explicit failed run without exporting raw secret-bearing exceptions.
+The runtime uses a sequential Crew with context from previous tasks and configurable `LLM_MODEL`. It omits temperature for model compatibility, uses low reasoning effort for GPT generations 5 and later, a 240-second request timeout, 6,000-token completion cap, four iterations and 900 seconds per agent by default. Provider and agent retries are disabled; the durable scheduler performs bounded recovery for transient generation failures. No arbitrary delegation, code execution or agent-owned credentials. These are execution bounds, not a dollar budget or guaranteed whole-run timeout. Use model-provider spending limits and monitor costs. Provider failures produce an explicit failed run without exporting raw secret-bearing exceptions.
 
 ### Concrete delivery and model-spend boundary
 

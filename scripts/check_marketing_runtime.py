@@ -70,31 +70,48 @@ def check():
     token = os.environ['MARKETING_API_KEY']
     for attempt in range(1, 13):
         try:
-            request = Request(base + '/ready', headers={
-                'Authorization': 'Bearer ' + token,
-                'Accept': 'application/json',
-                'User-Agent': API_USER_AGENT,
-            })
-            with build_opener(NoRedirect).open(request, timeout=15) as response:
-                result = json.load(response)
-            print(json.dumps(result, sort_keys=True), flush=True)
+            results = {}
+            for path in ('/ready',):
+                request = Request(base + path, headers={
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/json',
+                    'User-Agent': API_USER_AGENT,
+                })
+                with build_opener(NoRedirect).open(request, timeout=30) as response:
+                    results[path] = json.load(response)
+                print(json.dumps({'check': path, 'result': results[path]}, sort_keys=True), flush=True)
+            result = results['/ready']
             problems = configuration_problems(result)
             if problems:
                 raise ConfigurationError('; '.join(problems) +
                                          '. Correct the indicated configuration and redeploy.')
             if not result.get('worker_ready'):
                 raise ValueError('Worker is not ready')
+            for path in ('/automation/delivery-check', '/automation/research-check'):
+                request = Request(base + path, headers={
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/json',
+                    'User-Agent': API_USER_AGENT,
+                })
+                with build_opener(NoRedirect).open(request, timeout=30) as response:
+                    results[path] = json.load(response)
+                print(json.dumps({'check': path, 'result': results[path]}, sort_keys=True), flush=True)
+            if results['/automation/delivery-check'].get('status') != 'ready':
+                raise ValueError('Facebook Page delivery check is not ready')
+            research = results['/automation/research-check']
+            if research.get('status') != 'ready' or not research.get('recent_item_count'):
+                raise ValueError('Current-topic research check is not ready')
             return
         except ConfigurationError:
             raise  # Static settings will not change by retrying the same deployment.
         except Exception as exc:
             # URLs, tokens and HTTP bodies are deliberately excluded.
             status = f' http_status={exc.code}' if isinstance(exc, HTTPError) else ''
-            print(f'Runtime check GET /ready attempt={attempt}/12 error_type={type(exc).__name__}{status}', flush=True)
+            print(f'Runtime integration checks attempt={attempt}/12 error_type={type(exc).__name__}{status}', flush=True)
             if isinstance(exc, HTTPError):
                 print('Runtime HTTP diagnostics: ' + json.dumps(error_metadata(exc, token), sort_keys=True), flush=True)
             if attempt == 12:
-                raise RuntimeError('Runtime readiness failed; inspect Railway logs and /ready') from None
+                raise RuntimeError('Runtime integration checks failed; inspect Railway logs and authenticated preflight endpoints') from None
             time.sleep(5)
 
 

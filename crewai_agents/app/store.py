@@ -171,7 +171,7 @@ class Store:
             runs = [json.loads(row[0]) for row in db.execute('SELECT data FROM runs ORDER BY rowid')]
         return [run for run in runs if run['status'] == 'queued' and run.get('scheduled')]
 
-    def retry_generation(self, run_id, reviewer):
+    def retry_generation(self, run_id, reviewer, automatic=False):
         """Explicit, atomic recovery of generation only; never retries a social send."""
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -181,13 +181,19 @@ class Store:
             run = json.loads(row[0])
             if run['status'] != 'failed' or not run.get('scheduled'):
                 raise ValueError('Only failed scheduled generation can be retried')
+            if automatic:
+                legacy = not run.get('generation_settings') and (run.get('error_details') or {}).get('kind') in {'TimeoutError', 'RuntimeError'}
+                if not (run.get('retryable') or legacy) or run.get('attempts', 0) >= 3:
+                    raise ValueError('Automatic generation recovery is not eligible or its attempt limit was reached')
+                if run.get('retry_after') and datetime.fromisoformat(run['retry_after']) > datetime.now(timezone.utc):
+                    raise ValueError('Generation retry backoff has not elapsed')
             if db.execute('SELECT 1 FROM social_posts WHERE run_id = ?', (run_id,)).fetchone():
                 raise ValueError('A publication attempt exists; reconcile it instead of regenerating')
             deadline = run.get('publish_before')
             if not deadline or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc):
                 raise ValueError('Publication window has expired; wait for the next daily campaign')
             run.update(status='queued', tasks=[], artifact=None, approval=None, error=None,
-                       error_details=None, publication_blocker=None, updated_at=now())
+                       error_details=None, publication_blocker=None, retryable=False, retry_after=None, updated_at=now())
             db.execute('UPDATE runs SET data = ? WHERE id = ?', (json.dumps(run), run_id))
             from .observability import redact
             event = redact(dict(kind='generation_retry_requested', at=now(), reviewer=reviewer,
@@ -257,11 +263,11 @@ class Store:
         with self.connect() as db:
             return [json.loads(row[0]) for row in db.execute('SELECT data FROM social_posts ORDER BY rowid DESC LIMIT 20')]
 
-    def social_metrics(self, publication_id, metrics):
+    def social_metrics(self, publication_id, metrics, unavailable=None):
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             record = json.loads(db.execute('SELECT data FROM social_posts WHERE id = ?', (publication_id,)).fetchone()[0])
-            record.update(metrics=metrics, metrics_at=now())
+            record.update(metrics=metrics, metrics_at=now(), missing_metrics=unavailable or {})
             db.execute('UPDATE social_posts SET data = ? WHERE id = ?', (json.dumps(record), publication_id))
 
     def feedback_context(self):

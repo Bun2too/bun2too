@@ -6,6 +6,13 @@
   "brand_guidelines": "Helpful, factual, and educational. Explain technical terms clearly and avoid hype. Distinguish established capabilities, experimental ideas, and predictions. Describe the CrewAI-operated team as a proof of concept; distinguish intended capabilities from demonstrated results. Do not invent news, sources, market statistics, testimonials, prices, offers, or performance results.",
   "business_facts": "Bun2too is a software engineering service provider. One example of its products is this proof of concept for a team operated by CrewAI AI agents. The proof of concept illustrates Bun2too's work with software engineering and AI-agent teams.",
   "source_urls": [],
+  "research_feeds": [
+    "https://github.blog/changelog/feed/",
+    "https://blog.cloudflare.com/rss/",
+    "https://aws.amazon.com/blogs/aws/feed/"
+  ],
+  "research_max_age_days": 14,
+  "research_item_limit": 8,
   "timezone": "America/Chicago",
   "daily_hour": 8,
   "daily_minute": 0,
