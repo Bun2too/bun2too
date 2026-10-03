@@ -109,6 +109,11 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `MARKETING_AUTOMATION_ENABLED` | `true` enables scheduled job creation |
 | `AUTO_APPROVAL_ENABLED` | `true` allows policy-based approval when the business profile also selects automatic mode |
 | `PUBLISHING_ENABLED` | `true` enables real publication. Scheduled generation/readiness rejects disabled or missing delivery configuration |
+| `ARTICLE_ARTWORK_ENABLED` | Optional, defaults to `true`. Generates one persistent editorial hero for each approved scheduled article and backfills the latest public article after the first upgraded deployment |
+| `ARTICLE_IMAGE_MODEL` | Optional GPT Image model; defaults to `gpt-image-2.5-flare` |
+| `ARTICLE_IMAGE_QUALITY` | Optional `low`, `medium`, or `high`; defaults to `medium` |
+| `ARTICLE_IMAGE_SIZE` | Optional `1024x1024`, `1536x1024`, or `1024x1536`; the editorial default is `1536x1024` |
+| `ARTICLE_IMAGE_TIMEOUT_SECONDS` | Optional 30–600 second request bound; defaults to `240` |
 | `WORKER_ENABLED` | `true` starts the durable scheduled-generation worker; default is true, included explicitly |
 | `DD_API_KEY`, `DD_SITE` | Runtime Datadog credentials/site; no automatic inheritance from the standalone GitHub entries |
 | `DD_LOGS_ENABLED` | `true` exports durable application and n8n callback events to Datadog Logs |

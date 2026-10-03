@@ -4,7 +4,6 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-import html
 import hashlib
 import json
 import logging
@@ -17,7 +16,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -25,7 +24,7 @@ from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
-from . import atlassian, marketing, telemetry
+from . import article_view, atlassian, marketing, telemetry
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[1] / ".data")))
@@ -184,6 +183,8 @@ def execute_run(run_id, social_only=False):
                 db.update(run_id, publication_blocker=str(exc))
                 db.event(run_id, 'automatic_approval_blocked', status='blocked', reason=str(exc), **context)
             else:
+                artwork = create_article_artwork(db, run_id, artifact.model_dump())
+                db.update(run_id, article_artwork=artwork)
                 if config.get('approval_mode') == 'automatic' and os.getenv('AUTO_APPROVAL_ENABLED', 'false').lower() == 'true':
                     approve(run_id, ApprovalRequest(reviewer='configured-automatic-policy'))
                 else:
@@ -383,6 +384,8 @@ def worker_loop(stop):
         store().recover_generation()
         worker_ready.set()
         store().event('runtime', 'runtime_started', status='ready')
+        telemetry.flush(store())
+        backfill_article_artwork(store())
         telemetry.flush(store())
         while not stop.is_set():
             try:
@@ -623,25 +626,96 @@ def reconcile_post(publication_id: str, payload: ReconcilePost):
         raise HTTPException(502, 'Cannot verify post with Facebook') from None
 
 
-@app.get('/articles/{run_id}', response_class=HTMLResponse)
-def article(run_id: str):
+PUBLIC_ARTICLE_STATES = {'publishing', 'published', 'publication_unknown', 'publication_failed'}
+
+
+def create_article_artwork(db, run_id, artifact):
+    try:
+        result = marketing.generate_article_artwork(DATA_DIR, run_id, artifact)
+        if result['status'] == 'ready':
+            db.event(run_id, 'article_artwork_generated', status='completed', operation='openai.image.generate',
+                     image_model=result['model'], image_size=result['size'], image_quality=result['quality'],
+                     artwork_url='/articles/' + run_id + '/artwork.webp')
+        return result
+    except Exception as exc:
+        diagnostic = error_details(exc)
+        db.event(run_id, 'article_artwork_failed', status='partial', operation='openai.image.generate',
+                 error=diagnostic)
+        logger.warning('run=%s article_artwork_failed %s', run_id, json.dumps(diagnostic))
+        return {'status': 'failed', 'error_type': diagnostic['kind']}
+
+
+def backfill_article_artwork(db):
+    """Create one missing hero for the latest public article after a deployment."""
+    try:
+        if marketing.artwork_settings() is None:
+            return
+        for candidate in db.recent():
+            run = db.get(candidate['id'])
+            if (run['status'] in PUBLIC_ARTICLE_STATES and run.get('approval') and run.get('artifact')
+                    and not run.get('article_artwork')):
+                artwork = create_article_artwork(db, run['id'], run['artifact'])
+                db.update(run['id'], article_artwork=artwork)
+                return
+    except Exception as exc:
+        diagnostic = error_details(exc)
+        db.event('runtime', 'article_artwork_backfill_failed', status='partial',
+                 operation='openai.image.generate', error=diagnostic)
+        logger.warning('article_artwork_backfill_failed %s', json.dumps(diagnostic))
+
+
+def public_article(run_id):
     run = get_run(run_id)
-    if run['status'] not in {'publishing', 'published', 'publication_unknown', 'publication_failed'} or not run.get('approval'):
+    if run['status'] not in PUBLIC_ARTICLE_STATES or not run.get('approval'):
         raise HTTPException(404, 'Article not published')
     articles = (run.get('artifact') or {}).get('articles', [])
     if not articles:
         raise HTTPException(404, 'Article not found')
-    content = articles[0]
-    title = html.escape(content['title'])
-    body = ''.join('<p>' + html.escape(p) + '</p>' for p in content['body'].split('\n\n'))
-    sources = ''.join('<li><a rel="noopener noreferrer" href="' + html.escape(url, quote=True) + '">' +
-                      html.escape(url) + '</a></li>' for url in content.get('source_urls', []) if urlsplit(url).scheme == 'https')
-    if sources:
-        body += '<h2>Sources</h2><ul>' + sources + '</ul>'
-    return HTMLResponse('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" '
-                        'content="width=device-width,initial-scale=1"><title>' + title + '</title></head>'
-                        '<body><main><h1>' + title + '</h1>' + body + '</main></body></html>',
-                        headers={'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'"})
+    return run
+
+
+ARTICLE_HEADERS = {
+    'Cache-Control': 'public, max-age=300',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Content-Type-Options': 'nosniff',
+}
+
+
+@app.get('/', include_in_schema=False)
+def home():
+    return RedirectResponse('/insights', status_code=307)
+
+
+@app.get('/insights', response_class=HTMLResponse)
+def insights():
+    db = store()
+    items = []
+    for candidate in db.recent():
+        run = db.get(candidate['id'])
+        if run['status'] in PUBLIC_ARTICLE_STATES and run.get('approval') and (run.get('artifact') or {}).get('articles'):
+            items.append((run['id'], run, bool(marketing.artwork_path(DATA_DIR, run.get('article_artwork')))))
+    return HTMLResponse(article_view.render_index(items), headers=ARTICLE_HEADERS)
+
+
+@app.get('/articles/{run_id}', response_class=HTMLResponse)
+def article(run_id: str):
+    run = public_article(run_id)
+    artwork = marketing.artwork_path(DATA_DIR, run.get('article_artwork'))
+    page = article_view.render(run, run_id, os.getenv('PUBLIC_API_BASE_URL', ''), artwork=bool(artwork))
+    return HTMLResponse(page, headers=ARTICLE_HEADERS)
+
+
+@app.get('/articles/{run_id}/artwork.webp', response_class=FileResponse)
+def article_artwork(run_id: str):
+    run = public_article(run_id)
+    path = marketing.artwork_path(DATA_DIR, run.get('article_artwork'))
+    if not path:
+        raise HTTPException(404, 'Article artwork not found')
+    return FileResponse(path, media_type='image/webp', headers={
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+    })
 
 
 class OperationOutcome(BaseModel):

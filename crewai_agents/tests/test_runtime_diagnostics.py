@@ -31,7 +31,8 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                              OPENAI_API_KEY='test-provider-secret', MARKETING_AUTOMATION_ENABLED='true',
                              PUBLISHING_ENABLED='true', FACEBOOK_GRAPH_VERSION='v99.0', FACEBOOK_PAGE_ID='123',
                              FACEBOOK_PAGE_ACCESS_TOKEN='test-page-secret', PUBLIC_API_BASE_URL='https://crew.example',
-                             DD_LLMOBS_ENABLED='0', DD_TRACE_ENABLED='false', CREWAI_TRACING_ENABLED='false')]:
+                             DD_LLMOBS_ENABLED='0', DD_TRACE_ENABLED='false', CREWAI_TRACING_ENABLED='false',
+                             ARTICLE_ARTWORK_ENABLED='false')]:
             p.start(); self.addCleanup(p.stop)
         self.db = main.store()
         self.client = TestClient(main.app)

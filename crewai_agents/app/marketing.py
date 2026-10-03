@@ -1,4 +1,6 @@
 """Deterministic marketing operations. Model output never selects credentials or destinations."""
+import base64
+import binascii
 import hashlib
 import html
 import ipaddress
@@ -230,6 +232,76 @@ def check_artifact(run, config=None):
         if re.search(r'https?://|www\.', copy, re.I):
             raise ValueError('Keep URLs in source_urls; the publisher adds the approved article link')
     return artifact
+
+
+def artwork_settings():
+    enabled = os.getenv('ARTICLE_ARTWORK_ENABLED', 'true').lower() in {'true', '1'}
+    if not enabled:
+        return None
+    model = os.getenv('ARTICLE_IMAGE_MODEL', 'gpt-image-2.5-flare')
+    quality = os.getenv('ARTICLE_IMAGE_QUALITY', 'medium')
+    size = os.getenv('ARTICLE_IMAGE_SIZE', '1536x1024')
+    if not re.fullmatch(r'gpt-image-[A-Za-z0-9._-]+', model):
+        raise ValueError('ARTICLE_IMAGE_MODEL must be a GPT Image model')
+    if quality not in {'low', 'medium', 'high'}:
+        raise ValueError('ARTICLE_IMAGE_QUALITY must be low, medium, or high')
+    if size not in {'1024x1024', '1536x1024', '1024x1536'}:
+        raise ValueError('ARTICLE_IMAGE_SIZE is not supported by the article layout')
+    try:
+        timeout = int(os.getenv('ARTICLE_IMAGE_TIMEOUT_SECONDS', '240'))
+    except ValueError:
+        raise ValueError('ARTICLE_IMAGE_TIMEOUT_SECONDS must be an integer') from None
+    if not 30 <= timeout <= 600:
+        raise ValueError('ARTICLE_IMAGE_TIMEOUT_SECONDS must be between 30 and 600')
+    return {'model': model, 'quality': quality, 'size': size, 'timeout_seconds': timeout}
+
+
+def generate_article_artwork(data_dir, run_id, artifact):
+    """Generate one bounded editorial hero and persist it on the mounted volume."""
+    settings = artwork_settings()
+    if settings is None:
+        return {'status': 'disabled'}
+    key = os.getenv('OPENAI_API_KEY', '')
+    if not key:
+        raise ValueError('OPENAI_API_KEY is required when article artwork is enabled')
+    article = artifact['articles'][0]
+    title = re.sub(r'\s+', ' ', article['title']).strip()[:200]
+    prompt = ('Create a sophisticated editorial hero illustration for a technology magazine article titled: "' + title + '". '
+              'Use a bold contemporary composition, layered geometric forms, tactile texture, dramatic but refined lighting, '
+              'and a restrained palette with one vivid orange accent. Convey the topic through visual metaphor. '
+              'Landscape 3:2 composition with a clear focal point and generous negative space. '
+              'No words, letters, numbers, logos, trademarks, watermarks, UI screenshots, identifiable people, or photorealistic faces.')
+    from openai import OpenAI
+    response = OpenAI(api_key=key, timeout=settings['timeout_seconds'], max_retries=0).images.generate(
+        model=settings['model'], prompt=prompt, size=settings['size'], quality=settings['quality'],
+        output_format='webp', output_compression=82, n=1)
+    encoded = response.data[0].b64_json if response.data else None
+    if not encoded:
+        raise ValueError('Image API returned no artwork data')
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise ValueError('Image API returned invalid base64 artwork') from None
+    if not 100 <= len(image) <= 20_000_000 or image[:4] != b'RIFF' or image[8:12] != b'WEBP':
+        raise ValueError('Image API returned an invalid or oversized WebP')
+    asset_dir = Path(data_dir) / 'article-assets'
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    filename = run_id + '.webp'
+    temporary = asset_dir / (filename + '.tmp')
+    temporary.write_bytes(image)
+    temporary.chmod(0o644)
+    temporary.replace(asset_dir / filename)
+    return {'status': 'ready', 'filename': filename, 'format': 'webp',
+            'alt': 'Editorial illustration for ' + title,
+            'model': settings['model'], 'quality': settings['quality'], 'size': settings['size']}
+
+
+def artwork_path(data_dir, metadata):
+    filename = (metadata or {}).get('filename', '')
+    if (metadata or {}).get('status') != 'ready' or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}\.webp', filename):
+        return None
+    path = Path(data_dir) / 'article-assets' / filename
+    return path if path.is_file() else None
 
 
 def graph_config():

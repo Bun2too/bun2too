@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -66,7 +67,8 @@ class MarketingTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {'FACEBOOK_GRAPH_VERSION': 'v99.0', 'FACEBOOK_PAGE_ID': '123',
             'FACEBOOK_PAGE_ACCESS_TOKEN': 'test-page-secret', 'PUBLISHING_ENABLED': 'true',
             'PUBLIC_API_BASE_URL': 'https://crew.example', 'MARKETING_API_KEY': 'test-key',
-            'MARKETING_AUTOMATION_ENABLED': 'true', 'AUTO_APPROVAL_ENABLED': 'true', 'LLM_MODEL': 'test-model'})
+            'MARKETING_AUTOMATION_ENABLED': 'true', 'AUTO_APPROVAL_ENABLED': 'true', 'LLM_MODEL': 'test-model',
+            'ARTICLE_ARTWORK_ENABLED': 'false'})
         self.env.start(); self.addCleanup(self.env.stop)
         self.profile = patch.object(marketing, 'profile', return_value=config())
         self.profile.start(); self.addCleanup(self.profile.stop)
@@ -269,6 +271,51 @@ class MarketingTests(unittest.TestCase):
         response = self.client.get('/articles/'+run_id)
         self.assertNotIn('<script>', response.text)
         self.assertIn('&lt;script&gt;', response.text)
+        self.assertIn('BUN2TOO', response.text)
+        self.assertIn('class="hero fallback"', response.text)
+        self.assertIn("frame-ancestors 'none'", response.headers['content-security-policy'])
+
+    def test_generated_artwork_is_bounded_persisted_and_served(self):
+        webp = b'RIFF' + (120).to_bytes(4, 'little') + b'WEBP' + b'x' * 120
+        image = SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(webp).decode())])
+        client = Mock(images=Mock(generate=Mock(return_value=image)))
+        content = artifact()
+        with patch.dict(os.environ, ARTICLE_ARTWORK_ENABLED='true', OPENAI_API_KEY='test-image-key'), \
+                patch('openai.OpenAI', return_value=client):
+            result = marketing.generate_article_artwork(main.DATA_DIR, 'article-1', content)
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(result['model'], 'gpt-image-2.5-flare')
+        self.assertNotIn('prompt', result)
+        request = client.images.generate.call_args.kwargs
+        self.assertEqual(request['size'], '1536x1024')
+        self.assertEqual(request['output_format'], 'webp')
+        self.assertIn('No words', request['prompt'])
+        run_id = self.prepared()
+        target = main.DATA_DIR / 'article-assets' / (run_id + '.webp')
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(webp)
+        self.db.update(run_id, status='published', article_artwork=dict(result, filename=run_id + '.webp'))
+        page = self.client.get('/articles/' + run_id)
+        self.assertIn('/artwork.webp', page.text)
+        self.assertIn('property="og:image"', page.text)
+        asset = self.client.get('/articles/' + run_id + '/artwork.webp')
+        self.assertEqual(asset.status_code, 200)
+        self.assertEqual(asset.headers['content-type'], 'image/webp')
+        self.assertEqual(asset.content, webp)
+        index = self.client.get('/insights')
+        self.assertIn('Useful article', index.text)
+        self.assertIn('/articles/' + run_id + '/artwork.webp', index.text)
+        self.assertEqual(self.client.get('/', follow_redirects=False).headers['location'], '/insights')
+
+    def test_artwork_failure_uses_fallback_without_blocking_content(self):
+        run = self.db.create({'channels': ['facebook']})
+        with patch.object(marketing, 'generate_article_artwork', side_effect=httpx.ReadTimeout('private')):
+            result = main.create_article_artwork(self.db, run['id'], artifact())
+        self.assertEqual(result, {'status': 'failed', 'error_type': 'ReadTimeout'})
+        event = self.db.events(run['id'])[-1]
+        self.assertEqual(event['kind'], 'article_artwork_failed')
+        self.assertEqual(event['status'], 'partial')
+        self.assertNotIn('private', json.dumps(event))
 
     def test_lifespan_worker_consumes_durable_job(self):
         import time

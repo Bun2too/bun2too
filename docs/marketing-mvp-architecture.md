@@ -18,7 +18,7 @@ Business description, intended audience, approved facts/sources, numeric Page ID
 
 ### Scope and limits
 
-The first version operates one campaign per service instance, one configured Page, one original text article plus a text/link post. It collects available reactions, comments and shares; it does not claim to measure sales, conversions, reach, impressions or causal lift. Creative produces design briefs, not rendered media. Engineering produces implementation specifications, not autonomously executed code. The agents use fetched, operator-approved sources, not unrestricted web browsing.
+The first version operates one campaign per service instance, one configured Page, one original article with editorial hero artwork plus a text/link post. It collects available reactions, comments and shares; it does not claim to measure sales, conversions, reach, impressions or causal lift. Creative defines the visual concept and the application renders one bounded hero through the configured image model. Engineering produces implementation specifications, not autonomously executed code. The agents use fetched, operator-approved sources, not unrestricted web browsing.
 
 ## 2. End-to-end architecture
 
@@ -71,7 +71,7 @@ A standalone editable diagram is [marketing-architecture.mmd](marketing-architec
 | Generation worker | One thread under an exclusive filesystem lock in that container | Durable scheduled jobs, interrupted-generation recovery, event export |
 | n8n | Railway `n8n-orchestrator`, existing public domain | Clock triggers, authenticated calls, persisted execution history, error workflow |
 | Facebook publisher | Deterministic Python code in the API, not an LLM tool | Token/account selection, exact approved content, quota, send result and reconciliation |
-| Article host | Public `/articles/{run_id}` on the CrewAI API | Escaped HTML from approved artifacts; private drafts are not publicly accessible |
+| Article host | Public `/insights`, `/articles/{run_id}` and `/articles/{run_id}/artwork.webp` on the CrewAI API | Responsive editorial pages, escaped approved copy, source cards, social metadata and persistent generated artwork; private drafts remain inaccessible |
 | HCP Terraform | Remote state only; workspace execution mode Local | Infrastructure state and locks; it does not run the agents |
 | GitHub runner | Deployment job | Tests, Terraform CLI, Railway upload, runtime check, n8n workflow installation |
 | Existing Postgres | Railway `pipeline-postgres` | Existing infrastructure; the MVP does **not** silently migrate n8n or CrewAI databases into it |
@@ -108,7 +108,7 @@ All roles receive the approved brief and preceding deliverables. Scheduled runs 
 | **Product Owner** | Business objective, approved facts, prior results; chooses a bounded daily objective and priority | Campaign charter, success hypothesis, assumptions and up to six prioritized stories. Cannot approve spend or fabricate offers |
 | **Business Analyst** | Charter, audience and observed outcomes; translates objective into requirements and performs retrospective | Acceptance criteria, audience/funnel hypotheses, KPI definitions, measured-vs-missing analysis and one proposed improvement. No invented conversion results |
 | **Researcher** | Approved facts and recent RSS/Atom entries fetched from configured public technology sources | Compares current topics, selects evidence, attributes sources and dates, and flags unsupported claims |
-| **Creative** | Evidence and audience requirements | Concept, tone, layout/accessibility direction and optional asset brief. Explicitly labels unrendered assets |
+| **Creative** | Evidence and audience requirements | Concept, tone, layout/accessibility direction and a hero-art visual metaphor. The application renders the final image after content checks |
 | **Writer** | Approved evidence, creative brief, prior published content | Original article title/body/citations and one Facebook post. Avoid repetitive content, fabricated facts and copying entire source articles |
 | **Engineering** | Accepted concept and delivery requirements | Implementation/tracking specifications and dependencies. No shell, deployment, arbitrary HTTP or code execution tool is attached |
 | **Tester** | Drafts, evidence, requirements and publishing rules | Concrete content checks, evidence gaps, blockers and explicit `approved_for_publication` decision. Proposed integration tests are not represented as executed tests |

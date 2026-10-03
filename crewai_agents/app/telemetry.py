@@ -27,6 +27,7 @@ def log_entry(item):
               'request_timeout_seconds', 'agent_timeout_seconds', 'max_output_tokens',
               'missing_metrics',
               'recent_item_count', 'feed_failures',
+              'image_model', 'image_size', 'image_quality', 'artwork_url',
               'dd.trace_id', 'dd.span_id')
     metadata = {key: event[key] for key in fields if key in event}
     diagnostic = event.get('error')

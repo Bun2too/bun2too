@@ -139,6 +139,8 @@ The status and tick responses include `publish_after`, `publish_before`, `attemp
 
 After a real publication, verify the Page displays the exact approved message and article link. `published` requires a returned remote post ID; a draft or approved run is not evidence of a live post. Open the public article URL without authentication to confirm it is reachable from Facebook.
 
+Public articles use the editorial `/insights` index and responsive `/articles/{run_id}` layout. Each approved scheduled article requests one 3:2 WebP hero from the configured OpenAI image model and stores it under `DATA_DIR/article-assets` on the existing persistent volume. The page supplies the image through `/articles/{run_id}/artwork.webp` and advertises it in Open Graph metadata so Facebook can build a rich link preview. Artwork prompts prohibit text, logos, trademarks, identifiable people and photorealistic faces. Image failure records a warning and uses the built-in abstract CSS hero; it never blocks factual content or posting. The direct single-prompt Image API matches the [official OpenAI image generation guidance](https://developers.openai.com/api/docs/guides/image-generation).
+
 ### Recover failed generation after fixing its cause
 
 The October 1 production failure came from a model rejecting the hardcoded `temperature=0.3`. The application now omits temperature and uses the provider default. Deploy the updated CrewAI application **and** reinstall the updated n8n templates using the normal deployment pipeline. Reinstalling only workflows cannot fix a model request in the worker.
