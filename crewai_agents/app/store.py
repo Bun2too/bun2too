@@ -1,7 +1,7 @@
 """Persistent run artifacts for a single service instance using a mounted volume."""
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -24,6 +24,11 @@ class Store:
             event_columns = {row[1] for row in db.execute('PRAGMA table_info(events)')}
             if 'exported' not in event_columns:
                 db.execute('ALTER TABLE events ADD COLUMN exported INTEGER NOT NULL DEFAULT 0')
+            db.execute('CREATE INDEX IF NOT EXISTS events_exported_id ON events(exported, id)')
+            db.execute('CREATE TABLE IF NOT EXISTS telemetry_dead_letters (event_id INTEGER PRIMARY KEY, reason TEXT, at TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS telemetry_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            db.execute('INSERT OR IGNORE INTO telemetry_metadata VALUES (?, ?)', ('journal_id', str(uuid4())))
+            db.execute('INSERT OR IGNORE INTO telemetry_metadata VALUES (?, ?)', ('created_at', now()))
             db.execute("CREATE TABLE IF NOT EXISTS publications (id TEXT PRIMARY KEY, run_id TEXT, data TEXT NOT NULL, campaign_key TEXT)")
             columns = {row[1] for row in db.execute("PRAGMA table_info(publications)")}
             if "campaign_key" not in columns:
@@ -32,17 +37,19 @@ class Store:
 
     @contextmanager
     def connect(self):
+        from . import otel
         db = sqlite3.connect(self.path, timeout=30)
         try:
-            with db:
+            with (otel.span('db.sqlite.transaction', {'db.system.name': 'sqlite'}) if otel.RUN.get() else nullcontext()), db:
                 yield db
         finally:
             db.close()
 
     def create(self, brief):
+        from .otel import carrier
         run_id = str(uuid4())
         run = dict(id=run_id, campaign_key=brief.get("campaign_key") or run_id, status="queued", created_at=now(),
-                   brief=brief, tasks=[], artifact=None, approval=None, error=None)
+                   brief=brief, tasks=[], artifact=None, approval=None, error=None, trace_context=carrier())
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             for row in db.execute("SELECT data FROM runs"):
@@ -82,9 +89,11 @@ class Store:
 
     def event(self, run_id, kind, **details):
         from .observability import redact, trace_context
-        data = redact(dict(kind=kind, at=now(), **trace_context(), **details))
+        data = redact(dict(kind=kind, at=now(), **{**trace_context(), **details}))
         with self.connect() as db:
             db.execute("INSERT INTO events (run_id, data) VALUES (?, ?)", (run_id, json.dumps(data)))
+        from .otel import measure
+        measure('app.event.count', attributes={'operation': kind, 'outcome': details.get('status', details.get('outcome', 'recorded'))})
 
     def events(self, run_id):
         with self.connect() as db:
@@ -154,9 +163,11 @@ class Store:
 
 
     def schedule(self, slot, brief, **window):
+        from .otel import carrier
         run_id = str(uuid4())
         run = dict(id=run_id, campaign_key=brief['campaign_key'], status='queued', created_at=now(),
-                   brief=brief, tasks=[], artifact=None, approval=None, error=None, scheduled=True, attempts=0, **window)
+                   brief=brief, tasks=[], artifact=None, approval=None, error=None, scheduled=True, attempts=0,
+                   trace_context=carrier(), **window)
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             previous = db.execute('SELECT run_id FROM schedule_slots WHERE slot = ?', (slot,)).fetchone()
@@ -283,9 +294,34 @@ class Store:
 
     def log_batch(self):
         with self.connect() as db:
-            return [dict(id=row[0], run_id=row[1], event=json.loads(row[2])) for row in
+            journal_id = db.execute("SELECT value FROM telemetry_metadata WHERE key = 'journal_id'").fetchone()[0]
+            return [dict(id=row[0], journal_id=journal_id, run_id=row[1], event=json.loads(row[2])) for row in
                     db.execute('SELECT id, run_id, data FROM events WHERE exported = 0 ORDER BY id LIMIT 50')]
+
+    def telemetry_created_at(self):
+        with self.connect() as db:
+            return db.execute("SELECT value FROM telemetry_metadata WHERE key = 'created_at'").fetchone()[0]
 
     def logs_sent(self, ids):
         with self.connect() as db:
             db.executemany('UPDATE events SET exported = 1 WHERE id = ?', [(key,) for key in ids])
+
+    def quarantine_log(self, event_id, reason):
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO telemetry_dead_letters VALUES (?, ?, ?)', (event_id, reason, now()))
+            db.execute('UPDATE events SET exported = -1 WHERE id = ?', (event_id,))
+
+    def requeue_log(self, event_id):
+        with self.connect() as db:
+            if not db.execute('SELECT 1 FROM telemetry_dead_letters WHERE event_id = ?', (event_id,)).fetchone():
+                raise KeyError(event_id)
+            db.execute('DELETE FROM telemetry_dead_letters WHERE event_id = ?', (event_id,))
+            db.execute('UPDATE events SET exported = 0 WHERE id = ?', (event_id,))
+
+    def telemetry_backlog(self):
+        with self.connect() as db:
+            count = db.execute('SELECT COUNT(*) FROM events WHERE exported = 0').fetchone()[0]
+            oldest = db.execute('SELECT data FROM events WHERE exported = 0 ORDER BY id LIMIT 1').fetchone()
+            quarantined = db.execute('SELECT COUNT(*) FROM telemetry_dead_letters').fetchone()[0]
+        age = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(json.loads(oldest[0])['at'])).total_seconds()) if oldest else 0
+        return {'pending_count': count, 'oldest_pending_seconds': age, 'quarantined_count': quarantined}

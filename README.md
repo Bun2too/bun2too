@@ -246,3 +246,14 @@ n8n requires persistent `/home/node/.n8n`. The optional Terraform volume must be
 Set CrewAI `DD_LOGS_ENABLED=true`, `DD_API_KEY` and the correct `DD_SITE` to export operational events from its durable journal. `DD_LLMOBS_ENABLED=1` enables agent/task/model traces through the `start.py` launcher. GitHub's separate Datadog secret enables deployment-outcome logs. The n8n workflows record success/failure execution events. Datadog queries and live verification are in the runbook; no host metrics or monitor provisioning is implied.
 
 Existing manual campaign Jira/Confluence publishing, reviewed lessons and legacy n8n webhook dispatch remain available. See [agent operations](docs/agent-operations.md). The daily automated campaign uses the new deterministic publisher and does not create corporate tickets every day. Do not also route the same scheduled content through the legacy publishing webhook.
+
+## Enterprise telemetry architecture (OTLP over HTTP)
+
+The provider-independent path uses OTLP over HTTP, with an independent durable event exporter, lifecycle traces, AI usage/cost/quality measurements, and a local Collector/Tempo/Loki/Prometheus/Grafana reference stack. Kafka/Event Hub is optional. Set `TELEMETRY_ENABLED=true` to select this path; it takes precedence over the legacy Datadog settings described above.
+
+- [Architecture standard](docs/enterprise-ai-observability-architecture.md)
+- [Downloadable standalone document with implementation appendix](docs/enterprise-ai-observability-architecture.html)
+- [Download ZIP: HTML and Markdown sources](docs/enterprise-ai-observability-architecture.zip)
+- [Implementation coverage, rollout, and verification](docs/telemetry-implementation.md)
+
+The new path is opt-in until a Collector endpoint and deployment policy are configured. Source instrumentation alone does not establish live ingestion, external evaluator results, alert delivery, host metrics, or individual user attribution.

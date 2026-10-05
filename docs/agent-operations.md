@@ -135,3 +135,7 @@ Local verification:
 ```
 
 Tests use mocked LLM/Atlassian responses and capture Datadog spans without exporting them. Live Datadog ingestion, Atlassian permissions, space resolution and your Jira custom fields must be checked after runtime credentials are configured.
+
+## OTLP over HTTP migration
+
+For the provider-independent pipeline, follow [the enterprise telemetry rollout guide](telemetry-implementation.md). `TELEMETRY_ENABLED=true` selects OTLP and the launcher disables duplicate Datadog instrumentation. The legacy Datadog path remains available when OTLP is disabled. Legacy prompt/output capture now defaults off; `TELEMETRY_CAPTURE_CONTENT=true` explicitly opts into defensive secret-redacted content capture and requires an appropriate data policy.

@@ -1,0 +1,289 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Enterprise AI Observability Architecture — OTLP over HTTP</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#172a3d;background:#edf2f7;line-height:1.65}
+body{max-width:1060px;margin:40px auto;background:white;padding:50px 64px;border-top:8px solid #167b94}
+h1{font-size:2.2rem;line-height:1.2;letter-spacing:-.035em}h2{margin-top:2.6rem;color:#126b82;line-height:1.3}
+h3{margin-top:2rem}a{color:#126b82}table{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.5rem 0}
+th,td{padding:12px;border:1px solid #d6e0e9;text-align:left;vertical-align:top}th{background:#edf4f7}
+pre{background:#edf2f7;padding:20px;overflow:auto;border-radius:8px;font-size:.84rem;line-height:1.5}
+code{font-size:.9em;overflow-wrap:anywhere}li{margin:.55rem 0}figure{margin:2rem 0}svg{width:100%}
+svg rect{fill:#edf6fa;stroke:#167b94;stroke-width:1.5}svg text{font-size:13px;fill:#172a3d}
+.arrow{fill:none;stroke:#48617b;stroke-width:2}figcaption{color:#54667a;font-size:.88rem}
+hr{margin:4rem 0;border:0;border-top:2px solid #d6e0e9}.appendix{color:#167b94;text-transform:uppercase;font-weight:700;letter-spacing:.1em}
+@media(max-width:700px){body{margin:0;padding:22px}h1{font-size:1.8rem}table{display:block;overflow:auto}}
+@media print{body{margin:0;padding:0;border:0;max-width:none}h2{break-after:avoid}tr,pre,figure{break-inside:avoid}a{color:inherit}.appendix{break-before:page}}
+</style></head><body><h1>Enterprise AI Telemetry, Monitoring, and Observability Architecture</h1>
+<p><strong>Version:</strong> 1.0 · <strong>Transport:</strong> OTLP over HTTP · <strong>Scope:</strong> production AI applications, agents, and supporting services</p>
+<p>This standard defines the signals, controls, and operating practices needed to explain an AI system's behavior, detect failures, assess quality, and account for consumption. It is independent of cloud and observability vendor. OpenTelemetry is the instrumentation and transport foundation. Kafka or Event Hub is optional.</p>
+<p>“Must” identifies the production baseline. “Should” identifies a recommended default that teams may adapt with a documented reason. Each service must publish a coverage manifest identifying implemented, externally supplied, unavailable, and not-applicable measurements. Telemetry coverage is not a claim that a model is safe or correct.</p>
+<h2>1. Outcomes and architectural pillars</h2>
+<table>
+<thead>
+<tr>
+<th>Pillar</th>
+<th>Required operational questions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System health and performance</td>
+<td>Is the service available? Where is time spent? Are requests, jobs, memory, storage, or dependencies failing?</td>
+</tr>
+<tr>
+<td>Contextual tracing</td>
+<td>Which request, run, attempt, task, model, retrieval, policy decision, and publication produced this outcome?</td>
+</tr>
+<tr>
+<td>Data and model quality</td>
+<td>What was actually evaluated, by which evaluator and dataset version? What changed relative to a comparable baseline?</td>
+</tr>
+<tr>
+<td>Business and financial accountability</td>
+<td>What was delivered? What did it consume and approximately cost? Which organizational unit owns the work?</td>
+</tr>
+<tr>
+<td>Telemetry reliability</td>
+<td>Are signals arriving on time? Is anything buffered, rejected, sampled, or lost?</td>
+</tr>
+</tbody>
+</table>
+<h2>2. Reference architecture</h2>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 535" role="img" aria-label="OTLP HTTP reference architecture with optional message buffering"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#48617b"/></marker></defs><path d="M180 49 H220" class="arrow" marker-end="url(#arrow)"/><path d="M410 49 H450" class="arrow" marker-end="url(#arrow)"/><path d="M670 49 H710" class="arrow" marker-end="url(#arrow)"/><path d="M560 78 V130" class="arrow" marker-end="url(#arrow)"/><path d="M560 188 V235" class="arrow" marker-end="url(#arrow)"/><path d="M560 300 V345" class="arrow" marker-end="url(#arrow)"/><path d="M560 403 V445" class="arrow" marker-end="url(#arrow)"/><path d="M670 267 H710" class="arrow" marker-end="url(#arrow)"/><path d="M845 300 V374 H670" class="arrow" marker-end="url(#arrow)"/><path d="M370 267 H450" class="arrow" marker-end="url(#arrow)"/><rect x="20" y="20" width="160" height="58" rx="10"/><text x="100.0" y="54.0" text-anchor="middle">User / Scheduler</text><rect x="220" y="20" width="190" height="58" rx="10"/><text x="315.0" y="54.0" text-anchor="middle">Authenticated Gateway</text><rect x="450" y="20" width="220" height="58" rx="10"/><text x="560.0" y="54.0" text-anchor="middle">Application / Durable Worker</text><rect x="710" y="20" width="270" height="58" rx="10"/><text x="845.0" y="54.0" text-anchor="middle">Agents • Retrieval • Models • Delivery</text><rect x="450" y="130" width="220" height="58" rx="10"/><text x="560.0" y="164.0" text-anchor="middle">OpenTelemetry Instrumentation</text><rect x="450" y="235" width="220" height="65" rx="10"/><text x="560.0" y="272.5" text-anchor="middle">Collector + Persistent Queues</text><rect x="710" y="235" width="270" height="65" rx="10"/><text x="845.0" y="272.5" text-anchor="middle">Kafka / Event Hub (optional)</text><rect x="450" y="345" width="220" height="58" rx="10"/><text x="560.0" y="379.0" text-anchor="middle">Traces • Metrics • Logs</text><rect x="450" y="445" width="220" height="58" rx="10"/><text x="560.0" y="479.0" text-anchor="middle">Dashboards / Alerts / Investigation</text><rect x="20" y="235" width="350" height="65" rx="10"/><text x="195.0" y="272.5" text-anchor="middle">Restricted Evidence / Versioned Evaluators</text><text x="575" y="218">OTLP over HTTP</text></svg><figcaption>Direct Collector export is the default. Kafka/Event Hub is optional.</figcaption></figure><p>Collectors provide a common control point for authentication, resource metadata, data handling, routing, buffering, and backend choice. They do not replace application instrumentation. The evidence store is separate from routine trace and log storage because its contents have different access and retention requirements.</p>
+<p><strong>Transport contract:</strong> use OTLP over HTTP with <code>/v1/traces</code>, <code>/v1/metrics</code>, and <code>/v1/logs</code>. Protobuf and OTLP JSON are both valid HTTP encodings. This project's SDK uses HTTP/protobuf for traces and metrics; its durable log exporter uses HTTP/JSON. Production network boundaries must use TLS and authenticated ingestion. Plain HTTP is limited to loopback or explicitly approved private networks. <a href="https://opentelemetry.io/docs/specs/otlp/">OTLP specification</a></p>
+<h2>3. Trace lifecycle and correlation</h2>
+<ol>
+<li>The gateway propagates a valid W3C <code>traceparent</code> and, where appropriate, <code>tracestate</code>. Do not place credentials or personal data in baggage.</li>
+<li>The service creates a server span and returns <code>X-Trace-ID</code> plus trace context in response headers, including handled error responses.</li>
+<li>When accepting background work, persist the originating trace context with the durable job, its stable run ID, and attempt number.</li>
+<li>A delayed job or retry creates a new execution trace linked to its originating request. Short synchronous operations remain child spans. A run ID connects the entire business lifecycle across all traces.</li>
+<li>Trace context loading, source retrieval, input policy checks, task/agent execution, model inference, output validation, approval, artwork, publication, reconciliation, and feedback collection.</li>
+<li>Attach safe error classification and outcome attributes. Explicitly mark failures caught by application code; an exception-free function can still return a failed publication.</li>
+<li>Correlate operational events with the active trace/span IDs. Preserve run and execution IDs even when detailed traces are sampled out.</li>
+</ol>
+<p>Span names and metric dimensions must use stable operation or route names. URLs, run IDs, publication IDs, user identifiers, and prompt text must not become metric dimensions. Attach identifiers to traces/logs instead.</p>
+<p>Every trace must carry service name, release version, deployment environment, and owning department. Every AI run should record prompt/template version, policy version, model configuration, source snapshot hash, and pricing version where cost is calculated. A shared API key does not establish individual user identity; gateway-authenticated pseudonymous identity is required for reliable user-level attribution.</p>
+<h2>4. Required signal coverage</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Traces and events</th>
+<th>Metrics and outcome evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API gateway/application</td>
+<td>Request, normalized route, status, trace context</td>
+<td>Request rate, latency distribution, error ratio, availability</td>
+</tr>
+<tr>
+<td>Scheduler/worker</td>
+<td>Job accepted, claimed, attempt, completion, retry, expiry</td>
+<td>Queue depth/wait, worker readiness, heartbeat, run duration/failures</td>
+</tr>
+<tr>
+<td>Context/retrieval</td>
+<td>Source access, reference loading, source snapshot version</td>
+<td>Retrieved count, source age, dependency failure count; relevance/MRR only with an evaluator</td>
+</tr>
+<tr>
+<td>Policy/guardrails</td>
+<td>Policy name/version, stage, pass/block outcome</td>
+<td>Decision rates; separately measured security/quality outcomes</td>
+</tr>
+<tr>
+<td>Crew/agent/task/tool</td>
+<td>Execution boundaries, assigned role, dependency relationship</td>
+<td>Duration and outcome per bounded operation</td>
+</tr>
+<tr>
+<td>Model inference</td>
+<td>Provider/model, operation, stop reason, response ID when available</td>
+<td>Actual input/output/cache usage, latency, streaming TTFT/TPS, versioned cost estimate</td>
+</tr>
+<tr>
+<td>Database/external HTTP</td>
+<td>Transaction or client operation, dependency, safe error type</td>
+<td>Duration, errors, connection/storage pressure</td>
+</tr>
+<tr>
+<td>Publication/approval</td>
+<td>Review, destination check, send, result, ambiguity, reconciliation</td>
+<td>Successful delivery, failed/unknown outcomes, publication freshness</td>
+</tr>
+<tr>
+<td>Feedback/evaluation</td>
+<td>Observations, evaluator/version/dataset, missing-field status</td>
+<td>Engagement, quality score distributions, drift under controlled comparisons</td>
+</tr>
+<tr>
+<td>Runtime/telemetry pipeline</td>
+<td>Startup, exporter status, rejection/quarantine</td>
+<td>CPU/memory/storage, signal heartbeat, backlog size/age, export failures and queue capacity</td>
+</tr>
+</tbody>
+</table>
+<p>Do not fabricate missing measurements. TTFT and generation TPS require observed streaming tokens. A non-streaming completion's total latency is not TTFT. Distinguish missing provider usage from zero tokens. RAG MRR requires ranked retrieval and relevance labels; a source list alone cannot establish MRR. “Useful token ratio” needs a documented labeling method and denominator.</p>
+<p>Application process metrics are not a substitute for host/container metrics. The platform team must supply actual host/container CPU, memory limits, restarts, disk and network metrics, and approved stdout collection where required.</p>
+<h2>5. Data and model quality</h2>
+<p>Each evaluated score must include a run ID, idempotent evaluation ID, evaluator type/version, dataset version, timestamp, and metric definition. Model-judge scores must be labeled as such; they are not ground truth. Human and benchmark evaluations must preserve their own provenance.</p>
+<p>Supported categories include faithfulness, toxicity, context relevance, ground-truth accuracy, and retrieval MRR. Deterministic checks such as citation-source matching, blocker count, and review approvals are useful operational measurements, but must not be described as proof of factual correctness.</p>
+<p>For semantic drift, use a fixed benchmark, comparable prompt version, and a stable embedding model. Measure cosine distance from a versioned baseline and variance over a declared window. A changed topic distribution is a confounder; unexplained distance is not proof of a silent model update. Retain enough sample count and baseline information to interpret the signal. Alert thresholds must be calibrated against known acceptable and unacceptable examples.</p>
+<h2>6. Cost and business controls</h2>
+<p>Use provider-reported usage wherever available. Apply an operator-maintained, versioned USD rate card keyed by exact model ID and modality. Account for cached input separately when reported. Image estimates must be keyed by model, size, and quality. Reconcile estimated usage costs with provider invoices; incomplete usage must remain visible.</p>
+<p>Record department on resource metadata. Record authenticated pseudonymous subject on traces where an identity provider supplies it. Do not infer a user from a shared service key.</p>
+<p>A between-call budget gate can prevent further calls once observed spending reaches a threshold or prior usage is unknown. It is not a hard spending cap: in-flight calls, retries, unreported usage, taxes, and provider pricing changes can exceed estimates. Hard limits require provider-side limits or an enforced reservation system.</p>
+<p>Measure business delivery and engagement separately from cost. Do not label engagement as ROI without attributed revenue and a documented cost model.</p>
+<h2>7. Delivery reliability and sampling</h2>
+<p>Application operational events must be durably journaled before asynchronous export. Export must run independently of model execution. Use bounded batches and payload sizes, exponential backoff with jitter, server <code>Retry-After</code> handling, and explicit quarantine for permanently rejected records. Provide a reviewed requeue mechanism.</p>
+<p>Delivery is at least once: duplicates can occur if the receiver accepts a batch before the sender records the acknowledgment. Include stable journal and event IDs for downstream deduplication across process restarts. OTLP partial acceptance must not trigger blind retries; retain the affected records for investigation when rejected IDs are unavailable.</p>
+<p>Collectors should use bounded sending queues backed by persistent storage on critical network hops. Monitor queue occupancy, failed exports, filesystem capacity, and rejected/dropped records. HTTP acceptance by a Collector is not proof of successful backend indexing. SDK trace buffers can still lose spans before Collector acceptance during a process crash; test this boundary explicitly. <a href="https://opentelemetry.io/docs/collector/resiliency/">Collector resiliency guidance</a></p>
+<p>Kafka or Event Hub is <strong>optional</strong>. Add it for cross-region isolation, longer outage buffering, independent consumers, or throughput requirements that justify the operating cost. Define partitioning, ordering needs, retention, consumer lag, duplicates, schema evolution, TLS/authentication, and recovery procedures. A queue does not eliminate loss at the producer or a full downstream disk.</p>
+<p>Start the small-volume reference service at 100% trace sampling. Larger deployments must document sampling ratios and keep unsampled aggregate metrics and durable outcome events. Tail sampling requires complete trace routing and sufficient memory; do not promise retention of all errors if they were already discarded by head sampling.</p>
+<h2>8. Privacy, evidence, and retention</h2>
+<p>Routine telemetry defaults to metadata only. Do not export prompts, response bodies, source documents, tool arguments, authorization headers, URL queries, or raw exception messages. Numeric token counts are operational data and must survive credential redaction.</p>
+<p>Store application artifacts and replay evidence in a restricted store with encryption at rest, access control, access auditing, retention and deletion procedures. Defensive secret matching is not comprehensive PII classification. Replay export must be explicit, authenticated, audited, and non-cacheable. Redacted evidence supports best-effort reproduction; nondeterministic providers and removed content prevent guaranteed exact replay.</p>
+<p>Suggested initial retention, subject to organizational data policy: detailed traces seven days, operational logs and metrics thirty days, replay exports no more than seven days, approved business artifacts according to their business retention schedule. Pending/quarantined events need an explicit capacity and recovery policy; do not silently delete them during an outage.</p>
+<h2>9. Monitoring, SLOs, and response</h2>
+<p>Initial targets to validate with load and failure testing:</p>
+<ul>
+<li>99% API availability measured as non-5xx responses; separately track dependency and business failures.</li>
+<li>Operational events normally visible within five seconds; alert if the oldest pending event exceeds sixty seconds for five minutes.</li>
+<li>Runtime metrics heartbeat within two minutes; alert on missing data as well as bad values.</li>
+<li>Daily publication and engagement freshness within twenty-six hours for the daily marketing profile.</li>
+<li>Collector queue occupancy below 80% and application storage usage below 85%.</li>
+</ul>
+<p>Use latency histograms rather than averages alone. Define production latency objectives from workload requirements; long campaign generation and short API acknowledgments need different objectives. Tune workflow freshness thresholds to the actual schedule.</p>
+<p>Provision dashboards and alert rules as code. Configure ownership and notification routing before production acceptance. Detect observability outages from an independent monitoring path; a broken exporter cannot reliably report its own failure through that same exporter.</p>
+<p>Incident flow: isolate the trace/run; identify the failed dependency, policy, model, or publication span; inspect restricted evidence only when authorized; reproduce in a staging environment with publication and side effects disabled; roll out a versioned prompt/policy/model change; compare quality/cost/latency against baseline; verify alert recovery. Dynamic overrides require authorization, audit, expiry, and rollback. A prompt edit is not a substitute for a security control.</p>
+<h2>10. Ownership and acceptance</h2>
+<p>Application teams own lifecycle coverage, metric definitions, resource metadata and safe handling. Platform teams own Collector deployment, authentication, durable volumes, infrastructure signals, backups and alert delivery. Model/data teams own evaluation datasets, evaluator calibration, drift baselines and rate cards. Service owners approve SLOs, retention, access and incident response.</p>
+<p>Production acceptance must demonstrate: correlated request and queued execution traces; actual model usage; publication and failure outcomes; no content leakage in routine telemetry; outage/restart recovery; quarantine/requeue; bounded backlog behavior; quality provenance; pricing coverage; dashboard queries; and an alert firing and resolving through the assigned notification route.</p>
+<p>The CrewAI implementation and its deployment steps are described in <code>telemetry-implementation.md</code>. Passing offline tests establishes implementation behavior, not live ingestion, complete evaluator coverage, or production readiness.</p>
+<h2>References</h2>
+<ul>
+<li><a href="https://opentelemetry.io/docs/specs/otlp/">OpenTelemetry OTLP specification</a></li>
+<li><a href="https://opentelemetry.io/docs/languages/python/instrumentation/">OpenTelemetry Python instrumentation</a></li>
+<li><a href="https://opentelemetry.io/docs/collector/resiliency/">OpenTelemetry Collector resiliency</a></li>
+<li><a href="https://opentelemetry.io/docs/specs/semconv/">OpenTelemetry semantic conventions</a></li>
+<li><a href="https://docs.datadoghq.com/llm_observability/instrument/otel_instrumentation/">Datadog OpenTelemetry ingestion for agent observability</a></li>
+</ul>
+<hr><div class="appendix">Implementation appendix</div><h1>CrewAI telemetry implementation and rollout</h1>
+<p>The application now has an enterprise OTLP/HTTP path alongside the legacy Datadog path. <code>TELEMETRY_ENABLED=true</code> selects OTLP. The launcher disables duplicate Datadog/CrewAI tracing in this mode. Application providers are private to this service, so CrewAI cannot replace them with its own global provider. OTLP traces and metrics use protobuf; the durable log journal uses OTLP JSON. Neither uses gRPC.</p>
+<h2>Coverage implemented in this repository</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API</td>
+<td>ASGI server spans, W3C inbound context, response <code>traceparent</code>/<code>X-Trace-ID</code>, normalized routes, request count/duration/status</td>
+</tr>
+<tr>
+<td>Runs and jobs</td>
+<td>Persisted request context; linked run traces with attempts and outcomes; full execution lifecycle including post-generation validation; durable progress/error events</td>
+</tr>
+<tr>
+<td>Agent/task/model</td>
+<td>Per-agent and per-task spans; pinned synchronous CrewAI native adapter instrumentation; actual usage, finish reason, latency, optional streaming TTFT/TPS, cost availability</td>
+</tr>
+<tr>
+<td>Retrieval and policy</td>
+<td>Source download and Atlassian reference spans; source count/age/failure metrics; credential egress input policy; existing output/publication policies traced</td>
+</tr>
+<tr>
+<td>Integrations</td>
+<td>HTTPX client instrumentation with safe URL export; Facebook publish outcomes; Atlassian actions; approval, n8n dispatch, artwork and engagement spans</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>SQLite transaction spans inside run execution, without statements or parameters</td>
+</tr>
+<tr>
+<td>Financial/business</td>
+<td>Versioned model and image cost estimates; optional between-call run budget gate; engagement observations and missing-count metrics</td>
+</tr>
+<tr>
+<td>Quality</td>
+<td>Automatic deterministic citation/review/blocker measurements; authenticated ingestion of versioned external evaluations; cosine drift and rolling variance from supplied comparable embeddings</td>
+</tr>
+<tr>
+<td>Replay</td>
+<td>Authenticated opt-in download of existing redacted evidence; no automatic execution or publishing; access audit event</td>
+</tr>
+<tr>
+<td>Export reliability</td>
+<td>Independent locked export thread; journal retention on retryable failure; backoff/jitter/Retry-After; batch and request budgets; quarantine/requeue; full backlog count and age</td>
+</tr>
+<tr>
+<td>Runtime/monitoring</td>
+<td>Process memory/CPU/thread metrics, storage usage, worker readiness, queue depth, freshness and heartbeat gauges; Collector/Prometheus/Grafana configurations and alert rules</td>
+</tr>
+</tbody>
+</table>
+<p>Existing n8n callbacks retain their execution IDs and run associations. The API accepts W3C context when the caller supplies it. The bundled n8n workflows do not instrument n8n's internal engine or every node; platform tracing/log shipping is still needed for that coverage. A gateway should supply validated user identity for per-user attribution; the current API authenticates a shared service key and attributes resource ownership to a department.</p>
+<p>No vector store exists in this application. Source retrieval is traced, but vector-query spans and MRR are not automatically invented. No extra evaluator model calls are made. Faithfulness/toxicity/ground-truth scores require a real evaluator or benchmark to submit them. The default credential check is not a complete prompt-injection or PII classifier.</p>
+<h2>Local reference stack</h2>
+<p>From the repository root:</p>
+<pre><code class="language-sh">export GRAFANA_ADMIN_PASSWORD='choose-a-local-password'
+docker compose -f observability/compose.yaml up -d
+</code></pre>
+<p>Set the following in the application environment, then start through <code>crewai_agents/start.py</code>:</p>
+<pre><code class="language-dotenv">TELEMETRY_ENABLED=true
+OTEL_SDK_DISABLED=false
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+OTEL_SERVICE_NAME=bun2too-marketing-api
+SERVICE_VERSION=your-release-or-commit
+DEPLOYMENT_ENVIRONMENT=qa
+TELEMETRY_DEPARTMENT=marketing
+TELEMETRY_TRACE_SAMPLE_RATIO=1
+</code></pre>
+<p>Grafana is at <code>http://localhost:3000</code>, user <code>admin</code>; Prometheus is at <code>http://localhost:9090</code>. The “Crew — operations and AI observability” dashboard is provisioned automatically. Grafana Explore provides the Metrics, Traces, and Logs sources. Filter logs by service and <code>run_id</code>; use <code>trace_id</code> to open the corresponding trace. IDs remain metadata, not metric labels.</p>
+<p>The Compose setup binds exposed ports to loopback. It is a development/reference stack, not a hardened production deployment. It uses pinned images, local disk, single replicas, and root in the storage-writing Collector/Tempo/Loki containers for volume initialization compatibility. Production must use approved image versions/digests, appropriately owned volumes and non-root identities, backups, TLS/authentication, access control, capacity planning and HA as needed. Do not expose its unauthenticated internal endpoints publicly.</p>
+<h2>Production / Railway</h2>
+<ol>
+<li>Deploy an approved Collector with a persistent queue volume. The project does not create a Railway Collector service automatically.</li>
+<li>Use <code>observability/collector.yaml</code> as a private-network starting point. Configure the trace/log backend endpoints; for an enterprise metrics backend, replace/add the Prometheus exporter with an approved OTLP/HTTP exporter. Configure authenticated TLS ingestion or place it behind the enterprise gateway. Install platform host/container metrics and approved log shipping separately.</li>
+<li>Add the application settings above to <code>MARKETING_RUNTIME_CONFIG</code>; CI supplies <code>SERVICE_VERSION</code> from <code>GITHUB_SHA</code> unless explicitly set. Deployment preflight validates the OTLP transport and endpoint before contacting Railway. Use the Collector's HTTPS base URL. Supply <code>OTEL_EXPORTER_OTLP_HEADERS</code> in runtime secrets when the gateway requires authentication. Percent-encode header values, e.g. <code>Authorization=Bearer%20...</code>. Signal-specific <code>OTEL_EXPORTER_OTLP_TRACES_ENDPOINT</code>, <code>_METRICS_ENDPOINT</code>, and <code>_LOGS_ENDPOINT</code> override the base and must include the complete signal path.</li>
+<li>Use <code>OTEL_ALLOW_INSECURE_HTTP=true</code> only for a deliberately trusted private network. Remote cleartext endpoints otherwise fail configuration validation. Keep <code>TELEMETRY_CAPTURE_CONTENT=false</code> and <code>REPLAY_EXPORT_ENABLED=false</code> unless content access is explicitly enabled under policy.</li>
+<li>Load <code>observability/alerts.yaml</code> into Prometheus and configure Alertmanager routing to the service owner. The included rules evaluate alert state; they do not send notifications until a receiver is configured. Adjust the daily-publication and n8n thresholds for actual schedules.</li>
+<li>Verify one test campaign, an induced failure, trace links, metrics, log arrival, a Collector outage/recovery, and an alert firing/resolving before switching production traffic.</li>
+</ol>
+<p>Kafka/Event Hub is not required. If introduced, insert it between Collector tiers and define signal topics, retention, consumer lag monitoring, authentication, encoding and deduplication. Keep application OTLP/HTTP unchanged. Do not route the same event simultaneously through direct and queued paths without a deduplication plan.</p>
+<h2>Pricing and budgets</h2>
+<p>Create a private rate card based on <code>config/model-pricing.example.json</code>, replace the placeholder model ID and every rate, then set <code>MODEL_PRICING_PATH</code> to its deployed path. Zero in the example is a placeholder, not a provider price. Text model keys must exactly match <code>LLM_MODEL</code>; the native request model is separately recorded on spans. Input, cached input and output rates are USD per million tokens.</p>
+<p>For generated artwork, add an <code>images</code> object keyed by model and <code>size:quality</code>, with a USD estimate per generated image. The generator currently requests one image per call. Example structure, with your actual rates:</p>
+<pre><code class="language-json">{&quot;version&quot;:&quot;approved-rate-card-date&quot;,&quot;models&quot;:{},&quot;images&quot;:{&quot;exact-image-model&quot;:{&quot;1536x1024:medium&quot;:0.0}}}
+</code></pre>
+<p>Missing rates or usage produce <code>unavailable</code> and a coverage metric. They never produce a fabricated zero cost. <code>RUN_COST_BUDGET_USD=0</code> disables the gate. A positive value checks accumulated run events before subsequent calls and blocks if prior cost is unknown or the budget has been reached. Configure provider spending limits as well: this is an observed-spend gate, not a preauthorization reservation or guaranteed dollar ceiling. Rates need to be available inside the container, not merely on the developer workstation.</p>
+<h2>Quality and replay APIs</h2>
+<p>Authenticated <code>POST /runs/{run_id}/evaluations</code> accepts:</p>
+<pre><code class="language-json">{
+  &quot;evaluation_id&quot;:&quot;benchmark-2026-10-04-run-001&quot;,
+  &quot;evaluator&quot;:&quot;benchmark&quot;,
+  &quot;evaluator_version&quot;:&quot;accuracy-v1&quot;,
+  &quot;dataset_version&quot;:&quot;approved-fixtures-v1&quot;,
+  &quot;scores&quot;:{&quot;faithfulness&quot;:0.92,&quot;ground_truth_accuracy&quot;:0.9}
+}
+</code></pre>
+<p>Allowed evaluators are <code>human</code>, <code>benchmark</code>, <code>model_judge</code>, and <code>embedding</code>. Allowed scores are <code>faithfulness</code>, <code>toxicity</code>, <code>context_relevance</code>, <code>mrr</code>, <code>ground_truth_accuracy</code>, and <code>useful_token_ratio</code>, between zero and one. An evaluation ID is idempotent and bound to a run. Version strings belong in event metadata; bounded evaluator/metric names are used in metrics.</p>
+<p>For drift, submit a finite nonzero <code>embedding</code> plus <code>embedding_model</code>, evaluator version and dataset version. The first comparable sample establishes a normalized reference vector; subsequent samples record cosine distance and variance over the latest 100 distances. The cohort includes embedding model, dataset, prompt version and evaluator version. Use a fixed benchmark and version embedding models to avoid confusing topic shifts with model drift. No embedding is sent to the telemetry backend; the baseline vector lives in the restricted application database. Access and encryption policy must therefore cover that database too.</p>
+<p>With <code>REPLAY_EXPORT_ENABLED=true</code>, authenticated <code>GET /runs/{run_id}/replay-bundle</code> downloads redacted brief, task plans, outputs, source snapshots and version metadata. It does not execute or publish anything. Responses are non-cacheable and exports are audited. Redaction and provider nondeterminism limit reproduction fidelity. Apply evidence-retention controls to downloaded files; never send them to ordinary logs.</p>
+<h2>Export operations and recovery</h2>
+<p><code>GET /observability/status</code> reports signal state, last log export, total pending records, oldest pending age and quarantine count. <code>pending_batch_count</code> remains the size of the next batch for backward compatibility; it is not total backlog.</p>
+<p>Retryable failures leave events in SQLite. The independent exporter normally checks every two seconds and backs off on failure. Individual requests have a five-second timeout; a pass limits request count and elapsed work. Oversized individual records and permanent payload rejections are quarantined. Authentication failures retain the backlog so credentials can be corrected. Partial OTLP acceptance quarantines the batch because the receiver does not identify rejected event IDs.</p>
+<p>Inspect the <code>telemetry_dead_letters</code> table on the restricted volume, fix the cause, then call authenticated <code>POST /observability/dead-letters/{event_id}/requeue</code>. A partial-acceptance requeue can duplicate previously accepted events; downstream deduplication uses the stable <code>(journal_id, event_id)</code> pair, which survives process restarts.</p>
+<p>Collector persistent queues protect data after admission. SDK trace/metric buffers are in-memory and may lose their last unexported interval on abrupt termination. Metric counters are process-local and reset on restart. The durable event journal provides recovery evidence; it is not an exactly-once metrics ledger.</p>
+<p>SQLite journal/artifact history is not automatically purged by this patch, because that history also drives campaign review and recovery. Establish an archival job and disk limits before sustained production use; never prune pending/quarantined rows. Tempo reference retention is seven days, Loki and Prometheus thirty days. Docker volumes are persistence, not backups.</p>
+<h2>Verification and known deployment boundaries</h2>
+<p>Run <code>.venv/bin/python scripts/verify_marketing.py</code> with an installed Node runtime on PATH. Tests use fake provider responses and intercepted OTLP HTTP calls. They verify protobuf signal serialization, OTLP JSON correlation, context links, metadata handling, pricing, evaluation deduplication/drift, replay controls and export recovery without spending model tokens or publishing content.</p>
+<p>Validation performed for this change: 163 offline regression tests passed; all observability YAML files parsed; Docker Compose configuration validation passed. The Collector metrics-reader configuration was checked against the pinned release source. Docker-based startup and end-to-end backend ingestion remain unverified because the local Docker daemon was not running. Parsing/configuration validation does not establish live ingestion. No production deployment, telemetry account configuration, external evaluator execution, notification delivery, per-user identity integration, or host-agent installation is performed by these source changes.</p>
+</body></html>

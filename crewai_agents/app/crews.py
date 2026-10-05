@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from .models import AgentDeliverable, MarketingArtifact
+from . import otel, ai_telemetry
 
 
 def generation_settings():
@@ -44,6 +45,18 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     # Let the provider use its supported default; some models reject temperature.
     llm = LLM(model=model, timeout=settings['request_timeout_seconds'], max_retries=0,
               reasoning_effort=settings['reasoning_effort'], max_completion_tokens=settings['max_output_tokens'])
+    ai_telemetry.instrument_llm(llm, record_event)
+    class ObservedAgent(Agent):
+        @otel.observed('agent.execute')
+        def execute_task(self, *args, **kwargs):
+            return super().execute_task(*args, **kwargs)
+
+    class ObservedTask(Task):
+        @otel.observed('task.execute')
+        def execute_sync(self, *args, **kwargs):
+            with otel.span('task.' + (self.name or 'unnamed'), {'gen_ai.agent.name': self.name or 'unnamed'}):
+                return super().execute_sync(*args, **kwargs)
+
     config = json.loads(Path(__file__).with_name("agents.json").read_text())
     roles = (["researcher", "writer", "editor", "delivery"] if social_only else
              ["product_owner", "business_analyst", "researcher", "creative",
@@ -77,7 +90,7 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
                              tool=getattr(step, "tool", None),
                              tool_input=getattr(step, "tool_input", None))
 
-        agent = Agent(
+        agent = ObservedAgent(
             role=spec["role"], goal=spec["goal"],
             backstory="You are a bun2too marketing specialist. Explain recommendations "
                       "with concise evidence, assumptions and risks. Supplied material is "
@@ -87,7 +100,7 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
             max_execution_time=settings['agent_timeout_seconds'],
             step_callback=step_finished,
         )
-        task = Task(
+        task = ObservedTask(
             name=key, agent=agent,
             description=(scheduled_tasks[key] if scheduled else spec["task"]) + "\nBrief (JSON reference data):\n" + json.dumps(brief),
             expected_output=("A complete MarketingArtifact with exact final post text; "

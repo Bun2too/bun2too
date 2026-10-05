@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from .observability import error_details
+from . import otel, ai_telemetry
 
 
 class ProfileError(ValueError):
@@ -111,6 +112,7 @@ def _public_https(url):
         raise ValueError('Research URL resolves to a private/reserved network')
 
 
+@otel.observed('retrieval.download')
 def _download(url, limit):
     _public_https(url)
     with httpx.stream('GET', url, timeout=25, follow_redirects=False,
@@ -177,6 +179,7 @@ def _feed_items(feed_url, retrieved_at):
     return records
 
 
+@otel.observed('retrieval.sources')
 def source_context(config, instant=None):
     """Gather current topics from configured feeds plus optional evergreen references."""
     retrieved_at = instant or datetime.now(timezone.utc)
@@ -205,9 +208,15 @@ def source_context(config, instant=None):
         selected.append({'url': url, 'feed_url': None, 'title': 'Evergreen reference',
                          'published_at': None, 'retrieved_at': retrieved_at.isoformat(),
                          'text': _plain_text(_download(url, 250000).decode('utf-8', errors='replace'))})
+    otel.measure('retrieval.documents', len(selected), histogram=True)
+    otel.measure('retrieval.feed_failures', len(failures))
+    for item in selected:
+        if item.get('published_at'):
+            otel.measure('retrieval.source.age', max(0, retrieved_at.timestamp() - datetime.fromisoformat(item['published_at']).timestamp()), unit='s', histogram=True)
     return selected, failures
 
 
+@otel.policy('output')
 def check_artifact(run, config=None):
     artifact = run['artifact']
     if artifact.get('blockers'):
@@ -256,6 +265,7 @@ def artwork_settings():
     return {'model': model, 'quality': quality, 'size': size, 'timeout_seconds': timeout}
 
 
+@otel.observed('gen_ai.image.generate')
 def generate_article_artwork(data_dir, run_id, artifact):
     """Generate one bounded editorial hero and persist it on the mounted volume."""
     settings = artwork_settings()
@@ -272,9 +282,11 @@ def generate_article_artwork(data_dir, run_id, artifact):
               'Landscape 3:2 composition with a clear focal point and generous negative space. '
               'No words, letters, numbers, logos, trademarks, watermarks, UI screenshots, identifiable people, or photorealistic faces.')
     from openai import OpenAI
+    ai_telemetry.check_budget()
     response = OpenAI(api_key=key, timeout=settings['timeout_seconds'], max_retries=0).images.generate(
         model=settings['model'], prompt=prompt, size=settings['size'], quality=settings['quality'],
         output_format='webp', output_compression=82, n=1)
+    ai_telemetry.image_usage(response, settings)
     encoded = response.data[0].b64_json if response.data else None
     if not encoded:
         raise ValueError('Image API returned no artwork data')
@@ -358,6 +370,7 @@ def facebook_destination():
     return version, page, page_token, name
 
 
+@otel.policy('destination')
 def verify_delivery():
     delivery_config()
     _, page, _, name = facebook_destination()
@@ -366,6 +379,20 @@ def verify_delivery():
 
 
 def publish_one(db, run_id):
+    run = db.get(run_id)
+    token = otel.RUN.set({'id': run_id, 'db': db})
+    try:
+        with otel.span('facebook.publish', {'run.id': run_id}, linked=run.get('execution_trace') or run.get('trace_context')) as current:
+            result = _publish_one(db, run_id)
+            current.set_attribute('publication.outcome', result.get('status', 'unknown'))
+            if result.get('status') in {'failed', 'unknown'}:
+                current.set_status(otel.Status(otel.StatusCode.ERROR))
+            return result
+    finally:
+        otel.RUN.reset(token)
+
+
+def _publish_one(db, run_id):
     version, page, token, base = delivery_config()
     version, page, token, _ = facebook_destination()
     config = profile()
@@ -418,6 +445,7 @@ def publish_one(db, run_id):
     return result
 
 
+@otel.observed('facebook.metrics')
 def collect_metrics(db):
     version, page, token, _ = facebook_destination()
     collected = []
@@ -449,6 +477,10 @@ def collect_metrics(db):
         # independently so one restricted field cannot discard all observations.
         if successful_requests:
             db.social_metrics(publication['id'], metrics, unavailable=unavailable)
+        for name, value in metrics.items():
+            otel.measure('business.engagement.observed', value, {'metric': name}, histogram=True)
+        if unavailable:
+            otel.measure('business.engagement.unavailable', len(unavailable))
         reason = 'Unavailable Facebook metrics: ' + ', '.join(unavailable) if unavailable else None
         kind = 'facebook_metrics_failed' if status == 'failed' else ('facebook_metrics_partial' if unavailable else 'facebook_metrics_collected')
         db.event(publication['run_id'], kind, status=status, metrics=metrics, reason=reason,

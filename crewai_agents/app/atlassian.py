@@ -8,6 +8,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from .observability import redact, action_span
+from . import otel
 
 
 def settings():
@@ -187,6 +188,7 @@ def find_existing(api, record, request, config):
     return remote_link(record['kind'], matches[0], config) if matches else None
 
 
+@otel.observed('atlassian.publish')
 def publish_one(db, key):
     config = settings()
     record = db.publication(key)
@@ -261,6 +263,7 @@ def publish_pending(db, run_id):
     return db.publications(run_id)
 
 
+@otel.observed('atlassian.reconcile')
 def reconcile(db, key, remote_id):
     """Adopt a confirmed remote object after timeout/restart; never create another."""
     record = db.publication(key)
@@ -289,6 +292,7 @@ def reconcile(db, key, remote_id):
                                  status='published', remote=remote_link(record['kind'], data, config), published_body=record['request']['body'], error=None)
 
 
+@otel.observed('retrieval.atlassian')
 def load_references(brief):
     if not brief.get('jira_issue_keys') and not brief.get('confluence_page_ids'):
         return []

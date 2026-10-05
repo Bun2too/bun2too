@@ -6,3 +6,8 @@ httpx>=0.28.1,<1
 openai>=2.54.0,<3
 python-dotenv>=1.2.1,<2
 ddtrace==4.15.1
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-instrumentation-httpx==0.65b0
+psutil>=5.9,<8

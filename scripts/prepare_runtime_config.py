@@ -5,6 +5,27 @@ import re
 from urllib.parse import urlsplit
 
 
+def validate_telemetry_config(config):
+    if config.get('TELEMETRY_ENABLED', 'false').lower() != 'true':
+        return
+    if config.get('OTEL_SDK_DISABLED', 'false').lower() == 'true':
+        raise ValueError('Enabled telemetry conflicts with OTEL_SDK_DISABLED=true')
+    if config.get('OTEL_EXPORTER_OTLP_PROTOCOL', 'http/protobuf') != 'http/protobuf':
+        raise ValueError('Enterprise telemetry requires OTLP over HTTP: http/protobuf')
+    for signal in ('TRACES', 'METRICS', 'LOGS'):
+        value = config.get('OTEL_EXPORTER_OTLP_' + signal + '_ENDPOINT') or config.get('OTEL_EXPORTER_OTLP_ENDPOINT', '')
+        try:
+            parsed = urlsplit(value)
+            valid = (parsed.scheme in {'https', 'http'} and parsed.hostname and not parsed.username
+                     and not parsed.password and not parsed.query and not parsed.fragment)
+            if parsed.scheme == 'http' and parsed.hostname not in {'localhost', '127.0.0.1', '::1'}:
+                valid = valid and config.get('OTEL_ALLOW_INSECURE_HTTP') == 'true'
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError('Configure a valid authenticated HTTPS OTLP endpoint or approved private HTTP endpoint for ' + signal)
+
+
 def validate_scheduled_config(config):
     """Validate declared inputs locally; no running application is required."""
     problems = []
@@ -26,7 +47,7 @@ def validate_scheduled_config(config):
         base = urlsplit('')
     if base.scheme != 'https' or not base.hostname or base.username or base.password:
         problems.append('PUBLIC_API_BASE_URL must be HTTPS without credentials')
-    if config.get('DD_LOGS_ENABLED', 'false').lower() == 'true' and not config.get('DD_API_KEY', '').strip():
+    if config.get('TELEMETRY_ENABLED', 'false').lower() != 'true' and config.get('DD_LOGS_ENABLED', 'false').lower() == 'true' and not config.get('DD_API_KEY', '').strip():
         problems.append('missing DD_API_KEY for enabled runtime logs')
     if problems:
         raise ValueError('Incomplete MARKETING_RUNTIME_CONFIG for scheduled deploy: ' + '; '.join(problems)
@@ -46,7 +67,10 @@ def prepare(env):
         raise ValueError('MARKETING_API_KEY is required for deployment')
     if key:
         config['MARKETING_API_KEY'] = key
+    if env.get('GITHUB_SHA'):
+        config.setdefault('SERVICE_VERSION', env['GITHUB_SHA'])
     if env.get('DEPLOY_OPERATION', 'deploy') == 'deploy':
+        validate_telemetry_config(config)
         validate_scheduled_config(config)
     return json.dumps(config, ensure_ascii=True)
 

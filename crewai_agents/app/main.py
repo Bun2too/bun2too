@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -24,7 +24,7 @@ from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
-from . import article_view, atlassian, marketing, telemetry
+from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[1] / ".data")))
@@ -33,19 +33,30 @@ logger = logging.getLogger(__name__)
 worker_ready = threading.Event()
 @asynccontextmanager
 async def lifespan(app):
+    otel.initialize()
     stop = threading.Event()
+    export_stop = threading.Event()
+    exporter = threading.Thread(target=telemetry.export_loop, args=(export_stop, store()), daemon=True, name='telemetry-export')
+    exporter.start()
+    otel.runtime_metrics(store(), DATA_DIR, worker_ready)
     worker = None
     if os.getenv('WORKER_ENABLED', 'true').lower() == 'true':
         worker = threading.Thread(target=worker_loop, args=(stop,), daemon=True)
         worker.start()
-    yield
-    stop.set()
-    if worker:
-        await asyncio.to_thread(worker.join, 5)
-    worker_ready.clear()
+    try:
+        yield
+    finally:
+        stop.set()
+        if worker:
+            await asyncio.to_thread(worker.join, 5)
+        worker_ready.clear()
+        export_stop.set()
+        await asyncio.to_thread(exporter.join, 16)
+        await asyncio.to_thread(otel.shutdown)
 
 
 app = FastAPI(title="bun2too Marketing Department API", lifespan=lifespan)
+app.add_middleware(otel.RequestTracing)
 bearer = HTTPBearer(auto_error=False)
 
 
@@ -79,9 +90,26 @@ def change_run(run_id, **changes):
 
 def execute_run(run_id, social_only=False):
     db = store()
+    run = db.get(run_id)
+    token = otel.RUN.set({'id': run_id, 'db': db})
+    try:
+        with otel.span('campaign.run', {'run.id': run_id, 'run.attempt': run.get('attempts', 0) + 1},
+                       linked=run.get('trace_context') or None) as current, workflow_span(run_id):
+            _execute_run(run_id, social_only)
+            result = db.get(run_id)
+            current.set_attribute('run.outcome', result['status'])
+            if result['status'] == 'failed':
+                current.set_status(otel.Status(otel.StatusCode.ERROR))
+    finally:
+        otel.RUN.reset(token)
+
+
+def _execute_run(run_id, social_only=False):
+    db = store()
     try:
         previous = db.get(run_id)
-        run = db.update(run_id, expected={"queued"}, status="running", attempts=previous.get('attempts', 0) + 1)
+        run = db.update(run_id, expected={"queued"}, status="running", attempts=previous.get('attempts', 0) + 1,
+                        execution_trace=otel.carrier())
     except ValueError:
         return  # Another local dispatcher claimed the durable job.
     started = time.monotonic()
@@ -154,27 +182,38 @@ def execute_run(run_id, social_only=False):
                 if event["kind"] == "lesson_reviewed")
         if len(json.dumps(brief["reviewed_lessons"])) > 60000:
             raise ValueError("Too many reviewed lessons selected")
+        manifest = {'service_version': os.getenv('SERVICE_VERSION', 'unknown'),
+                    'prompt_version': ai_telemetry.version([Path(__file__).with_name(name).read_text() for name in ('agents.json', 'crews.py')]),
+                    'policy_version': ai_telemetry.version(marketing.profile()) if run.get('scheduled') else 'manual-v1',
+                    'source_snapshot_hash': ai_telemetry.version(brief.get('source_material', ''))}
+        db.update(run_id, telemetry_manifest=manifest)
+        db.event(run_id, 'run_manifest', **manifest)
         db.event(run_id, "context_loaded", jira_issue_keys=brief.get("jira_issue_keys", []),
                  confluence_page_ids=brief.get("confluence_page_ids", []),
                  lesson_run_ids=brief.get("lesson_run_ids", []))
-        with workflow_span(run_id):
+        with otel.span('crew.kickoff'):
             correlation = trace_context()
             operation = 'build_crew'
             settings = generation_settings()
             db.update(run_id, generation_settings=settings)
             db.event(run_id, 'generation_configured', **settings, attempt=run['attempts'])
+            ai_telemetry.input_policy(brief)
             crew = build_crew(brief, record_task, social_only=social_only,
                               record_event=lambda kind, **data: db.event(run_id, kind, **data))
             operation = 'Crew.kickoff'
             result = crew.kickoff()
         operation = 'validate_artifact'
-        artifact = (MarketingArtifact.model_validate(result.pydantic) if result.pydantic
-                    else MarketingArtifact.model_validate_json(result.raw))
+        with otel.span('artifact.validate'):
+            artifact = (MarketingArtifact.model_validate(result.pydantic) if result.pydantic
+                        else MarketingArtifact.model_validate_json(result.raw))
         allowed = {channel.lower() for channel in run["brief"]["channels"]}
         if any(post.channel.lower() not in allowed for post in artifact.posts):
             raise ValueError("Artifact contains an unrequested channel")
         db.update(run_id, status="awaiting_review", artifact=artifact.model_dump())
-        db.event(run_id, "run_completed", status="awaiting_review")
+        quality = ai_telemetry.quality(db.get(run_id))
+        db.update(run_id, quality=quality)
+        db.event(run_id, 'quality_evaluated', quality=quality, evaluator=quality['evaluator'])
+        db.event(run_id, "run_completed", status="awaiting_review", duration_ms=round((time.monotonic() - started) * 1000))
         if run.get('scheduled'):
             config = marketing.profile()
             try:
@@ -221,7 +260,7 @@ def execute_run(run_id, social_only=False):
         db.event(run_id, "run_failed", status='failed', error_type=type(exc).__name__, error=diagnostic,
                  operation=operation, agent=next((role for role in roles if role not in completed), None) if operation == 'Crew.kickoff' else None,
                  retryable=retryable, retry_after=retry_after,
-                 duration_ms=round((time.monotonic() - started) * 1000), **context, **correlation)
+                 duration_ms=round((time.monotonic() - started) * 1000), **context, **(trace_context() or correlation))
 
 
 @app.get("/health")
@@ -326,6 +365,7 @@ def reconcile_publication(publication_id: str, payload: ReconcileRequest):
 
 
 @app.post("/runs/{run_id}/approve", dependencies=[Depends(authorize)])
+@otel.observed('approval.review')
 def approve(run_id: str, payload: ApprovalRequest):
     run = get_run(run_id)
     if run["status"] != "awaiting_review":
@@ -345,6 +385,7 @@ def approve(run_id: str, payload: ApprovalRequest):
 
 
 @app.post("/runs/{run_id}/dispatch", dependencies=[Depends(authorize)])
+@otel.observed('n8n.dispatch')
 def dispatch(run_id: str):
     if os.getenv("PUBLISHING_ENABLED", "false").lower() != "true":
         raise HTTPException(403, "Publishing handoff is disabled")
@@ -384,16 +425,13 @@ def worker_loop(stop):
         store().recover_generation()
         worker_ready.set()
         store().event('runtime', 'runtime_started', status='ready')
-        telemetry.flush(store())
         backfill_article_artwork(store())
-        telemetry.flush(store())
         while not stop.is_set():
             try:
                 for run in store().queued():
                     if stop.is_set():
                         break
                     execute_run(run['id'])
-                telemetry.flush(store())
             except Exception as exc:
                 diagnostic = error_details(exc)
                 logger.error('worker_error %s', json.dumps(diagnostic))
@@ -433,7 +471,7 @@ def readiness():
         base = urlsplit(os.getenv('PUBLIC_API_BASE_URL', ''))
         if base.scheme != 'https' or not base.hostname or base.username or base.password:
             missing.append('valid_public_article_url')
-    if os.getenv('DD_LOGS_ENABLED', 'false').lower() == 'true' and not os.getenv('DD_API_KEY'):
+    if not otel.enabled() and os.getenv('DD_LOGS_ENABLED', 'false').lower() == 'true' and not os.getenv('DD_API_KEY'):
         missing.append('DD_API_KEY')
     return {'storage': 'ok', 'model_configured': bool(os.getenv('LLM_MODEL')),
             'configuration_errors': configuration_errors,
@@ -444,6 +482,7 @@ def readiness():
 
 
 @app.post('/automation/tick', dependencies=[Depends(authorize)])
+@otel.observed('scheduler.tick')
 def automation_tick():
     if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() != 'true':
         raise HTTPException(409, 'Scheduled marketing is disabled')
@@ -485,6 +524,7 @@ def automation_tick():
 
 
 @app.post('/automation/publish', dependencies=[Depends(authorize)])
+@otel.observed('publication.batch')
 def automation_publish():
     results = []
     for candidate in store().recent():
@@ -511,6 +551,7 @@ def automation_publish():
 
 
 @app.post('/automation/metrics', dependencies=[Depends(authorize)])
+@otel.observed('engagement.collect')
 def automation_metrics():
     try:
         results = marketing.collect_metrics(store())
@@ -594,6 +635,36 @@ def observability_status():
     return telemetry.status(store())
 
 
+@app.post('/observability/dead-letters/{event_id}/requeue', dependencies=[Depends(authorize)])
+def requeue_telemetry(event_id: int):
+    try:
+        store().requeue_log(event_id)
+    except KeyError:
+        raise HTTPException(404, 'Quarantined event not found') from None
+    store().event('runtime', 'telemetry_requeue_requested', operation='telemetry.requeue', remote_id=str(event_id))
+    return {'status': 'queued', 'event_id': event_id}
+
+
+@app.post('/runs/{run_id}/evaluations', dependencies=[Depends(authorize)])
+def submit_evaluation(run_id: str, payload: evaluation.Evaluation):
+    try:
+        with otel.span('quality.evaluate', {'run.id': run_id}, linked=get_run(run_id).get('execution_trace')):
+            return evaluation.record(store(), run_id, payload)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.get('/runs/{run_id}/replay-bundle', dependencies=[Depends(authorize)])
+def download_replay(run_id: str):
+    if os.getenv('REPLAY_EXPORT_ENABLED', 'false').lower() != 'true':
+        raise HTTPException(403, 'Replay export is disabled by content access policy')
+    get_run(run_id)
+    bundle = evaluation.replay_bundle(store(), run_id)
+    store().event(run_id, 'replay_bundle_exported', operation='replay.export')
+    return JSONResponse(bundle, headers={'Content-Disposition': 'attachment; filename="replay.json"',
+                                         'Cache-Control': 'no-store'})
+
+
 class ReconcilePost(BaseModel):
     remote_id: str = Field(pattern=r'^\d+_\d+$')
     reviewer: str = Field(min_length=1, max_length=200)
@@ -629,7 +700,16 @@ def reconcile_post(publication_id: str, payload: ReconcilePost):
 PUBLIC_ARTICLE_STATES = {'publishing', 'published', 'publication_unknown', 'publication_failed'}
 
 
+@otel.observed('artwork.generate')
 def create_article_artwork(db, run_id, artifact):
+    token = otel.RUN.set({'id': run_id, 'db': db})
+    try:
+        return _create_article_artwork(db, run_id, artifact)
+    finally:
+        otel.RUN.reset(token)
+
+
+def _create_article_artwork(db, run_id, artifact):
     try:
         result = marketing.generate_article_artwork(DATA_DIR, run_id, artifact)
         if result['status'] == 'ready':

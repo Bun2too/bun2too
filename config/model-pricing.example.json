@@ -1,0 +1,11 @@
+{
+  "version": "replace-with-approved-rate-card-version",
+  "currency": "USD",
+  "models": {
+    "REPLACE_WITH_EXACT_MODEL_ID": {
+      "input_per_million": 0,
+      "cached_input_per_million": 0,
+      "output_per_million": 0
+    }
+  }
+}

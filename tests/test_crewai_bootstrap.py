@@ -6,6 +6,17 @@ from scripts import deploy_crewai, prepare_runtime_config
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_enterprise_telemetry_preflight_rejects_bad_endpoints_without_echoing_them(self):
+        for endpoint in ('', 'grpc://collector:4317', 'https://user:private-secret@collector.example', 'http://public.example:4318'):
+            with self.subTest(endpoint=endpoint), self.assertRaises(ValueError) as caught:
+                prepare_runtime_config.validate_telemetry_config({'TELEMETRY_ENABLED': 'true', 'OTEL_EXPORTER_OTLP_ENDPOINT': endpoint})
+            self.assertNotIn('private-secret', str(caught.exception))
+        prepare_runtime_config.validate_telemetry_config({'TELEMETRY_ENABLED': 'true', 'OTEL_EXPORTER_OTLP_ENDPOINT': 'https://collector.example'})
+
+    def test_release_identity_uses_ci_commit_when_unspecified(self):
+        config = json.loads(prepare_runtime_config.prepare({'DEPLOY_OPERATION': 'infrastructure-only', 'GITHUB_SHA': 'test-release'}))
+        self.assertEqual(config['SERVICE_VERSION'], 'test-release')
+
     def setUp(self):
         self.env = dict(RAILWAY_PROJECT_ID='project', CREWAI_SERVICE_ID='service',
                         RAILWAY_ENVIRONMENT_ID='environment', RAILWAY_API_TOKEN='secret')

@@ -1,0 +1,265 @@
+{
+  "uid": "crew-observability",
+  "title": "Crew \u2014 operations and AI observability",
+  "schemaVersion": 40,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "API throughput",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_server_request_count[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "API p95 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket[5m])))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Operational outcomes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation, outcome) (rate(app_event_count[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "LLM p95 latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(gen_ai_client_operation_duration_bucket[5m])))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Model token consumption",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (model, token_type) (increase(gen_ai_client_token_usage_sum[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Estimated model spend (USD)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (model, pricing_version) (increase(gen_ai_client_cost[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Queued events",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "telemetry_logs_pending_count"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Oldest pending event (seconds)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "telemetry_logs_oldest_pending_seconds"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Quality scores",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (metric, evaluator) (rate(ai_quality_score_sum[1h])) / sum by (metric, evaluator) (rate(ai_quality_score_count[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Process memory (bytes)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_memory_usage"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Storage used ratio",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "app_storage_used_ratio"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Publication age (seconds)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "crew-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "app_publication_age"
+        }
+      ]
+    }
+  ]
+}

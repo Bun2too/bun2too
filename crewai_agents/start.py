@@ -14,7 +14,12 @@ os.environ.setdefault("DD_SERVICE", "bun2too-marketing-api")
 os.environ.setdefault("DD_TRACE_ENABLED", "false")
 command = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0",
            "--port", os.getenv("PORT", "8000")]
-if os.getenv("DD_LLMOBS_ENABLED", "0").lower() in {"1", "true"}:
+if os.getenv("TELEMETRY_ENABLED", "false").lower() == "true":
+    # One instrumentation owner prevents duplicate model spans and content export.
+    os.environ["DD_LLMOBS_ENABLED"] = "0"
+    os.environ["DD_TRACE_ENABLED"] = "false"
+    os.environ["CREWAI_TRACING_ENABLED"] = "false"
+elif os.getenv("DD_LLMOBS_ENABLED", "0").lower() in {"1", "true"}:
     if not os.getenv("DD_API_KEY", "").strip():
         raise SystemExit("DD_LLMOBS_ENABLED requires DD_API_KEY in service secrets")
     command = [str(Path(sys.executable).with_name("ddtrace-run")), *command]

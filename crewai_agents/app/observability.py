@@ -8,7 +8,10 @@ from contextlib import contextmanager
 
 def redact(value):
     if isinstance(value, dict):
-        return {k: ("[REDACTED]" if k not in {'max_output_tokens'} and re.search(r"password|api[_-]?key|token|authorization|secret", k, re.I)
+        numeric_usage = {'max_output_tokens', 'max_tokens', 'input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens',
+                         'total_tokens', 'cached_prompt_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens',
+                         'cached_tokens', 'reasoning_tokens', 'cache_creation_tokens'}
+        return {k: ("[REDACTED]" if not (k.rsplit('.', 1)[-1] in numeric_usage and isinstance(v, (int, float)) and not isinstance(v, bool)) and re.search(r"password|api[_-]?key|token|authorization|secret", k, re.I)
                     else redact(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v) for v in value]
@@ -66,6 +69,10 @@ def error_details(exc):
 
 
 def trace_context():
+    from .otel import correlation
+    current = correlation()
+    if current:
+        return current
     if os.getenv('DD_TRACE_ENABLED', 'false').lower() not in {'true', '1'} and os.getenv('DD_LLMOBS_ENABLED', '0').lower() not in {'true', '1'}:
         return {}
     from ddtrace import tracer
@@ -127,8 +134,9 @@ def workflow_span(run_id):
 
 
 def redact_span(span):
-    span.input = redact(span.input)
-    span.output = redact(span.output)
+    capture = os.getenv('TELEMETRY_CAPTURE_CONTENT', 'false').lower() == 'true'
+    span.input = redact(span.input) if capture else None
+    span.output = redact(span.output) if capture else None
     span.metadata = redact(span.metadata)
     return span
 
