@@ -11,7 +11,7 @@ import socket
 import time
 import xml.etree.ElementTree as ET
 from functools import lru_cache
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -189,19 +189,25 @@ def source_context(config, instant=None):
     for feed_url in config.get('research_feeds', []):
         try:
             recent.extend(item for item in _feed_items(feed_url, retrieved_at)
-                          if item['published_at'] and datetime.fromisoformat(item['published_at']).timestamp() >= cutoff)
+                          if item['published_at'] and cutoff <= datetime.fromisoformat(item['published_at']).timestamp() <= retrieved_at.timestamp())
         except (ValueError, OSError, httpx.HTTPError) as exc:
             failures.append({'feed_url': feed_url, 'error_type': type(exc).__name__})
     recent.sort(key=lambda item: item['published_at'], reverse=True)
-    # Keep source diversity before filling remaining slots by recency.
-    selected, seen_feeds, seen_urls = [], set(), set()
+    # Round-robin all feeds, rather than filling spare slots from the fastest feed.
+    selected, seen_urls = [], set()
+    buckets = {}
     for item in recent:
-        if item['feed_url'] not in seen_feeds:
-            selected.append(item); seen_feeds.add(item['feed_url']); seen_urls.add(item['url'])
-    for item in recent:
-        if item['url'] not in seen_urls:
-            selected.append(item); seen_urls.add(item['url'])
-    selected = selected[:config.get('research_item_limit', 8)]
+        buckets.setdefault(item['feed_url'], []).append(item)
+    while buckets and len(selected) < config.get('research_item_limit', 8):
+        for feed in list(buckets):
+            item = buckets[feed].pop(0)
+            if item['url'] not in seen_urls:
+                selected.append(item)
+                seen_urls.add(item['url'])
+            if not buckets[feed]:
+                del buckets[feed]
+            if len(selected) >= config.get('research_item_limit', 8):
+                break
     if not selected:
         raise ValueError('No recent research items were available from configured feeds')
     for url in config.get('source_urls', []):
@@ -214,6 +220,51 @@ def source_context(config, instant=None):
         if item.get('published_at'):
             otel.measure('retrieval.source.age', max(0, retrieved_at.timestamp() - datetime.fromisoformat(item['published_at']).timestamp()), unit='s', histogram=True)
     return selected, failures
+
+
+PROVIDER_PATTERNS = {
+    'microsoft': r'\b(?:microsoft|copilot|azure)\b',
+    'openai': r'\b(?:openai|chatgpt|gpt[- ]?\d+)\b',
+    'google': r'\b(?:google|gemini|deepmind|vertex)\b',
+    'anthropic': r'\b(?:anthropic|claude)\b',
+    'amazon': r'\b(?:amazon|aws|bedrock|sagemaker)\b',
+    'meta': r'\b(?:meta|llama)\b',
+}
+
+
+def title_providers(title):
+    return {provider for provider, pattern in PROVIDER_PATTERNS.items() if re.search(pattern, title, re.I)}
+
+
+EDITORIAL_THEMES = (
+    'AI concepts and emerging research',
+    'Enterprise AI use cases and measurable business value',
+    'Retrieval, data quality and knowledge engineering',
+    'AI security, privacy and threat modeling',
+    'Evaluation, observability and production reliability',
+    'Responsible AI, safety, governance and human oversight',
+    'Agent workflows, interoperability and implementation tradeoffs',
+)
+
+
+def editorial_context(db, run, config):
+    """Stable daily theme plus actual publication history, including legacy articles."""
+    instant = datetime.fromisoformat(run.get('publish_after') or run['created_at'])
+    local_day = instant.astimezone(ZoneInfo(config.get('timezone', 'America/Chicago'))).date()
+    history = []
+    for record in db.published_between(instant - timedelta(days=7), instant):
+        if record['status'] != 'published' or record['run_id'] == run['id']:
+            continue
+        previous = db.get(record['run_id'])
+        published = _date(record.get('created_at'))
+        if not published or not 0 <= (instant - published).total_seconds() <= 7 * 86400:
+            continue
+        for article in (previous.get('artifact') or {}).get('articles', []):
+            history.append({'title': article['title'], 'source_urls': article.get('source_urls', [])})
+    return {'theme': EDITORIAL_THEMES[local_day.toordinal() % len(EDITORIAL_THEMES)],
+            'recent_publications': history,
+            'selection_rules': 'Address the assigned theme with practical enterprise lessons. Avoid repeating recent titles, products, or source stories. Prefer concepts and implementation guidance across providers. If evidence does not support the theme, choose another underrepresented theme and explain why in decisions. Do not invent news.',
+            'provider_focus_limit': 'Do not repeat provider names or products in headlines within seven days. Incidental body mentions and comparisons are allowed. Editors must also reject repeated provider-centered articles even if their headlines omit the name.'}
 
 
 @otel.policy('output')
@@ -231,6 +282,15 @@ def check_artifact(run, config=None):
     allowed = {source['url'] for source in run.get('source_snapshots', [])}
     if any(url not in allowed for url in articles[0].get('source_urls', [])):
         raise ValueError('Article cites a source that was not retrieved')
+    editorial = run.get('editorial_context') or {}
+    previous = editorial.get('recent_publications', [])
+    title = articles[0]['title']
+    providers = title_providers(title)
+    for prior in previous:
+        if title.casefold().strip() == prior['title'].casefold().strip():
+            raise ValueError('Article repeats a title published in the past seven days')
+        if providers & title_providers(prior['title']):
+            raise ValueError('Article headline repeats a provider covered in the past seven days')
     if config:
         reviews = {task['agent']: task.get('structured') or {} for task in run.get('tasks', [])}
         if any(reviews.get(role, {}).get('approved_for_publication') is not True for role in ('tester', 'editor')):
@@ -389,6 +449,9 @@ def publish_one(db, run_id):
                 current.set_status(otel.Status(otel.StatusCode.ERROR))
             return result
     finally:
+        if run.get('scheduled'):
+            from .atlassian import sync_scheduled
+            sync_scheduled(db, run_id)
         otel.RUN.reset(token)
 
 

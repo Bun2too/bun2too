@@ -117,9 +117,11 @@ def _execute_run(run_id, social_only=False):
     correlation = {}
     context = dict(campaign_key=run.get('campaign_key'), model=os.getenv('LLM_MODEL'), attempt=run['attempts'])
     db.event(run_id, "run_started", operation=operation, **context)
+    if run.get("scheduled"):
+        atlassian.sync_scheduled(db, run_id)
     try:
         def record_task(role, output, structured=None):
-            task_id = run_id + ":" + role
+            task_id = run_id + ":" + str(run["attempts"]) + ":" + role
             db.update(run_id, task=redact(dict(task_id=task_id, agent=role, completed_at=now(),
                                              output=output, structured=structured)))
             db.event(run_id, "task_completed", agent=role, task_id=task_id, **context)
@@ -135,13 +137,16 @@ def _execute_run(run_id, social_only=False):
             operation = 'load_context'
             config = marketing.profile()
             sources, source_failures = marketing.source_context(config)
-            db.update(run_id, source_snapshots=sources)
+            editorial = marketing.editorial_context(db, run, config)
+            db.update(run_id, source_snapshots=sources, editorial_context=editorial)
+            brief['editorial_context'] = editorial
+            db.event(run_id, 'editorial_policy_selected', **editorial)
             brief['source_material'] = json.dumps({'business_facts': config['business_facts'],
                                                    'recent_research': sources})
             brief['observed_results'] = db.feedback_context()
             brief['retrospective_instruction'] = ('Compare observed post results, distinguish missing metrics from zero, '
                 'propose one evidence-backed improvement for this cycle; do not claim causality or invented results.')
-            brief['required_output'] = ('Select one timely technical topic from recent_research. Produce exactly one '
+            brief['required_output'] = ('Follow editorial_context and select a source-supported topic. Produce exactly one '
                                         'original article in articles and one Facebook post linking to it.')
             brief['publishing_rules'] = {'forbidden_phrases': config.get('forbidden_phrases', []),
                                         'links': 'No URLs in prose. Put retrieved citations in article.source_urls.'}
@@ -165,7 +170,7 @@ def _execute_run(run_id, social_only=False):
             db.event(run_id, 'research_collected', source_urls=[item['url'] for item in sources],
                      recent_item_count=sum(bool(item.get('published_at')) for item in sources),
                      feed_failures=source_failures)
-        previous_publications = db.publications(run_id)
+        previous_publications = [] if run.get('scheduled') else db.publications(run_id)
         brief["existing_campaign_backlog"] = [
             {"work_key": p["content"].get("work_key"), "title": p["content"].get("title"), "reference": p["remote"]}
             for p in previous_publications if p["kind"] in {"story", "task"}]
@@ -199,7 +204,7 @@ def _execute_run(run_id, social_only=False):
             db.event(run_id, 'generation_configured', **settings, attempt=run['attempts'])
             ai_telemetry.input_policy(brief)
             crew = build_crew(brief, record_task, social_only=social_only,
-                              record_event=lambda kind, **data: db.event(run_id, kind, **data))
+                              record_event=lambda kind, **data: db.event(run_id, kind, attempt=run["attempts"], **data))
             operation = 'Crew.kickoff'
             result = crew.kickoff()
         operation = 'validate_artifact'
@@ -238,7 +243,7 @@ def _execute_run(run_id, social_only=False):
             except Exception as exc:
                 db.event(run_id, "atlassian_sync_failed", error_type=type(exc).__name__,
                          message=str(exc) if isinstance(exc, ValueError) else "Inspect publication status")
-        else:
+        elif not run.get('scheduled'):
             db.event(run_id, "atlassian_not_published", reason="Set campaign_key for automatic campaign publishing")
     except Exception as exc:
         diagnostic = error_details(exc)
@@ -261,6 +266,10 @@ def _execute_run(run_id, social_only=False):
                  operation=operation, agent=next((role for role in roles if role not in completed), None) if operation == 'Crew.kickoff' else None,
                  retryable=retryable, retry_after=retry_after,
                  duration_ms=round((time.monotonic() - started) * 1000), **context, **(trace_context() or correlation))
+
+    finally:
+        if run.get('scheduled'):
+            atlassian.sync_scheduled(db, run_id)
 
 
 @app.get("/health")
@@ -308,7 +317,8 @@ def read_run(run_id: str):
 @app.get("/runs/{run_id}/work", dependencies=[Depends(authorize)])
 def read_work(run_id: str):
     get_run(run_id)
-    return {"events": store().events(run_id), "publications": store().publications(run_id)}
+    return {"events": store().events(run_id), "publications": store().publications(run_id),
+            "agents": atlassian.agent_report(store(), run_id)}
 
 
 @app.post("/runs/{run_id}/lessons", dependencies=[Depends(authorize)])
@@ -340,6 +350,9 @@ def check_atlassian():
 def publish_work(run_id: str):
     get_run(run_id)
     def publish():
+        if get_run(run_id).get("scheduled"):
+            atlassian.queue_scheduled(store(), run_id)
+            return atlassian.publish_pending(store(), run_id)
         if get_run(run_id)["artifact"] is None:
             raise ValueError("Wait for a complete campaign artifact before publishing")
         atlassian.queue_campaign(store(), run_id)
@@ -381,6 +394,8 @@ def approve(run_id: str, payload: ApprovalRequest):
                       artifact=artifact.model_dump(),
                       approval=dict(reviewer=payload.reviewer, approved_at=now(), sha256=digest))
     store().event(run_id, "social_content_approved", reviewer=payload.reviewer, sha256=digest)
+    if run.get("scheduled"):
+        atlassian.sync_scheduled(store(), run_id)
     return result
 
 
@@ -688,6 +703,8 @@ def reconcile_post(publication_id: str, payload: ReconcilePost):
         result = db.finish_social(publication_id, 'published', expected=('sending', 'unknown'),
                                   remote_id=payload.remote_id, reconciled_by=payload.reviewer)
         db.event(record['run_id'], 'facebook_publication_reconciled', remote_id=payload.remote_id)
+        if db.get(record['run_id']).get('scheduled'):
+            atlassian.sync_scheduled(db, record['run_id'])
         return result
     except KeyError:
         raise HTTPException(404, 'Publication not found') from None

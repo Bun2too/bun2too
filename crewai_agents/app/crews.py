@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 from .models import AgentDeliverable, MarketingArtifact
@@ -54,8 +55,24 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     class ObservedTask(Task):
         @otel.observed('task.execute')
         def execute_sync(self, *args, **kwargs):
-            with otel.span('task.' + (self.name or 'unnamed'), {'gen_ai.agent.name': self.name or 'unnamed'}):
-                return super().execute_sync(*args, **kwargs)
+            role = self.name or 'unnamed'
+            token = ai_telemetry.AGENT.set(role)
+            started = time.monotonic()
+            status = 'completed'
+            if record_event:
+                record_event('agent_started', agent=role)
+            try:
+                with otel.span('task.' + role, {'gen_ai.agent.name': role}):
+                    return super().execute_sync(*args, **kwargs)
+            except BaseException:
+                status = 'failed'
+                raise
+            finally:
+                if record_event:
+                    record_event('agent_finished', agent=role, status=status,
+                                 duration_ms=round((time.monotonic() - started) * 1000))
+                ai_telemetry.AGENT.reset(token)
+
 
     config = json.loads(Path(__file__).with_name("agents.json").read_text())
     roles = (["researcher", "writer", "editor", "delivery"] if social_only else
@@ -64,14 +81,14 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     verbose = os.getenv("AGENT_VERBOSE", "false").lower() == "true"
     scheduled = brief.get('publishing_context', {}).get('scheduled') is True
     scheduled_tasks = {
-        'product_owner': 'Select one timely technical topic from the supplied recent_research items. Prefer the most recent topic with practical relevance to the audience. Define concise scope and reader value; no project backlog or budget is needed.',
+        'product_owner': 'Select one timely technical topic from the supplied recent_research items. Follow editorial_context: prioritize the assigned theme, novelty against recent publications, and provider-neutral enterprise lessons over recency. Record selected topic, supporting sources, rejected alternatives and concise selection rationale in decisions and evidence. Define concise scope and reader value; no project backlog or budget is needed.',
         'business_analyst': 'Define the reader question and content acceptance criteria for that topic. Use available observations without inventing results. Missing analytics and extra human authorization are not release prerequisites under the supplied automatic policy.',
         'researcher': 'Compare the supplied recent internet items, confirm their publication dates, and build a concise claim-to-source evidence map for the selected current topic. Use only provided source URLs, distinguish reported facts from analysis, and flag unsupported facts.',
         'creative': 'Suggest a clear title, structure and accessible explanation. Define one sophisticated editorial hero-art concept and visual metaphor for the selected topic; the application renders it after content approval.',
         'writer': 'Write the complete original article (400–650 words) and one Facebook post (under 150 words, three relevant hashtags) about the selected recent topic. State when the reported development occurred. Ground factual claims in supplied evidence, distinguish analysis, and include exact source URLs separately from prose. The application inserts the article link.',
         'engineering': 'Check the proposed content fits the supplied publisher contract: one article, one Facebook post, citations separate from prose, destination inserted by the application. Identify content-format issues only; do not demand new infrastructure, tracking, or tests before this daily article.',
         'tester': 'Audit the writer article and Facebook copy against evidence, brand rules and publishing_context.review_scope. Set approved_for_publication=true if the content meets those checks. Do not require a prior Editor approval to perform your independent review. Otherwise identify concrete content defects. Do not invent executed tests or require an already-live draft link.',
-        'editor': 'Review the article, Facebook copy and Tester findings against supplied evidence and publishing_context.review_scope. Produce the complete final edited article and Facebook copy, with source URLs separately. Set approved_for_publication=true only when the content is supported and meets the rules. Do not require an already-published draft or extra manual release permission.',
+        'editor': 'Review the article, Facebook copy and Tester findings against supplied evidence, editorial_context (theme, recent-topic duplication and provider focus limit), and publishing_context.review_scope. Reject repeated provider-centered coverage within seven days; incidental mentions and comparisons are allowed. Produce the complete final edited article and Facebook copy, with source URLs separately. Set approved_for_publication=true only when the content is supported and meets the rules. Do not require an already-published draft or extra manual release permission.',
         'delivery': 'Assemble exactly the final Editor-reviewed article and Facebook copy into MarketingArtifact. Preserve their text and supplied citations and retain the final editorial asset brief. Keep planning fields concise. Use the configured schedule and automatic policy. The application generates the hero artwork after this artifact; do not block on a pre-existing image. List only unresolved content defects in blockers; never invent infrastructure, analytics, human-approval or live-draft prerequisites. Do not claim publication happened.',
     }
     agents, tasks = [], []

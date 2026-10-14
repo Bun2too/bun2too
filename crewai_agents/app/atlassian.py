@@ -90,6 +90,89 @@ def queue_campaign(db, run_id):
             existing_keys.add(key)
 
 
+def agent_report(db, run_id):
+    """Measured execution and explicit decision summaries, never private reasoning."""
+    from pathlib import Path
+    roles = json.loads(Path(__file__).with_name('agents.json').read_text())
+    run = db.get(run_id)
+    events = db.events(run_id)
+    attempt_start = max((i for i, e in enumerate(events) if e['kind'] == 'run_started'), default=0)
+    current_events = events[attempt_start:]
+    report = []
+    for role, spec in roles.items():
+        tasks = [task for task in run['tasks'] if task['agent'] == role]
+        finishes = [e for e in events if e['kind'] == 'agent_finished' and e.get('agent') == role]
+        calls = [e for e in events if e['kind'] == 'llm_call_finished' and e.get('agent') == role]
+        usage = {}
+        for call in calls:
+            for key, value in call.get('usage', {}).items():
+                usage[key] = usage.get(key, 0) + value
+        costs = [call.get('cost', {}) for call in calls]
+        lifecycle = [e for e in current_events if e['kind'] in {'agent_started', 'agent_finished'} and e.get('agent') == role]
+        status = 'completed' if tasks else 'not_started'
+        if lifecycle:
+            last = lifecycle[-1]
+            status = last['status'] if last['kind'] == 'agent_finished' else ('interrupted' if run['status'] == 'failed' else 'started')
+        report.append({'agent': role, 'role': spec['role'], 'goal': spec['goal'],
+                       'status': status,
+                       'executions': len(finishes), 'failures': sum(e['status'] == 'failed' for e in finishes),
+                       'duration_ms': sum(e['duration_ms'] for e in finishes) if finishes else None,
+                       'llm_calls': len(calls), 'usage': usage or None,
+                       'estimated_cost_usd': sum(c['usd'] for c in costs) if costs and all(c.get('status') == 'estimated' for c in costs) else None,
+                       'latest_deliverable': tasks[-1].get('structured') if tasks else None})
+    return redact(report)
+
+
+def queue_scheduled(db, run_id):
+    run = db.get(run_id)
+    title = run['campaign_key'] + ' / ' + run['created_at'][:10]
+    db.enqueue(run_id, 'product_owner', 'epic', 'campaign', {
+        'title': title, 'description': 'Daily execution record for run ' + run_id,
+        'owner_role': 'product_owner', 'acceptance_criteria': ['Record generation and publication outcomes.']})
+    try:
+        social = db.social('fb-' + run_id)
+    except KeyError:
+        social = None
+    report = agent_report(db, run_id)
+    evidence = {'run_id': run_id, 'status': run['status'], 'attempts': run.get('attempts', 0),
+                'editorial_context': run.get('editorial_context'), 'quality': run.get('quality'),
+                'error': run.get('error_details'), 'publication_blocker': run.get('publication_blocker'),
+                'trace_context': run.get('execution_trace') or run.get('trace_context'),
+                'audit_path': '/runs/' + run_id + '/work'}
+    for operation, role, detail, criteria in [
+        ('generate', 'product_owner', evidence,
+         ['Record source selection and editorial rationale.', 'Record each agent outcome and review result.']),
+        ('publish', 'delivery', {'run_id': run_id, 'run_status': run['status'], 'approval': run.get('approval'),
+                                'publication': social, 'blocker': run.get('publication_blocker'),
+                                'publish_after': run.get('publish_after'), 'publish_before': run.get('publish_before')},
+         ['Publish only approved content within its window.', 'Record remote post ID or failure/unknown outcome.'])]:
+        db.enqueue(run_id, role, 'story', operation, {
+            'title': ('Generate daily campaign: ' if operation == 'generate' else 'Publish approved content: ') + title,
+            'work_key': operation.upper(), 'owner_role': role, 'execution_record': True,
+            'description': json.dumps(detail, ensure_ascii=False, indent=2),
+            'acceptance_criteria': criteria, 'dependencies': ['GENERATE'] if operation == 'publish' else []})
+    # A dossier is useful once there is agent output or failure evidence to inspect.
+    if run['tasks'] or run.get('error_details'):
+        db.enqueue(run_id, 'delivery', 'confluence', 'dossier', {
+            'campaign_key': title, 'run_id': run_id, 'brief': run['brief'],
+            'tasks': run['tasks'], 'artifact': run['artifact'],
+            'execution': evidence, 'agents': report, 'social_publication': social})
+
+
+def sync_scheduled(db, run_id):
+    """Tracking failure never changes a Facebook delivery outcome."""
+    try:
+        queue_scheduled(db, run_id)
+        if os.getenv('ATLASSIAN_AUTO_PUBLISH', 'true').lower() in {'true', '1'}:
+            results = publish_pending(db, run_id)
+            incomplete = [p for p in results if p['status'] != 'published']
+            if incomplete:
+                db.event(run_id, 'atlassian_sync_incomplete', publications=[
+                    {'id': p['id'], 'status': p['status'], 'error': p.get('error')} for p in incomplete])
+    except Exception as exc:
+        db.event(run_id, 'atlassian_sync_failed', error_type=type(exc).__name__)
+
+
 def paragraph(text):
     return {'type': 'paragraph', 'content': [{'type': 'text', 'text': str(text)}]}
 
@@ -102,7 +185,9 @@ def jira_document(record, references):
         nodes.append({'type': 'heading', 'attrs': {'level': 2}, 'content': [{'type': 'text', 'text': title}]})
         nodes.extend(paragraph('• ' + str(value)) for value in values)
     nodes.append(paragraph('Responsible role: ' + content.get('owner_role', record['agent'])))
-    nodes.append(paragraph('AI proposal. No sprint commitment, human approval or execution is implied.'))
+    nodes.append(paragraph('Application execution record; observed outcomes are recorded below. Jira status remains human-owned.'
+                           if content.get('execution_record') else
+                           'AI proposal. No sprint commitment, human approval or execution is implied.'))
     nodes.append(paragraph('Campaign: ' + record['campaign_key'] + ' | Work key: ' + content.get('work_key', 'EPIC')))
     nodes.extend(paragraph(ref['url']) for ref in references if ref.get('url'))
     document = {'type': 'doc', 'version': 1, 'content': nodes}
@@ -119,6 +204,10 @@ def dossier_html(record, references):
              '<h2>Campaign brief</h2><p>' + html.escape(content['brief']['brief']) + '</p>']
     for reference in references:
         parts.append('<p><a href="' + html.escape(reference['url'], quote=True) + '">' + html.escape(reference.get('key', 'Related work')) + '</a></p>')
+    for field in ('execution', 'agents', 'social_publication'):
+        if field in content:
+            parts.append('<h2>' + html.escape(field) + '</h2><pre>' +
+                         html.escape(json.dumps(content[field], ensure_ascii=False, indent=2)) + '</pre>')
     for task in content['tasks']:
         parts.append('<h2>' + html.escape(task['agent'].replace('_', ' ').title()) + '</h2>')
         details = task.get('structured') or {'deliverable': task['output']}

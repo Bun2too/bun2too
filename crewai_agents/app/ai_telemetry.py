@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import otel
 
+AGENT = ContextVar('telemetry_agent', default=None)
 CALL = ContextVar('telemetry_llm_call', default=None)
 
 
@@ -186,7 +187,7 @@ def instrument_llm(llm, record_event=None):
                     else:
                         otel.measure('gen_ai.client.usage_unavailable', attributes=labels)
                     if record_event:
-                        record_event('llm_call_finished', status=outcome, model=model, usage=usage, cost=cost,
+                        record_event('llm_call_finished', agent=AGENT.get(), status=outcome, model=model, usage=usage, cost=cost,
                                      duration_ms=round(elapsed * 1000), finish_reason=call.get('finish_reason'),
                                      measurement_status='available' if usage else 'unavailable')
         finally:

@@ -103,7 +103,10 @@ class Store:
     def enqueue(self, run_id, role, kind, index, content):
         import hashlib
         from .observability import redact
-        campaign_key = self.get(run_id).get("campaign_key", run_id)
+        run = self.get(run_id)
+        campaign_key = run.get("campaign_key", run_id)
+        if run.get("scheduled"):
+            campaign_key += ":" + run_id
         key = hashlib.sha256(f"{campaign_key}:{kind}:{index}".encode()).hexdigest()[:32]
         content = redact(content)
         data = dict(id=key, run_id=run_id, campaign_key=campaign_key, agent=role, kind=kind,
@@ -136,7 +139,10 @@ class Store:
         return key
 
     def publications(self, run_id):
-        campaign_key = self.get(run_id).get("campaign_key", run_id)
+        run = self.get(run_id)
+        campaign_key = run.get("campaign_key", run_id)
+        if run.get("scheduled"):
+            campaign_key += ":" + run_id
         with self.connect() as db:
             rows = db.execute("SELECT data FROM publications WHERE campaign_key = ? ORDER BY rowid", (campaign_key,)).fetchall()
         return [json.loads(row[0]) for row in rows]
@@ -280,6 +286,13 @@ class Store:
             record = json.loads(db.execute('SELECT data FROM social_posts WHERE id = ?', (publication_id,)).fetchone()[0])
             record.update(metrics=metrics, metrics_at=now(), missing_metrics=unavailable or {})
             db.execute('UPDATE social_posts SET data = ? WHERE id = ?', (json.dumps(record), publication_id))
+
+    def published_between(self, start, end):
+        """Uncapped publication history; engagement refreshes do not change its age."""
+        with self.connect() as db:
+            records = [json.loads(row[0]) for row in db.execute('SELECT data FROM social_posts')]
+        return [record for record in records if record['status'] == 'published'
+                and start <= datetime.fromisoformat(record['created_at']) <= end]
 
     def feedback_context(self):
         context = []

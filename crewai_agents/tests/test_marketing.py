@@ -376,3 +376,55 @@ class MarketingTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class EditorialDiversityTests(unittest.TestCase):
+    def test_busy_feed_cannot_fill_all_remaining_slots(self):
+        instant = datetime(2026, 10, 13, tzinfo=timezone.utc)
+        def items(feed, at):
+            return [dict(url=feed + '/' + str(i), feed_url=feed, title=str(i), text='Evidence',
+                         published_at=(instant - timedelta(hours=i + (10 if feed == 'slow' else 0))).isoformat())
+                    for i in range(8)]
+        with patch.object(marketing, '_feed_items', side_effect=items):
+            sources, _ = marketing.source_context({'research_feeds': ['busy', 'slow'], 'research_item_limit': 6}, instant)
+        self.assertEqual([s['feed_url'] for s in sources], ['busy', 'slow'] * 3)
+
+    def test_rotation_covers_seven_themes_and_rejects_repeat_headline_provider(self):
+        db = Mock(published_between=Mock(return_value=[]))
+        themes = set()
+        for day in range(1, 8):
+            context = marketing.editorial_context(db, {'id': 'new', 'created_at': f'2026-10-{day:02}T12:00:00+00:00'}, config())
+            themes.add(context['theme'])
+        self.assertEqual(len(themes), 7)
+        content = artifact()
+        content['articles'][0]['title'] = 'Copilot for enterprise engineering'
+        run = dict(artifact=content, editorial_context={'recent_publications': [{'title': 'Microsoft AI updates'}]})
+        with self.assertRaisesRegex(ValueError, 'repeats a provider'):
+            marketing.check_artifact(run)
+        content['articles'][0]['title'] = 'Evaluating enterprise AI safely'
+        marketing.check_artifact(run)
+
+    def test_history_includes_more_than_twenty_posts_and_ignores_metric_refresh_age(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Store(Path(directory) / 'runs.db')
+            instant = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+            for i in range(22):
+                run = db.create({'brief': 'AI'})
+                content = artifact()
+                content['articles'][0]['title'] = 'Copilot baseline' if i == 0 else f'Article {i}'
+                db.update(run['id'], status='published', artifact=content)
+                record = {'id': f'post-{i}', 'run_id': run['id'], 'status': 'published',
+                          'created_at': (instant - timedelta(days=2)).isoformat(),
+                          'updated_at': instant.isoformat()}
+                with db.connect() as connection:
+                    connection.execute('INSERT INTO social_posts VALUES (?, ?, ?)',
+                                       (record['id'], run['id'], json.dumps(record)))
+            run = {'id': 'new', 'created_at': instant.isoformat()}
+            history = marketing.editorial_context(db, run, config())['recent_publications']
+            self.assertEqual(len(history), 22)
+            self.assertIn('Copilot baseline', [item['title'] for item in history])
+            with db.connect() as connection:
+                record['created_at'] = (instant - timedelta(days=9)).isoformat()
+                connection.execute('UPDATE social_posts SET data = ? WHERE id = ?',
+                                   (json.dumps(record), record['id']))
+            self.assertEqual(len(marketing.editorial_context(db, run, config())['recent_publications']), 21)

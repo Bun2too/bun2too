@@ -144,3 +144,62 @@ class TrackingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ScheduledTrackingTests(unittest.TestCase):
+    setUp = TrackingTests.setUp
+    respond = TrackingTests.respond
+
+    def test_daily_runs_have_distinct_stories_and_dossiers(self):
+        ids = []
+        for day in ('2026-10-12', '2026-10-13'):
+            run, _ = self.db.schedule(day, {'campaign_key': 'daily', 'brief': 'AI engineering'})
+            self.db.update(run['id'], tasks=[{'agent': 'writer', 'output': 'Draft',
+                'structured': {'decisions': ['Use evidence'], 'evidence': ['Source']}}])
+            atlassian.queue_scheduled(self.db, run['id'])
+            atlassian.publish_pending(self.db, run['id'])
+            records = self.db.publications(run['id'])
+            self.assertEqual(len(records), 4)
+            self.assertEqual(sum(p['kind'] == 'story' for p in records), 2)
+            ids.append({p['id'] for p in records})
+            before = len(self.posts)
+            atlassian.queue_scheduled(self.db, run['id'])
+            atlassian.publish_pending(self.db, run['id'])
+            self.assertEqual(len(self.posts), before)
+        self.assertFalse(ids[0] & ids[1])
+
+    def test_publication_story_updates_same_issue_with_remote_outcome(self):
+        run, _ = self.db.schedule('today', {'campaign_key': 'daily', 'brief': 'AI'})
+        atlassian.queue_scheduled(self.db, run['id'])
+        atlassian.publish_pending(self.db, run['id'])
+        story = next(p for p in self.db.publications(run['id']) if p['content'].get('work_key') == 'PUBLISH')
+        self.db.update(run['id'], status='approved')
+        publication = self.db.claim_social(run['id'], '123', '2026-10-13', 1)
+        self.db.finish_social(publication['id'], 'published', remote_id='123_456')
+        atlassian.queue_scheduled(self.db, run['id'])
+        atlassian.publish_pending(self.db, run['id'])
+        updated = self.db.publication(story['id'])
+        self.assertEqual(updated['remote']['id'], story['remote']['id'])
+        self.assertIn('123_456', updated['content']['description'])
+        self.assertEqual(updated['status'], 'published')
+        self.assertEqual(len(self.posts), 3)
+
+    def test_agent_report_preserves_unknown_measurements_and_failure(self):
+        run = self.db.create({'brief': 'test'})['id']
+        self.db.event(run, 'agent_finished', agent='writer', status='failed', duration_ms=500)
+        self.db.event(run, 'llm_call_finished', agent='writer', usage={'input_tokens': 100},
+                      cost={'status': 'unavailable'})
+        report = {row['agent']: row for row in atlassian.agent_report(self.db, run)}
+        self.assertEqual(report['writer']['failures'], 1)
+        self.assertEqual(report['writer']['usage'], {'input_tokens': 100})
+        self.assertIsNone(report['writer']['estimated_cost_usd'])
+        self.assertEqual(report['tester']['status'], 'not_started')
+        self.assertIsNone(report['tester']['duration_ms'])
+
+    def test_sync_outage_does_not_change_run_state(self):
+        run, _ = self.db.schedule('today', {'campaign_key': 'daily', 'brief': 'AI'})
+        self.db.update(run['id'], status='dispatched')
+        with patch.object(atlassian, 'publish_pending', side_effect=httpx.ConnectError('offline')):
+            atlassian.sync_scheduled(self.db, run['id'])
+        self.assertEqual(self.db.get(run['id'])['status'], 'dispatched')
+        self.assertEqual(self.db.events(run['id'])[-1]['kind'], 'atlassian_sync_failed')

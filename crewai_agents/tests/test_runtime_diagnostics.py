@@ -275,3 +275,27 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AgentLifecycleTests(unittest.TestCase):
+    setUp = RuntimeDiagnosticsTests.setUp
+
+    def test_task_failure_records_role_duration_and_resets_context(self):
+        from crewai_agents.app import ai_telemetry
+        events = []
+        with patch.dict(os.environ, LLM_MODEL='gpt-4.1', OPENAI_API_KEY='test-key',
+                        DD_LLMOBS_ENABLED='0', CREWAI_TRACING_ENABLED='false'), \
+                patch('crewai_core.token_manager.TokenManager._get_secure_storage_path', return_value=main.DATA_DIR):
+            crew = build_crew({'channels': ['facebook']}, lambda *args: None,
+                              record_event=lambda kind, **data: events.append(dict(kind=kind, **data)))
+            from crewai import Task
+        def fail(*args, **kwargs):
+            self.assertEqual(ai_telemetry.AGENT.get(), 'product_owner')
+            raise RuntimeError('failed task')
+        with patch.object(Task, 'execute_sync', side_effect=fail):
+            with self.assertRaises(RuntimeError):
+                crew.tasks[0].execute_sync()
+        self.assertIsNone(ai_telemetry.AGENT.get())
+        self.assertEqual(events[-2]['kind'], 'agent_started')
+        self.assertEqual(events[-1]['status'], 'failed')
+        self.assertGreaterEqual(events[-1]['duration_ms'], 0)
