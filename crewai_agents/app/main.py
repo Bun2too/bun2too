@@ -24,7 +24,7 @@ from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
-from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation
+from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation, langsmith_trace
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[1] / ".data")))
@@ -53,6 +53,7 @@ async def lifespan(app):
         export_stop.set()
         await asyncio.to_thread(exporter.join, 16)
         await asyncio.to_thread(otel.shutdown)
+        await asyncio.to_thread(langsmith_trace.flush)
 
 
 app = FastAPI(title="bun2too Marketing Department API", lifespan=lifespan)
@@ -125,6 +126,8 @@ def _execute_run(run_id, social_only=False):
             db.update(run_id, task=redact(dict(task_id=task_id, agent=role, completed_at=now(),
                                              output=output, structured=structured)))
             db.event(run_id, "task_completed", agent=role, task_id=task_id, **context)
+            langsmith_trace.event("agent_deliverable", dict(agent=role, **{key: (structured or {}).get(key)
+                for key in ("summary", "decisions", "evidence")}))
             logger.info("run=%s completed_agent=%s", run_id, role)
 
         brief = dict(run["brief"])
@@ -647,7 +650,7 @@ def retry_generation(run_id: str, payload: GenerationRetry):
 
 @app.get('/observability/status', dependencies=[Depends(authorize)])
 def observability_status():
-    return telemetry.status(store())
+    return {**telemetry.status(store()), 'langsmith': langsmith_trace.status()}
 
 
 @app.post('/observability/dead-letters/{event_id}/requeue', dependencies=[Depends(authorize)])

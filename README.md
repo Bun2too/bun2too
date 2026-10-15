@@ -259,3 +259,5 @@ The provider-independent path uses OTLP over HTTP, with an independent durable e
 The new path is opt-in until a Collector endpoint and deployment policy are configured. Source instrumentation alone does not establish live ingestion, external evaluator results, alert delivery, host metrics, or individual user attribution.
 
 Daily topic diversity and execution records for agents, Jira Stories, and Confluence dossiers are described in [Editorial and agent tracking](docs/editorial-and-agent-tracking.md).
+
+Optional LangSmith tracing for the existing CrewAI team is documented in [LangSmith tracing](docs/langsmith-tracing.md).

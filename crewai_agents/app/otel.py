@@ -258,8 +258,11 @@ def span(name, attributes=None, parent=None, linked=None, kind=SpanKind.INTERNAL
         attrs['run.id'] = run['id']
     started = time.monotonic()
     outcome = 'completed'
-    with tracer.start_as_current_span(name, context=context, links=links, kind=kind, attributes=attrs,
-                                      record_exception=False, set_status_on_exception=False) as current:
+    from . import langsmith_trace
+    with langsmith_trace.span(name, attrs) as mirrored, tracer.start_as_current_span(
+            name, context=context, links=links, kind=kind, attributes=attrs,
+            record_exception=False, set_status_on_exception=False) as original:
+        current = langsmith_trace.MirrorSpan(original, mirrored)
         try:
             yield current
         except BaseException as exc:

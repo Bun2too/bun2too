@@ -22,6 +22,7 @@ def redact(value):
             value = value.replace(secret, "[REDACTED]")
     value = re.sub(r"(?i)(Bearer\s+)[^\s\"']+", r"\1[REDACTED]", value)
     value = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", value)
+    value = re.sub(r"\blsv2_[A-Za-z0-9_-]+", "[REDACTED]", value)
     value = re.sub(r"(?i)([?&](?:access_token|api_key|token)=)[^\s&#]+", r"\1[REDACTED]", value)
     return value
 

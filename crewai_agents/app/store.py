@@ -89,9 +89,11 @@ class Store:
 
     def event(self, run_id, kind, **details):
         from .observability import redact, trace_context
-        data = redact(dict(kind=kind, at=now(), **{**trace_context(), **details}))
+        from . import langsmith_trace
+        data = redact(dict(kind=kind, at=now(), **{**trace_context(), **langsmith_trace.correlation(), **details}))
         with self.connect() as db:
             db.execute("INSERT INTO events (run_id, data) VALUES (?, ?)", (run_id, json.dumps(data)))
+        langsmith_trace.event(kind, data)
         from .otel import measure
         measure('app.event.count', attributes={'operation': kind, 'outcome': details.get('status', details.get('outcome', 'recorded'))})
 
