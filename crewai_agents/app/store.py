@@ -18,6 +18,9 @@ class Store:
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS operational_state (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS alert_deliveries (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS schedule_slots (slot TEXT PRIMARY KEY, run_id TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS social_posts (id TEXT PRIMARY KEY, run_id TEXT UNIQUE, data TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, run_id TEXT, data TEXT NOT NULL)")
@@ -201,8 +204,10 @@ class Store:
             if run['status'] != 'failed' or not run.get('scheduled'):
                 raise ValueError('Only failed scheduled generation can be retried')
             if automatic:
-                legacy = not run.get('generation_settings') and (run.get('error_details') or {}).get('kind') in {'TimeoutError', 'RuntimeError'}
-                if not (run.get('retryable') or legacy) or run.get('attempts', 0) >= 3:
+                from .recovery import classify
+                policy = classify(run.get('error_details') or {})
+                legacy = not run.get('generation_settings') and policy['retryable']
+                if policy['pause_generation'] or not (run.get('retryable') or legacy) or run.get('attempts', 0) >= 3:
                     raise ValueError('Automatic generation recovery is not eligible or its attempt limit was reached')
                 if run.get('retry_after') and datetime.fromisoformat(run['retry_after']) > datetime.now(timezone.utc):
                     raise ValueError('Generation retry backoff has not elapsed')

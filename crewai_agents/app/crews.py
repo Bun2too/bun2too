@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from .models import AgentDeliverable, MarketingArtifact
-from . import otel, ai_telemetry
+from . import otel, ai_telemetry, model_routing
 
 
 def generation_settings():
@@ -42,11 +42,6 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     from crewai import Agent, Crew, LLM, Process, Task
 
     settings = generation_settings()
-    model = settings['model']
-    # Let the provider use its supported default; some models reject temperature.
-    llm = LLM(model=model, timeout=settings['request_timeout_seconds'], max_retries=0,
-              reasoning_effort=settings['reasoning_effort'], max_completion_tokens=settings['max_output_tokens'])
-    ai_telemetry.instrument_llm(llm, record_event)
     class ObservedAgent(Agent):
         @otel.observed('agent.execute')
         def execute_task(self, *args, **kwargs):
@@ -94,6 +89,14 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
     agents, tasks = [], []
     for key in roles:
         spec = config[key]
+        selected = model_routing.route(key, settings)
+        model = selected['model']
+        llm = LLM(**model_routing.llm_options(selected, settings))
+        model_routing.enable_prompt_cache(llm, selected['provider'])
+        ai_telemetry.instrument_llm(llm, record_event, configured_model=model)
+        if record_event:
+            record_event('model_route_selected', agent=key, **selected)
+
 
         def completed(output, role=key):
             details = output.pydantic.model_dump() if output.pydantic else None

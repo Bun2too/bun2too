@@ -166,6 +166,7 @@ jobs:
       - name: Deploy version-controlled n8n workflows
         if: env.DEPLOY_OPERATION == 'deploy'
         env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
           N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
           N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
           MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}

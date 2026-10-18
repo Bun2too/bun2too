@@ -38,7 +38,12 @@ def price(model, usage):
     if usage.get('input_tokens') is None or usage.get('output_tokens') is None:
         return {'status': 'unavailable', 'reason': 'provider_usage_missing'}
     cached = min(usage.get('cached_tokens', 0), usage['input_tokens'])
-    amount = ((usage['input_tokens'] - cached) * rates['input_per_million'] +
+    created = min(usage.get('cache_creation_tokens', 0), usage['input_tokens'] - cached)
+    write_rate = rates.get('cache_creation_per_million')
+    if created and (not isinstance(write_rate, (int, float)) or not math.isfinite(write_rate) or write_rate < 0):
+        return {'status': 'unavailable', 'reason': 'cache_write_price_missing'}
+    amount = ((usage['input_tokens'] - cached - created) * rates['input_per_million'] +
+              created * (write_rate or 0) +
               cached * rates['cached_input_per_million'] + usage['output_tokens'] * rates['output_per_million']) / 1_000_000
     return {'status': 'estimated', 'usd': amount, 'pricing_version': config['version']}
 
@@ -46,6 +51,7 @@ def price(model, usage):
 def normalized_usage(data):
     aliases = {'input_tokens': ('input_tokens', 'prompt_tokens'), 'output_tokens': ('output_tokens', 'completion_tokens'),
                'cached_tokens': ('cached_tokens', 'cached_prompt_tokens', 'cache_read_input_tokens'),
+               'cache_creation_tokens': ('cache_creation_tokens', 'cache_creation_input_tokens'),
                'reasoning_tokens': ('reasoning_tokens',)}
     result = {}
     for target, sources in aliases.items():
@@ -81,14 +87,21 @@ def image_usage(response, settings):
                         status='completed', usage=usage, cost=cost)
 
 
-def check_budget(record_event=None):
+def check_budget(record_event=None, model=None):
     run = otel.RUN.get()
+    max_calls = int(os.getenv('RUN_MAX_LLM_CALLS', '36'))
+    if not 1 <= max_calls <= 100:
+        raise ValueError('RUN_MAX_LLM_CALLS must be between 1 and 100')
+    if run:
+        calls_so_far = sum(event['kind'] == 'llm_call_finished' for event in run['db'].events(run['id']))
+        if calls_so_far >= max_calls:
+            raise ValueError('Run model call limit reached; operator review required')
     limit = float(os.getenv('RUN_COST_BUDGET_USD', '0'))
     if limit <= 0 or not run:
         return
     if not math.isfinite(limit):
         raise ValueError('Run budget must be a finite USD amount')
-    if price(os.getenv('LLM_MODEL', ''), {'input_tokens': 0, 'output_tokens': 0})['status'] != 'estimated':
+    if price(model or os.getenv('LLM_MODEL', ''), {'input_tokens': 0, 'output_tokens': 0})['status'] != 'estimated':
         raise ValueError('A configured run cost budget requires a versioned model rate card')
     events = run['db'].events(run['id'])
     calls = [event for event in events if event['kind'] == 'llm_call_finished']
@@ -112,7 +125,7 @@ def input_policy(brief):
             raise ValueError('Input contains credential material; remove secrets before generation')
 
 
-def instrument_llm(llm, record_event=None):
+def instrument_llm(llm, record_event=None, configured_model=None):
     if getattr(llm, '_enterprise_instrumented', False):
         return llm
     original = llm.call
@@ -142,8 +155,8 @@ def instrument_llm(llm, record_event=None):
 
     @functools.wraps(original)
     def invoke(*args, **kwargs):
-        check_budget(record_event)
-        model = os.getenv('LLM_MODEL') or str(llm.model)
+        model = configured_model or str(llm.model)
+        check_budget(record_event, model)
         provider = str(getattr(llm, 'provider', 'unknown'))
         call = {'usage': {}, 'first_token': None}
         token = CALL.set(call)

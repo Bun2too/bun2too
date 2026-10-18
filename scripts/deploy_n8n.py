@@ -89,7 +89,95 @@ def marketing_credential(env, base, key, request):
     return credential_id
 
 
+def alert_credentials(env, base, key, request):
+    """Provision optional independent fallback destinations as encrypted credentials."""
+    from urllib.parse import quote
+    configs = []
+    if env.get('ALERT_SLACK_BOT_TOKEN') and env.get('ALERT_SLACK_CHANNEL'):
+        configs.append(('slack', 'httpHeaderAuth', {'name': 'Authorization', 'value': 'Bearer ' + env['ALERT_SLACK_BOT_TOKEN']}))
+    if env.get('SMTP_HOST') and env.get('ALERT_EMAIL_FROM') and env.get('ALERT_EMAIL_TO'):
+        configs.append(('smtp', 'smtp', {'host': env['SMTP_HOST'], 'port': int(env.get('SMTP_PORT', '587')),
+            'user': env.get('SMTP_USER', ''), 'password': env.get('SMTP_PASSWORD', ''),
+            'secure': env.get('SMTP_PORT', '587') == '465', 'disableStartTls': False}))
+    result = {}
+    if not configs:
+        return result
+    existing, path = [], '/credentials?limit=100'
+    while path:
+        page = request(base, key, path)
+        existing.extend(page['data'])
+        cursor = page.get('nextCursor')
+        path = '/credentials?limit=100&cursor=' + quote(cursor, safe='') if cursor else None
+    for channel, kind, data in configs:
+        name = 'Bun2too operational ' + channel + ' (' + env.get('DEPLOY_ENVIRONMENT', 'production') + ')'
+        matches = [record for record in existing if record['name'] == name]
+        if len(matches) > 1:
+            raise ValueError('Duplicate operational notification credentials')
+        payload = {'name': name, 'type': kind, 'data': data}
+        if matches:
+            if matches[0]['type'] != kind:
+                raise ValueError('Operational credential type mismatch')
+            identity = matches[0]['id']
+            request(base, key, '/credentials/' + quote(identity, safe=''), 'PATCH', payload)
+        else:
+            identity = request(base, key, '/credentials', 'POST', payload)['id']
+        result[channel] = identity
+    return result
+
+
+def render_alerts(payload, credentials, env):
+    if 'errors' not in payload['name']:
+        return payload
+    replacements = {
+        '__ALERT_SLACK_CREDENTIAL_ID__': credentials.get('slack', ''),
+        '__ALERT_SMTP_CREDENTIAL_ID__': credentials.get('smtp', ''),
+        '__ALERT_SLACK_CHANNEL__': env.get('ALERT_SLACK_CHANNEL', ''),
+        '__ALERT_EMAIL_FROM__': env.get('ALERT_EMAIL_FROM', ''),
+        '__ALERT_EMAIL_TO__': env.get('ALERT_EMAIL_TO', ''),
+    }
+    def replace(value):
+        if isinstance(value, dict):
+            return {key: replace(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [replace(item) for item in value]
+        if isinstance(value, str):
+            for old, new in replacements.items():
+                value = value.replace(old, new)
+        return value
+    payload = replace(payload)
+    remove = set()
+    if not credentials.get('slack'):
+        remove.update({'Slack fallback notification', 'Remember Slack fallback', 'Gate slack fallback'})
+    if not credentials.get('smtp'):
+        remove.update({'Email fallback notification', 'Gate email fallback', 'Remember email fallback'})
+    if not credentials:
+        remove.add('Prepare independent fallback')
+    payload['nodes'] = [node for node in payload['nodes'] if node['name'] not in remove]
+    payload['connections'] = {source: {'main': [[edge for edge in edges if edge['node'] not in remove] for edges in outputs['main']]}
+                              for source, outputs in payload['connections'].items() if source not in remove}
+    return payload
+
+
+def notification_environment(env):
+    """CI already owns the runtime JSON secret; reuse only notification fields."""
+    result = dict(env)
+    try:
+        runtime = json.loads(env.get('MARKETING_RUNTIME_CONFIG') or '{}')
+    except ValueError:
+        raise ValueError('MARKETING_RUNTIME_CONFIG must contain valid JSON') from None
+    if not isinstance(runtime, dict):
+        raise ValueError('MARKETING_RUNTIME_CONFIG must be an object')
+    for key in ('ALERT_SLACK_BOT_TOKEN', 'ALERT_SLACK_CHANNEL', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER',
+                'SMTP_PASSWORD', 'ALERT_EMAIL_FROM', 'ALERT_EMAIL_TO'):
+        if not result.get(key) and runtime.get(key):
+            if not isinstance(runtime[key], str):
+                raise ValueError('Notification configuration values must be strings')
+            result[key] = runtime[key]
+    return result
+
+
 def deploy(env, request=api):
+    env = notification_environment(env)
     required = ('N8N_BASE_URL', 'N8N_API_KEY', 'CREWAI_BASE_URL')
     for name in required:
         if not env.get(name):
@@ -109,11 +197,13 @@ def deploy(env, request=api):
         cursor = result.get('nextCursor')
         path = '/workflows?limit=100&cursor=' + quote(cursor, safe='') if cursor else None
     credential_id = marketing_credential(env, base, key, request)
+    alerts = alert_credentials(env, base, key, request)
     error_workflow_id = None
     verified_workflows = []
     for source in sorted((ROOT / 'n8n').glob('*.json')):
         payload = render(json.loads(source.read_text()), crew, credential_id,
                          env.get('DEPLOY_ENVIRONMENT', 'production'), env.get('MARKETING_TIMEZONE', 'America/Chicago'))
+        payload = render_alerts(payload, alerts, env)
         if error_workflow_id:
             payload['settings']['errorWorkflow'] = error_workflow_id
         matches = [workflow for workflow in workflows if workflow['name'] == payload['name']]

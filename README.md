@@ -261,3 +261,7 @@ The new path is opt-in until a Collector endpoint and deployment policy are conf
 Daily topic diversity and execution records for agents, Jira Stories, and Confluence dossiers are described in [Editorial and agent tracking](docs/editorial-and-agent-tracking.md).
 
 Optional LangSmith tracing for the existing CrewAI team is documented in [LangSmith tracing](docs/langsmith-tracing.md).
+
+For campaign recovery, failure notifications and watchdog configuration, see [Operational recovery](docs/operational-recovery.md). The [October 14–16 incident RCA](docs/incident-2026-10-16.md) records the confirmed provider-credit outage and contributing alert/retry defects.
+
+Task-based provider routing and offline batch usage: [model routing and cost controls](docs/model-routing-and-cost-controls.md).

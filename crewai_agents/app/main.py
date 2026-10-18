@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,7 +25,7 @@ from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
-from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation, langsmith_trace
+from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation, langsmith_trace, recovery, operations, notifications
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[1] / ".data")))
@@ -39,6 +40,12 @@ async def lifespan(app):
     exporter = threading.Thread(target=telemetry.export_loop, args=(export_stop, store()), daemon=True, name='telemetry-export')
     exporter.start()
     otel.runtime_metrics(store(), DATA_DIR, worker_ready)
+    operations_stop = threading.Event()
+    operations_worker = None
+    if os.getenv('OPERATIONS_ENABLED', 'false').lower() == 'true':
+        operations.bootstrap(store())
+        operations_worker = threading.Thread(target=operations.loop, args=(operations_stop, store()), daemon=True, name='operations-watchdog')
+        operations_worker.start()
     worker = None
     if os.getenv('WORKER_ENABLED', 'true').lower() == 'true':
         worker = threading.Thread(target=worker_loop, args=(stop,), daemon=True)
@@ -50,6 +57,9 @@ async def lifespan(app):
         if worker:
             await asyncio.to_thread(worker.join, 5)
         worker_ready.clear()
+        operations_stop.set()
+        if operations_worker:
+            await asyncio.to_thread(operations_worker.join, 35)
         export_stop.set()
         await asyncio.to_thread(exporter.join, 16)
         await asyncio.to_thread(otel.shutdown)
@@ -92,6 +102,12 @@ def change_run(run_id, **changes):
 def execute_run(run_id, social_only=False):
     db = store()
     run = db.get(run_id)
+    if run.get('scheduled') and operations.circuit(db):
+        return
+    if run.get('scheduled') and run.get('publish_before') and datetime.fromisoformat(run['publish_before']) <= datetime.now(timezone.utc):
+        if run['status'] == 'queued':
+            db.update(run_id, expected={'queued'}, status='expired', publication_blocker='Publishing window expired before generation.')
+        return
     token = otel.RUN.set({'id': run_id, 'db': db})
     try:
         with otel.span('campaign.run', {'run.id': run_id, 'run.attempt': run.get('attempts', 0) + 1},
@@ -254,14 +270,18 @@ def _execute_run(run_id, social_only=False):
             diagnostic['message'] = ('Generation exceeded its execution budget; '
                 f"model request timeout={settings['request_timeout_seconds']}s, "
                 f"agent timeout={settings['agent_timeout_seconds']}s, reasoning_effort={settings['reasoning_effort']}")
-        transient_types = {'TimeoutError', 'ReadTimeout', 'ConnectTimeout', 'APITimeoutError', 'APIConnectionError', 'ConnectError'}
-        retryable = operation in {'Crew.kickoff', 'facebook.preflight', 'load_context'} and any(
-            cause['type'] in transient_types or cause.get('status_code') in {'429', '500', '502', '503', '504'}
-            for cause in diagnostic['causes'])
-        retry_after = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat() if retryable else None
+        policy = recovery.classify(diagnostic, run['attempts'])
+        retryable = operation in {'Crew.kickoff', 'facebook.preflight', 'load_context'} and policy['retryable'] and run['attempts'] < 3
+        retry_after = (datetime.now(timezone.utc) + timedelta(seconds=policy['delay_seconds'])).isoformat() if retryable else None
+        reason = policy['reason'] if policy['category'] != 'generation_error' else 'Generation failed (' + diagnostic['kind'] + '); inspect run diagnostics.'
+        if policy['retryable'] and run['attempts'] >= 3:
+            reason = 'Automatic generation recovery exhausted after three attempts; inspect the provider and resume manually within the publishing window.'
         logger.error("run=%s operation=%s generation_failed %s", run_id, operation, json.dumps(diagnostic))
-        db.update(run_id, status="failed", error="Generation failed (" + type(exc).__name__ + ")",
+        db.update(run_id, status="failed", error=reason, failure_category=policy["category"],
                   error_details=diagnostic, retryable=retryable, retry_after=retry_after)
+        operations.pause(db, run_id, policy)
+        notifications.incident(db, "campaign:" + run_id, "Daily campaign generation failed", reason, run_id,
+                               severity="critical" if policy["pause_generation"] or run["attempts"] >= 3 else "error")
         completed = [task['agent'] for task in db.get(run_id).get('tasks', [])]
         roles = ['researcher', 'writer', 'editor', 'delivery'] if social_only else [
             'product_owner', 'business_analyst', 'researcher', 'creative', 'writer', 'engineering', 'tester', 'editor', 'delivery']
@@ -450,11 +470,14 @@ def worker_loop(stop):
                     if stop.is_set():
                         break
                     execute_run(run['id'])
+                notifications.resolve(store(), 'runtime:worker', 'Campaign worker loop is operating again.')
             except Exception as exc:
                 diagnostic = error_details(exc)
                 logger.error('worker_error %s', json.dumps(diagnostic))
                 try:
                     store().event('runtime', 'worker_failed', status='failed', error=diagnostic)
+                    notifications.incident(store(), 'runtime:worker', 'Campaign worker failed',
+                                           'Inspect service logs and worker diagnostics; error type: ' + diagnostic['kind'])
                 except Exception:
                     logger.error('Could not persist worker failure; inspect service logs')
             stop.wait(2)
@@ -465,6 +488,15 @@ def readiness():
     db = store()
     missing = []
     configuration_errors = {}
+    if os.getenv('MODEL_ROUTING_ENABLED', 'false').lower() == 'true':
+        try:
+            from . import model_routing
+            settings = generation_settings()
+            for role in model_routing.ROLES:
+                model_routing.route(role, settings)
+        except ValueError as exc:
+            missing.append('model_routing')
+            configuration_errors['model_routing'] = str(exc)
     if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() == 'true':
         try:
             marketing.profile()
@@ -505,6 +537,9 @@ def automation_tick():
     if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() != 'true':
         raise HTTPException(409, 'Scheduled marketing is disabled')
     try:
+        blocked = operations.circuit(store())
+        if blocked:
+            return {'status': 'blocked', 'reason': blocked['reason'], 'run_id': blocked.get('run_id')}
         config = marketing.profile()
         marketing.delivery_config()
         if not os.getenv('LLM_MODEL'):
@@ -592,10 +627,15 @@ PROBLEM_STATES = {'failed', 'awaiting_review', 'publication_failed', 'publicatio
 
 
 def campaign_state(run):
+    reason = run.get('publication_blocker') or run.get('error')
+    policy = recovery.classify(run.get('error_details') or {})
+    if run['status'] == 'failed' and policy['pause_generation']:
+        reason = policy['reason']
     return dict(run_id=run['id'], id=run['id'], status=run['status'], campaign_key=run.get('campaign_key'),
                 created_at=run['created_at'], attempt=run.get('attempts', 0),
                 publish_after=run.get('publish_after'), publish_before=run.get('publish_before'),
-                reason=run.get('publication_blocker') or run.get('error'), error=run.get('error_details'),
+                reason=reason, error=run.get('error_details'),
+                failure_category=run.get('failure_category'),
                 retryable=run.get('retryable', False), retry_after=run.get('retry_after'),
                 generation_settings=run.get('generation_settings'))
 
@@ -856,9 +896,11 @@ def workflow_event(payload: WorkflowEvent):
                     operation=payload.operation, node=payload.node, execution_url=payload.execution_url)
     reason = redact(payload.error_message) if payload.error_message else None
     if not reason:
-        reason = next((item.reason or 'Campaign outcome: ' + str(item.status)
-                       for item in outcomes if item.status in PROBLEM_STATES), None)
+        reason = next((item.reason for item in outcomes if item.status in PROBLEM_STATES and item.reason), None)
+        reason = reason or next(('Campaign outcome: ' + str(item.status) for item in outcomes if item.status in PROBLEM_STATES), None)
     run_ids = list(dict.fromkeys(item.run_id for item in outcomes if item.run_id))
+    if not run_ids and payload.error_message and 'runs=' in payload.error_message:
+        run_ids = re.findall(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', payload.error_message.split('runs=', 1)[1])[:100]
     for run_id in run_ids:
         try:
             state = campaign_state(db.get(run_id))
@@ -872,4 +914,43 @@ def workflow_event(payload: WorkflowEvent):
              outcome=payload.result.status if payload.result else status,
              outcomes=[item.model_dump(exclude_none=True, exclude={'campaigns', 'publications', 'results'}) for item in outcomes],
              **metadata)
-    return {'recorded': True, 'failed': failed, 'reason': reason, 'run_ids': run_ids}
+    if failed:
+        if run_ids:
+            for run_id in run_ids:
+                notifications.incident(db, 'campaign:' + run_id, 'Daily campaign requires attention', reason or 'Workflow failed', run_id)
+        else:
+            notifications.incident(db, 'workflow:' + payload.workflow_name + ':' + (payload.node or payload.operation or 'unknown'),
+                                   'Workflow operation failed: ' + payload.workflow_name, reason or 'Inspect n8n execution ' + payload.execution_id)
+    elif payload.status == 'completed':
+        notifications.resolve(db, 'workflow:' + payload.workflow_name + ':' + (payload.node or payload.operation or 'unknown'),
+                              'Workflow operation completed successfully again.')
+    return {'recorded': True, 'failed': failed, 'reason': reason, 'run_ids': run_ids,
+            'notifications_managed': notifications.enabled()}
+
+
+class RecoveryResume(BaseModel):
+    reviewer: str = Field(min_length=1, max_length=200)
+    run_id: str | None = Field(default=None, max_length=100)
+
+
+@app.get('/automation/operations/status', dependencies=[Depends(authorize)])
+def operational_status():
+    return operations.status(store())
+
+
+@app.post('/automation/recovery/resume', dependencies=[Depends(authorize)])
+def resume_generation(payload: RecoveryResume):
+    try:
+        return operations.resume(store(), payload.reviewer, payload.run_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else 'Run not found') from None
+
+
+@app.post('/automation/notifications/{delivery_id}/retry', dependencies=[Depends(authorize)])
+def retry_notification(delivery_id: str, payload: RecoveryResume):
+    try:
+        return notifications.retry(store(), delivery_id, payload.reviewer)
+    except KeyError:
+        raise HTTPException(404, 'Notification delivery not found') from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None

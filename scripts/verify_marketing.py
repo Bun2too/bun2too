@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--terraform', action='store_true', help='Also validate and run Terraform mock-provider tests (requires init)')
     args = parser.parse_args()
-    env = dict(os.environ, TELEMETRY_ENABLED='false', OTEL_SDK_DISABLED='true', DD_LLMOBS_ENABLED='0', CREWAI_TRACING_ENABLED='false',
+    env = dict(os.environ, MODEL_ROUTING_ENABLED='false', LANGSMITH_TRACING='false', ALERTS_ENABLED='false', OPERATIONS_ENABLED='false', TELEMETRY_ENABLED='false', OTEL_SDK_DISABLED='true', DD_LLMOBS_ENABLED='0', CREWAI_TRACING_ENABLED='false',
                DD_TRACE_ENABLED='false', DD_INSTRUMENTATION_TELEMETRY_ENABLED='false',
                DD_REMOTE_CONFIGURATION_ENABLED='false',
                DD_LOGS_ENABLED='false', WORKER_ENABLED='false', PUBLISHING_ENABLED='false')

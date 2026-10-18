@@ -151,3 +151,81 @@ assert.equal(guard(input({failed:false})).length, 1);
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class OperationalWorkflowTests(unittest.TestCase):
+    def test_optional_fallback_credentials_are_rendered_without_tokens(self):
+        template = json.loads((Path(__file__).resolve().parents[1] / 'n8n/00-error-handler.json').read_text())
+        env = {'ALERT_SLACK_CHANNEL': 'C123', 'ALERT_EMAIL_FROM': 'alerts@example.com', 'ALERT_EMAIL_TO': 'bun2too@gmail.com'}
+        payload = deploy_n8n.render_alerts(template, {'slack':'slack-id','smtp':'smtp-id'}, env)
+        serialized = json.dumps(payload)
+        self.assertNotIn('__ALERT_', serialized)
+        self.assertIn('slack-id', serialized)
+        self.assertIn('smtp-id', serialized)
+        self.assertEqual(next(n for n in payload['nodes'] if n['name']=='Record failure')['onError'], 'continueRegularOutput')
+        for node in payload['nodes']:
+            if 'fallback notification' in node['name']:
+                self.assertEqual(node['onError'], 'continueRegularOutput')
+
+    def test_no_fallback_nodes_reference_missing_credentials(self):
+        template = json.loads((Path(__file__).resolve().parents[1] / 'n8n/00-error-handler.json').read_text())
+        payload = deploy_n8n.render_alerts(template, {}, {})
+        self.assertEqual(len(payload['nodes']), 2)
+        names = {n['name'] for n in payload['nodes']}
+        for outputs in payload['connections'].values():
+            for edges in outputs['main']:
+                for edge in edges:
+                    self.assertIn(edge['node'], names)
+
+    def test_alert_credentials_use_encrypted_store_only(self):
+        request = Mock(side_effect=[{'data': []}, {'id': 'slack-credential'}, {'id': 'smtp-credential'}])
+        env = {'ALERT_SLACK_BOT_TOKEN': 'private-slack', 'ALERT_SLACK_CHANNEL':'C123',
+               'SMTP_HOST':'smtp.example.com','SMTP_PASSWORD':'private-smtp','ALERT_EMAIL_FROM':'alerts@example.com',
+               'ALERT_EMAIL_TO':'bun2too@gmail.com'}
+        result = deploy_n8n.alert_credentials(env, 'https://n8n.example', 'api-key', request)
+        self.assertEqual(result, {'slack':'slack-credential','smtp':'smtp-credential'})
+        self.assertEqual(request.call_args_list[1].args[4]['data']['value'], 'Bearer private-slack')
+        self.assertEqual(request.call_args_list[2].args[4]['type'], 'smtp')
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is required for n8n JavaScript checks')
+    def test_fallback_dedupes_channels_independently_and_detects_watchdog_failure(self):
+        root = Path(__file__).resolve().parents[1]
+        error = json.loads((root/'n8n/00-error-handler.json').read_text())
+        operations = json.loads((root/'n8n/marketing-operations.json').read_text())
+        codes = {n['name']: n['parameters']['jsCode'] for n in error['nodes']+operations['nodes'] if n['type']=='n8n-nodes-base.code'}
+        program = r'''
+const assert = require('node:assert/strict');
+const codes = JSON.parse(process.argv[1]);
+const input = data => ({first:()=>({json:data}),all:()=>[{json:data}]});
+const source = {workflow:{id:'daily',name:'Daily'},execution:{lastNodeExecuted:'Generate daily campaign',id:'123'}};
+const select = name => input(source);
+let state = {};
+const prepare = new Function('$input','$','$getWorkflowStaticData',codes['Prepare independent fallback']);
+assert.deepEqual(prepare(input({recorded:true,notifications_managed:true}),select,()=>state),[]);
+const notice = prepare(input({error:'API unavailable'}),select,()=>state)[0].json;
+assert.ok(notice.text.includes('Primary alert service unavailable'));
+const gate = name => new Function('$input','$getWorkflowStaticData',codes[name]);
+const slack = gate('Gate slack fallback')(input(notice),()=>state)[0].json;
+const remember = new Function('$input','$','$getWorkflowStaticData',codes['Remember Slack fallback']);
+remember(input({ok:false}),()=>input(slack),()=>state);
+assert.equal(gate('Gate slack fallback')(input(notice),()=>state).length,1);
+remember(input({ok:true}),()=>input(slack),()=>state);
+assert.equal(gate('Gate slack fallback')(input(notice),()=>state).length,0);
+assert.equal(gate('Gate email fallback')(input(notice),()=>state).length,1);
+const health = new Function('$input',codes['Check operational health']);
+assert.throws(()=>health(input({enabled:false})),/watchdog/);
+assert.throws(()=>health(input({enabled:true,watchdog:{at:new Date().toISOString()},notifications:{enabled:true,configured:{slack:true},deliveries:{'slack:exhausted':1}}})),/alert delivery/);
+assert.equal(health(input({enabled:true,watchdog:{at:new Date().toISOString()},notifications:{enabled:true,configured:{slack:true},deliveries:{}}})).length,1);
+'''
+        result = subprocess.run(['node','-e',program,json.dumps(codes)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_ci_notification_config_reuses_runtime_secret_without_unrelated_fields(self):
+        env = deploy_n8n.notification_environment({'MARKETING_RUNTIME_CONFIG': json.dumps({
+            'ALERT_SLACK_BOT_TOKEN':'private-slack','ALERT_SLACK_CHANNEL':'C123',
+            'OPENAI_API_KEY':'private-provider'}), 'ALERT_SLACK_CHANNEL':'C456'})
+        self.assertEqual(env['ALERT_SLACK_BOT_TOKEN'],'private-slack')
+        self.assertEqual(env['ALERT_SLACK_CHANNEL'],'C456')
+        self.assertNotIn('OPENAI_API_KEY',env)
+        with self.assertRaises(ValueError):
+            deploy_n8n.notification_environment({'MARKETING_RUNTIME_CONFIG':'[]'})

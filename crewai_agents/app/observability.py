@@ -23,6 +23,7 @@ def redact(value):
     value = re.sub(r"(?i)(Bearer\s+)[^\s\"']+", r"\1[REDACTED]", value)
     value = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", value)
     value = re.sub(r"\blsv2_[A-Za-z0-9_-]+", "[REDACTED]", value)
+    value = re.sub(r"\bxox[baprs]-[A-Za-z0-9-]+", "[REDACTED]", value)
     value = re.sub(r"(?i)([?&](?:access_token|api_key|token)=)[^\s&#]+", r"\1[REDACTED]", value)
     return value
 
@@ -45,6 +46,10 @@ def error_details(exc):
             except (ValueError, AttributeError):
                 pass
             entry['status_code'] = str(response.status_code)
+            try:
+                entry['retry_after_seconds'] = min(3600, max(0, int(response.headers.get('Retry-After', '0'))))
+            except (ValueError, AttributeError):
+                pass
         if isinstance(body, dict):
             problem = body.get('error', body)
             if isinstance(problem, dict):
