@@ -54,7 +54,7 @@ Create these **eight entries** for the full MVP including Datadog and pipeline-m
 | Secret name | Exact contents | Used by |
 | --- | --- | --- |
 | `TF_API_TOKEN` | HCP team token or permitted user token with workspace read, state read/write and lock/unlock access | Terraform backend/preflight; HCP workspace must use **Local** execution mode |
-| `RAILWAY_API_TOKEN` | Railway account/workspace API token with access to the project/environment | Railway API, Terraform provider and CLI upload; the workflow maps the provider alias itself |
+| `RAILWAY_API_TOKEN` | Railway account/workspace API token with access to the project/environment | Railway API, Terraform provider and CLI upload; Terraform receives it through its explicit token input |
 | `POSTGRES_PASSWORD` | Correct password for this environment; different in QA | Postgres Terraform variable and configuration readback |
 | `MARKETING_API_KEY` | A long random secret **you generate**; CI injects it into both the CrewAI runtime map and the encrypted n8n Header Auth credential | Deployed API authentication and post-deployment readiness check |
 | `N8N_API_KEY` | Management API key created in the target n8n account, with access to list/read/create/update/activate the managed workflows | Install and verify n8n workflows; **not** used to authenticate CrewAI calls |

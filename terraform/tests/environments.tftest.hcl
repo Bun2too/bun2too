@@ -1,6 +1,7 @@
 mock_provider "railway" {}
 
 variables {
+  railway_api_token = "test-only-account-token"
   github_repository      = "bun2too/crew-team"
   railway_project_id     = "11111111-1111-4111-8111-111111111111"
   railway_environment_id = "22222222-2222-4222-8222-222222222222"

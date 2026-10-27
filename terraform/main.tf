@@ -10,8 +10,14 @@ terraform {
   }
 }
 
+variable "railway_api_token" {
+  description = "Account/workspace token, supplied by TF_VAR_railway_api_token from the canonical RAILWAY_API_TOKEN secret."
+  type        = string
+  sensitive   = true
+}
+
 provider "railway" {
-  # CI maps secrets.RAILWAY_API_TOKEN to the provider's RAILWAY_TOKEN variable.
+  token = var.railway_api_token
 }
 
 variable "deployment_environment" {

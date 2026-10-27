@@ -1,4 +1,5 @@
 import json
+import subprocess
 import unittest
 from unittest.mock import Mock
 
@@ -47,6 +48,27 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Timed out'):
             deploy_crewai.deploy(self.env, self.run, Mock(return_value=self.response('BUILDING')),
                                  self.sleep, Mock(side_effect=[0, 0, 901]))
+
+    def test_recovery_does_not_pass_terraform_token_to_cli(self):
+        env = dict(self.env, RAILWAY_TOKEN='account-token-in-provider-alias', PATH='/bin')
+        deploy_crewai.deploy(env, self.run, Mock(return_value=self.response('SUCCESS')), self.sleep)
+        child_env = self.run.call_args.kwargs['env']
+        self.assertNotIn('RAILWAY_TOKEN', child_env)
+        self.assertEqual(child_env['RAILWAY_API_TOKEN'], self.env['RAILWAY_API_TOKEN'])
+        self.assertEqual(child_env['PATH'], '/bin')
+        self.assertIn('RAILWAY_TOKEN', env)
+
+    def test_cli_failure_is_actionable_and_does_not_echo_secrets(self):
+        for stderr, expected in [('Unauthorized token=private-key', 'authentication rejected'),
+                                 ('unexpected argument --project private-key', 'upload arguments'),
+                                 ('unknown private-key', 'safe diagnostic category')]:
+            request = Mock()
+            run = Mock(side_effect=subprocess.CalledProcessError(1, ['railway'], stderr=stderr))
+            with self.assertRaises(RuntimeError) as caught:
+                deploy_crewai.deploy(self.env, run, request, self.sleep)
+            self.assertIn(expected, str(caught.exception))
+            self.assertNotIn('private-key', str(caught.exception))
+            request.assert_not_called()
 
     def test_upload_failure_does_not_query_status(self):
         request = Mock()

@@ -136,8 +136,8 @@ jobs:
 
       - name: Terraform initialize, prepare state and plan or apply
         env:
-          # Terraform uses RAILWAY_TOKEN for account/workspace tokens.
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          # Native provider input; do not set the CLI project-token variable.
+          TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           N8N_SERVICE_ID: ${{ vars.N8N_SERVICE_ID }}
           N8N_VOLUME_READY: ${{ vars.N8N_VOLUME_READY || 'false' }}
