@@ -1,0 +1,5 @@
+{
+  "include": [
+    {"kind": "container", "directory": "crewai_agents", "image": "bun2too-crew-team"}
+  ]
+}

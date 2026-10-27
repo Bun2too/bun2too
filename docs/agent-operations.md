@@ -1,6 +1,6 @@
 # Marketing team: work, observability and Atlassian records
 
-For scheduled Facebook publishing and the daily retrospective loop, use the [MVP architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This document describes the retained manual-campaign and Atlassian integration; daily scheduled campaigns do not automatically create Jira/Confluence work.
+For scheduled Facebook publishing and the daily retrospective loop, use the [MVP architecture](marketing-mvp-architecture.md) and [operations runbook](marketing-operations.md). This document describes manual-campaign roles and Atlassian integration. Scheduled campaigns also synchronize lifecycle records when Atlassian is configured; see [editorial and agent tracking](editorial-and-agent-tracking.md). Stable role context is maintained in [the agent context files](agent-context.md).
 
 The application now records what each role was asked to do, its output and structured decisions, and the status of publication to Jira/Confluence. It uses nine roles:
 
@@ -16,7 +16,7 @@ The application now records what each role was asked to do, its output and struc
 | Editor | Factual/brand review and release blockers |
 | Delivery | Consolidated deliverables, proposed schedule and campaign package |
 
-The run remains sequential: later roles receive earlier outputs. Publishing is deterministic application code after successful generation, rather than an agent holding credentials and inventing arbitrary API calls. Atlassian records are proposals and references, not proof that engineering or publishing has executed.
+Runs are sequential. Manual campaigns receive prior outputs; scheduled campaigns use explicit task dependencies, with Tester reviewing the final Editor candidate. Publishing is deterministic application code after successful generation, rather than an agent holding credentials and inventing arbitrary API calls. Atlassian records are proposals and references, not proof that engineering or publishing has executed.
 
 ## Datadog setup
 
@@ -28,7 +28,7 @@ The container now runs `python start.py`. This loads local dotenv settings befor
 
 Open Datadog Agent/LLM Observability, select `bun2too-marketing-crew-team`, filter by environment and find the run/session ID. This traces SDK operations and configured tools, not every operating-system command. The agents currently have no shell/code-execution tools. Task prompts and concise decision summaries are review evidence; they are not guaranteed access to private internal model reasoning.
 
-The span processor and local audit exporter redact configured secret values and credential-named fields. Avoid placing credentials or unnecessary personal data in briefs. Prompt/output capture intentionally exports campaign content to Datadog; redaction is defensive, not a comprehensive data-classification system.
+The span processor and local audit exporter redact configured secret values and credential-named fields. Avoid placing credentials or unnecessary personal data in briefs. Prompt/output capture is opt-in through TELEMETRY_CAPTURE_CONTENT; enabling it exports campaign content to Datadog. Redaction is defensive, not a comprehensive data-classification system.
 
 Reference: [Datadog CrewAI integration](https://docs.datadoghq.com/llm_observability/guide/crewai_guide/).
 

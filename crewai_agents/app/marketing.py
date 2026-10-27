@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from .observability import error_details
+from .observability import error_details, redact
 from . import otel, ai_telemetry
 
 
@@ -267,11 +267,56 @@ def editorial_context(db, run, config):
             'provider_focus_limit': 'Do not repeat provider names or products in headlines within seven days. Incidental body mentions and comparisons are allowed. Editors must also reject repeated provider-centered articles even if their headlines omit the name.'}
 
 
+def performance_context(records):
+    """Historical outcomes inform measurement, never supply copy or research evidence."""
+    allowed = ('run_id', 'status', 'created_at', 'published_at', 'metrics', 'missing_metrics', 'metrics_status')
+    return [{key: record[key] for key in allowed if key in record} for record in records[:30]]
+
+
+def review_diagnostics(run):
+    """Bounded, redacted evidence for operators; never changes approval state."""
+    def safe(value, limit=600):
+        return str(redact(str(value)))[:limit]
+
+    blockers = (run.get('artifact') or {}).get('blockers') or []
+    tasks = {task['agent']: task.get('structured') or {} for task in run.get('tasks', [])}
+    reviews = {}
+    for role in ('tester', 'editor'):
+        review = tasks.get(role, {})
+        reviews[role] = {
+            'recorded': role in tasks,
+            'approved_for_publication': review.get('approved_for_publication') is True,
+            'summary': safe(review.get('summary', '')),
+            'decisions': [safe(item) for item in (review.get('decisions') or [])[:5]],
+            'risks': [safe(item) for item in (review.get('risks') or [])[:5]],
+        }
+    allowed = {source['url'] for source in run.get('source_snapshots', [])}
+    unverified = [url for article in (run.get('artifact') or {}).get('articles', [])
+                  for url in article.get('source_urls', []) if url not in allowed]
+    return {'unretrieved_source_urls': [safe(url) for url in unverified[:10]],
+            'blocker_count': len(blockers), 'blockers': [safe(item) for item in blockers[:10]],
+            'reviews': reviews}
+
+
+def publication_blocker_reason(run):
+    reason = run.get('publication_blocker') or run.get('error')
+    details = review_diagnostics(run)
+    if details['blocker_count'] and reason in (None, 'Artifact has unresolved blockers'):
+        examples = '; '.join(details['blockers'][:3])[:1200]
+        return f"Artifact has unresolved blockers ({details['blocker_count']}): {examples}"
+    if reason == 'Article cites a source that was not retrieved' and details['unretrieved_source_urls']:
+        return reason + ': ' + '; '.join(details['unretrieved_source_urls'][:3])[:1200]
+    if reason == 'Tester and Editor must both approve publication':
+        pending = [role for role, review in details['reviews'].items() if not review['approved_for_publication']]
+        return reason + '; missing approval: ' + ', '.join(pending)
+    return reason
+
+
 @otel.policy('output')
 def check_artifact(run, config=None):
     artifact = run['artifact']
     if artifact.get('blockers'):
-        raise ValueError('Artifact has unresolved blockers')
+        raise ValueError(publication_blocker_reason(dict(run, publication_blocker='Artifact has unresolved blockers')))
     if len(artifact['posts']) != 1 or artifact['posts'][0]['channel'].lower() != 'facebook':
         raise ValueError('Scheduled MVP requires exactly one Facebook post')
     if len(artifact['posts'][0]['text']) > 5000:

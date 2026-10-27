@@ -5,7 +5,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import notifications, recovery
+from . import notifications, recovery, marketing
 from .observability import error_details
 from .store import now
 
@@ -103,7 +103,7 @@ def inspect_runs(db):
                 except ValueError:
                     pass
         elif run['status'] in {'publication_failed', 'publication_unknown', 'expired', 'awaiting_review'}:
-            reason = run.get('publication_blocker') or run.get('error') or 'Campaign requires review; inspect approved content and publishing evidence.'
+            reason = marketing.publication_blocker_reason(run) or 'Campaign requires review; inspect approved content and publishing evidence.'
             if run['status'] == 'publication_unknown':
                 reason = 'Facebook send outcome is unknown. Reconcile the remote post before any further send; automatic replay is disabled.'
             notifications.incident(db, key, 'Daily campaign requires attention: ' + run['status'], reason, run['id'])

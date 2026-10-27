@@ -162,7 +162,7 @@ def _execute_run(run_id, social_only=False):
             db.event(run_id, 'editorial_policy_selected', **editorial)
             brief['source_material'] = json.dumps({'business_facts': config['business_facts'],
                                                    'recent_research': sources})
-            brief['observed_results'] = db.feedback_context()
+            brief['observed_results'] = marketing.performance_context(db.feedback_context())
             brief['retrospective_instruction'] = ('Compare observed post results, distinguish missing metrics from zero, '
                 'propose one evidence-backed improvement for this cycle; do not claim causality or invented results.')
             brief['required_output'] = ('Follow editorial_context and select a source-supported topic. Produce exactly one '
@@ -184,7 +184,10 @@ def _execute_run(run_id, social_only=False):
                     'Jira tasks, or an extra human approval when automatic policy is enabled. '
                     'The application enforces release timing, approved-content hashing and duplicate-send protection. '
                     'Do not claim tests were run. Missing metrics are not content blockers. '
-                    'Reject unsupported factual claims or rewrite them using the supplied sources.'),
+                    'Reject unsupported factual claims or rewrite them using the supplied sources. '
+                    'Historical publications are exclusions, never candidate drafts or evidence. '
+                    'Only URLs in recent_research may be cited. Writer and Editor must correct or replace '
+                    'unsuitable drafts; only Delivery must preserve the final approved wording.'),
             }
             db.event(run_id, 'research_collected', source_urls=[item['url'] for item in sources],
                      recent_item_count=sum(bool(item.get('published_at')) for item in sources),
@@ -207,7 +210,9 @@ def _execute_run(run_id, social_only=False):
         if len(json.dumps(brief["reviewed_lessons"])) > 60000:
             raise ValueError("Too many reviewed lessons selected")
         manifest = {'service_version': os.getenv('SERVICE_VERSION', 'unknown'),
-                    'prompt_version': ai_telemetry.version([Path(__file__).with_name(name).read_text() for name in ('agents.json', 'crews.py')]),
+                    'prompt_version': ai_telemetry.version(
+                        [Path(__file__).with_name(name).read_text() for name in ('agents.json', 'crews.py')] +
+                        [path.read_text() for path in sorted(Path(__file__).with_name('agent_context').glob('*.md'))]),
                     'policy_version': ai_telemetry.version(marketing.profile()) if run.get('scheduled') else 'manual-v1',
                     'source_snapshot_hash': ai_telemetry.version(brief.get('source_material', ''))}
         db.update(run_id, telemetry_manifest=manifest)
@@ -627,7 +632,7 @@ PROBLEM_STATES = {'failed', 'awaiting_review', 'publication_failed', 'publicatio
 
 
 def campaign_state(run):
-    reason = run.get('publication_blocker') or run.get('error')
+    reason = marketing.publication_blocker_reason(run)
     policy = recovery.classify(run.get('error_details') or {})
     if run['status'] == 'failed' and policy['pause_generation']:
         reason = policy['reason']
@@ -635,6 +640,7 @@ def campaign_state(run):
                 created_at=run['created_at'], attempt=run.get('attempts', 0),
                 publish_after=run.get('publish_after'), publish_before=run.get('publish_before'),
                 reason=reason, error=run.get('error_details'),
+                review_details=marketing.review_diagnostics(run) if run['status'] == 'awaiting_review' else None,
                 failure_category=run.get('failure_category'),
                 retryable=run.get('retryable', False), retry_after=run.get('retry_after'),
                 generation_settings=run.get('generation_settings'))
@@ -682,6 +688,23 @@ def retry_generation(run_id: str, payload: GenerationRetry):
         if not os.getenv('LLM_MODEL'):
             raise ValueError('LLM_MODEL is not configured')
         return campaign_state(store().retry_generation(run_id, payload.reviewer))
+    except KeyError:
+        raise HTTPException(404, 'Run not found') from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post('/runs/{run_id}/revise-content', dependencies=[Depends(authorize)], status_code=202)
+def revise_content(run_id: str, payload: GenerationRetry):
+    """Explicit bounded regeneration after a diagnosed content rejection; no approval override."""
+    if os.getenv('MARKETING_AUTOMATION_ENABLED', 'false').lower() != 'true':
+        raise HTTPException(409, 'Scheduled marketing is disabled')
+    try:
+        if operations.circuit(store()):
+            raise ValueError('Resolve the provider outage before requesting content revision')
+        marketing.delivery_config()
+        generation_settings()
+        return campaign_state(store().retry_generation(run_id, payload.reviewer, content_revision=True))
     except KeyError:
         raise HTTPException(404, 'Run not found') from None
     except ValueError as exc:

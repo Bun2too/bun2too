@@ -19,8 +19,46 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  verify:
     if: github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.packages.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify application and deployment logic locally
+        run: |
+          python3 -m pip install -r crewai_agents/requirements.txt
+          python3 scripts/verify_marketing.py
+      - name: Validate package targets
+        id: packages
+        run: python3 scripts/publish_package.py matrix
+
+  packages:
+    needs: verify
+    if: inputs.operation == '' || inputs.operation == 'deploy'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      kind: ${{ matrix.kind }}
+      directory: ${{ matrix.directory }}
+      image-name: ${{ matrix.image || 'bun2too-crew-team' }}
+
+  deploy:
+    needs: [verify, packages]
+    if: ${{ always() && !cancelled() && needs.verify.result == 'success' && (needs.packages.result == 'success' || inputs.operation == 'infrastructure-only' || inputs.operation == 'import-state') }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
@@ -64,10 +102,8 @@ jobs:
           MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
         run: python3 scripts/prepare_runtime_config.py
 
-      - name: Verify application and deployment logic locally
-        run: |
-          python3 -m pip install -r crewai_agents/requirements.txt
-          python3 scripts/verify_marketing.py
+      - name: Install deployment dependencies
+        run: python3 -m pip install -r crewai_agents/requirements.txt
 
       - name: Verify environment, credentials and deployment targets
         env:
