@@ -7,6 +7,7 @@ Run helpers from the repository root. Most deployment scripts read explicit envi
 - `check_deployment_scope.py`, `check_deployment.py`: scope, credentials and target verification.
 - `prepare_runtime_config.py`: secret runtime JSON for Terraform; output can contain credentials.
 - `prepare_terraform_state.py`, `ensure_n8n_volume.py`, `check_n8n_storage_plan.py`: preserve existing resources and mounted data.
+- `apply_terraform.py`: bounded missing-CrewAI-source recovery; fresh upload, replan and storage guard before one retry. Infrastructure-only never uploads.
 - `deploy_crewai.py`: upload and wait for the exact Railway deployment ID; a healthy older deployment is insufficient.
 - `check_marketing_runtime.py`, `deploy_n8n.py`: validate runtime before enabling schedules; read back workflow activation.
 - `marketing_batch.py`: operator-driven offline enrichment, not publication. Ambiguous submission must be reconciled before resubmission.

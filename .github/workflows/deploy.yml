@@ -120,6 +120,20 @@ jobs:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
+      - name: Set up Node.js 24 for Railway CLI
+        if: env.DEPLOY_OPERATION == 'deploy'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install Railway CLI Engine
+        if: env.DEPLOY_OPERATION == 'deploy'
+        run: |
+          python3 scripts/run_deployment_step.py node --version
+          python3 scripts/run_deployment_step.py npm install -g @railway/cli
+          python3 scripts/run_deployment_step.py railway --version
+
       - name: Terraform initialize, prepare state and plan or apply
         env:
           # Terraform uses RAILWAY_TOKEN for account/workspace tokens.
@@ -159,7 +173,7 @@ jobs:
             trap 'rm -f "$plan_file"' EXIT
             run terraform plan -input=false -no-color -out="$plan_file"
             run python3 "$GITHUB_WORKSPACE/scripts/check_n8n_storage_plan.py" "$plan_file"
-            run terraform apply -input=false -no-color "$plan_file"
+            run python3 "$GITHUB_WORKSPACE/scripts/apply_terraform.py" "$plan_file"
             run python3 "$GITHUB_WORKSPACE/scripts/ensure_n8n_volume.py" --verify-only
           fi
 
@@ -169,20 +183,6 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         run: python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py --verify-postgres
-
-      - name: Set up Node.js 24 for Railway CLI
-        if: env.DEPLOY_OPERATION == 'deploy'
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          package-manager-cache: false
-
-      - name: Install Railway CLI Engine
-        if: env.DEPLOY_OPERATION == 'deploy'
-        run: |
-          python3 scripts/run_deployment_step.py node --version
-          python3 scripts/run_deployment_step.py npm install -g @railway/cli
-          python3 scripts/run_deployment_step.py railway --version
 
       - name: Deploy CrewAI and wait for Railway deployment success
         if: env.DEPLOY_OPERATION == 'deploy'
