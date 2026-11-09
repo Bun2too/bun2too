@@ -69,7 +69,6 @@ jobs:
     env:
       DEPLOY_OPERATION: ${{ inputs.operation || 'deploy' }}
       DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
-      TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugin-cache
       # Set TF_WORKSPACE separately in each GitHub environment.
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
@@ -125,13 +124,15 @@ jobs:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
       - name: Prepare Terraform provider cache directory
-        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+        run: |
+          mkdir -p "$RUNNER_TEMP/terraform-plugin-cache"
+          printf 'TF_PLUGIN_CACHE_DIR=%s\n' "$RUNNER_TEMP/terraform-plugin-cache" >> "$GITHUB_ENV"
 
       - name: Cache locked Terraform providers
         uses: actions/cache@v4
         with:
           # Only provider binaries; never cache backend metadata, credentials, plans or state.
-          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          path: ${{ runner.temp }}/terraform-plugin-cache
           key: terraform-providers-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('terraform/.terraform.lock.hcl') }}
 
       - name: Set up Node.js 24 for Railway CLI
