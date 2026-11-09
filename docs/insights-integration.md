@@ -1,5 +1,90 @@
 # Bun2Too Insights integration
 
+## Configuration reference
+
+This is the canonical reference for the insights settings in this repository. The deployment checklist in `README.md` and `docs/deployment.md` points here; `crewai_agents/.env.example` uses the same names and defaults. Values below describe configuration, not verified live access.
+
+### Where to configure each service
+
+| Consumer | Local development | Hosted deployment |
+| --- | --- | --- |
+| CrewAI public pages and notification worker | Ignored `crewai_agents/.env` | Merge settings into GitHub **Settings → Environments → production (or qa) → Secrets → `MARKETING_RUNTIME_CONFIG`**. CI passes the JSON to Terraform, which writes the selected Railway service/environment variables. |
+| Main Next.js website signup/account APIs | The website repository's ignored `.env.local` | Configure the website hosting environment. Auth0 Management and Turnstile secrets are server-only; public/build settings must be present when building the website. This CrewAI pipeline does not deploy website secrets. |
+
+**Standalone GitHub secrets named `AUTH0_DOMAIN`, `AUTH0_MANAGEMENT_CLIENT_SECRET`, `AWS_REGION`, or `INSIGHTS_*` are not consumed by this workflow.** Put their values inside the complete `MARKETING_RUNTIME_CONFIG` JSON. Only `MARKETING_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` have explicit standalone-to-runtime merging in `scripts/prepare_runtime_config.py`. Root `.env`, local AWS profiles, and the website's `.env.local` do not populate GitHub or Railway automatically.
+
+All runtime JSON values must be strings, including `"true"` and `"false"`. Merge the insights entries into your existing map; do not replace the map and lose model, Facebook, telemetry or other settings. GitHub does not interpolate references to other secrets inside this JSON. Terraform state contains sensitive runtime values.
+
+### CrewAI runtime settings
+
+| Setting | Secret? | Value / source | Required for |
+| --- | --- | --- | --- |
+| `INSIGHTS_SITE_URL` | No | `https://bun2too.com`, without a trailing slash; use the corresponding main-site origin for QA | Canonical links, digest links, signup embed and permitted push registration origin |
+| `INSIGHTS_DIGEST_ENABLED` | No | `false` initially; enable only after controlled delivery verification | Weekly SES digest worker |
+| `AUTH0_DOMAIN` | No | `dev-bun2too.us.auth0.com` — tenant hostname only, **no `https://`, path or trailing slash** | Digest audience lookup and unsubscribe |
+| `AUTH0_MANAGEMENT_CLIENT_ID` | Identifier | Client ID of an authorized server-side **Machine to Machine** application | Auth0 Management API access |
+| `AUTH0_MANAGEMENT_CLIENT_SECRET` | **Yes** | Client secret belonging to that same Management application | Auth0 Management API access; never use a `NEXT_PUBLIC_` variable |
+| `AWS_REGION` | No | Current checked-in configuration: `us-west-2` (Oregon). Verify the SES identity and IAM configuration in this exact region. | SES client region |
+| `INSIGHTS_EMAIL_FROM` | No | `info@bun2too.com`; the sender identity/domain must be verified in the selected SES region | Digest From address |
+| `AWS_ACCESS_KEY_ID` | Credential identifier | AWS SDK credential-chain input, when using explicit access keys instead of workload credentials | SES authentication, if no other supported credential source exists |
+| `AWS_SECRET_ACCESS_KEY` | **Yes** | Matching scoped AWS secret key; use the same credential source as the access key ID | SES authentication with explicit keys |
+| `AWS_SESSION_TOKEN` | **Yes** | Required only with temporary AWS credentials; omit for long-lived access keys. Temporary credentials also need a refresh mechanism. | Temporary AWS credentials |
+| `INSIGHTS_UNSUBSCRIBE_SECRET` | **Yes** | At least 32 random characters, generated once and retained across deployments | Signing/validating unsubscribe links; separate from all API keys |
+| `INSIGHTS_PUSH_ENABLED` | No | `false` initially; enable only after a controlled browser subscription/send check | Web Push worker and registration endpoint |
+| `INSIGHTS_VAPID_PUBLIC_KEY` | No | URL-safe base64 public key from the generated VAPID P-256 key pair | Browser push subscription; intentionally exposed by `/insights/push-config` when enabled |
+| `INSIGHTS_VAPID_PRIVATE_KEY` | **Yes** | Matching private key accepted by `pywebpush`; keep it server-side | Signing Web Push sends |
+| `INSIGHTS_VAPID_SUBJECT` | No | `mailto:info@bun2too.com` | Contact identity in VAPID claims |
+
+`PUBLIC_API_BASE_URL` remains the CrewAI origin, normally `https://crewai.bun2too.com`; it is different from `INSIGHTS_SITE_URL`. It supplies artwork URLs and existing publication links. Public articles and feeds do not require Auth0, AWS or VAPID credentials. Auth0 is needed for email consent/unsubscribe, not anonymous browser-push permission.
+
+The previously discussed SES region was `us-east-2`; the current runtime default and `.env.example` are `us-west-2`. This reference follows the current repository configuration. Changing a region string does not migrate an SES identity or its verification.
+
+### Auth0 application boundaries
+
+The CrewAI Management client calls `https://<AUTH0_DOMAIN>/oauth/token` with audience `https://<AUTH0_DOMAIN>/api/v2/`. The worker derives that audience; it does **not** read `AUTH0_AUDIENCE` or `NEXT_PUBLIC_AUTH0_CLIENT_ID`.
+
+Authorize its Machine to Machine application for `read:users` and `update:users_app_metadata` (unsubscribe). The main website may use a separate Management application in the **same tenant**, with additional provisioning permissions such as `create:users`. Do not substitute the browser SPA client ID/secret or an OpenAI/Railway token for Management credentials. Never expose the Management client secret to the browser.
+
+| Main-website setting | Purpose | Used by this CrewAI worker? |
+| --- | --- | --- |
+| `AUTH0_DOMAIN`, `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET` | Website server-side provisioning and preference updates; configure independently in the website host | Same names, independently configured values; same tenant, optionally separate clients |
+| `AUTH0_AUDIENCE` | Audience of the website's authenticated preferences API | No; not the Management API audience |
+| `AUTH0_EMAIL_CONNECTION` | Passwordless connection name, normally `email` | No; CrewAI reads existing user consent rather than provisioning users |
+| `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_AUTH0_EMAIL_CONNECTION` | Public Auth0 React SDK configuration for the website SPA | No |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Public CAPTCHA widget key and server-only verification secret | No; signup remains on the main website |
+| `INSIGHTS_API_ORIGIN` | CrewAI origin, normally `https://crewai.bun2too.com`; used by server fetches and build-time rewrites | No |
+| `NEXT_PUBLIC_SITE_URL` | Main website origin, normally `https://bun2too.com`; keep aligned with `INSIGHTS_SITE_URL` | No |
+| `INSIGHTS_EMBED_ORIGINS` | Main-site configuration for permitted signup-frame origins; follow the website repo's current format/defaults | No |
+
+Digest delivery requires the Auth0 user to have `email_verified=true`, `app_metadata.bun2too.newsletter.status="subscribed"`, and `ai-automation` in the newsletter topics. Creating a passwordless record leaves consent pending; a successful signup response alone does not authorize email delivery.
+
+### Runtime JSON merge example
+
+Merge these entries into `MARKETING_RUNTIME_CONFIG`. Replace placeholders only for the features you configure; keep both delivery flags false until verified. Omit unused optional credential entries instead of deploying placeholder credentials. AWS credential keys are deliberately not included below: supply them securely through the SDK credential source chosen above.
+
+```json
+{
+  "INSIGHTS_SITE_URL": "https://bun2too.com",
+  "INSIGHTS_DIGEST_ENABLED": "false",
+  "AUTH0_DOMAIN": "dev-bun2too.us.auth0.com",
+  "AUTH0_MANAGEMENT_CLIENT_ID": "REPLACE_WITH_M2M_CLIENT_ID",
+  "AUTH0_MANAGEMENT_CLIENT_SECRET": "REPLACE_WITH_M2M_CLIENT_SECRET",
+  "AWS_REGION": "us-west-2",
+  "INSIGHTS_EMAIL_FROM": "info@bun2too.com",
+  "INSIGHTS_UNSUBSCRIBE_SECRET": "REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS",
+  "INSIGHTS_PUSH_ENABLED": "false",
+  "INSIGHTS_VAPID_PUBLIC_KEY": "REPLACE_WITH_VAPID_PUBLIC_KEY",
+  "INSIGHTS_VAPID_PRIVATE_KEY": "REPLACE_WITH_MATCHING_VAPID_PRIVATE_KEY",
+  "INSIGHTS_VAPID_SUBJECT": "mailto:info@bun2too.com"
+}
+```
+
+### Verification and rotation
+
+After deploying, authenticated `GET /automation/insights/status` reports feature flags, push registration count and delivery-state counts. It does not verify Auth0 permissions, SES identity/IAM, inbox receipt or VAPID validity. The CI provider-key read-back gate checks OpenAI/Anthropic/Gemini keys only; it does not validate these insights credentials.
+
+Verify Auth0 lookup/preferences with a controlled test account, then SES acceptance and actual inbox receipt, and finally a controlled opt-in browser send. Keep delivery flags off until their prerequisites are ready. Rotate Management/AWS credentials in the runtime map and redeploy; update a separate website client only if that credential is shared. Retain the unsubscribe signing secret so existing links remain valid. Retain the VAPID key pair for existing subscriptions; replacing it requires a browser subscription migration, not just a new environment value. Do not automatically replay delivery rows marked `unknown` or left `sending` after a crash.
+
 ## Ownership and routes
 
 CrewAI remains the editorial/publishing backend. The main Next.js website at `/Users/beball/Development/bun2too/bun2too-website` now renders `/insights` and `/insights/[id]` inside its existing navigation/footer. Server-side requests use `INSIGHTS_API_ORIGIN` (default `https://crewai.bun2too.com`); there is no marketing/admin credential in the browser. The list revalidates every 60 seconds. Public article projections include only approved runs whose status is `published`, never prompts, reviewers, traces, errors or draft artifacts. Individual lookups remain available for articles older than the 100-item index/feed.

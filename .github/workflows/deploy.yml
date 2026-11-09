@@ -69,6 +69,7 @@ jobs:
     env:
       DEPLOY_OPERATION: ${{ inputs.operation || 'deploy' }}
       DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
+      TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugin-cache
       # Set TF_WORKSPACE separately in each GitHub environment.
       TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
@@ -123,6 +124,16 @@ jobs:
           terraform_wrapper: false
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
+      - name: Prepare Terraform provider cache directory
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Cache locked Terraform providers
+        uses: actions/cache@v4
+        with:
+          # Only provider binaries; never cache backend metadata, credentials, plans or state.
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-providers-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('terraform/.terraform.lock.hcl') }}
+
       - name: Set up Node.js 24 for Railway CLI
         if: env.DEPLOY_OPERATION == 'deploy'
         uses: actions/setup-node@v6
@@ -161,7 +172,7 @@ jobs:
           run() { python3 "$GITHUB_WORKSPACE/scripts/run_deployment_step.py" "$@"; }
           cd terraform
           run terraform version
-          run terraform init -input=false -no-color
+          run python3 "$GITHUB_WORKSPACE/scripts/init_terraform.py"
           run terraform validate -no-color
           if [[ "$DEPLOY_OPERATION" == import-state ]]; then
             run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py" --import-existing

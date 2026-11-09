@@ -45,7 +45,7 @@ Service IDs can be shared across Railway environments in one project; environmen
 
 ### 3. GitHub Environment secrets — individual entries
 
-Create these **eight entries** for the full MVP including Datadog and pipeline-managed runtime configuration. The two `*_RUNTIME_CONFIG` entries contain JSON objects, not file paths.
+Create these **eight base entries** for the full MVP including Datadog and pipeline-managed runtime configuration. Insights settings are additional keys inside `MARKETING_RUNTIME_CONFIG`, not additional standalone GitHub secrets. The two `*_RUNTIME_CONFIG` entries contain JSON objects, not file paths.
 
 | Secret name | Exact contents | Used by |
 | --- | --- | --- |
@@ -59,6 +59,8 @@ Create these **eight entries** for the full MVP including Datadog and pipeline-m
 | `DD_API_KEY` | Datadog API key for the configured site | **GitHub deployment outcome logs**; also supply a runtime Datadog key inside the CrewAI JSON for agent activity |
 
 The two Datadog keys may be the same valid key or separate keys for the same site. Configuring only standalone `DD_API_KEY` does not forward it to CrewAI. The pipeline can run without deployment-log ingestion, but that does not fulfill the requested Datadog observability.
+
+**Insights / Auth0 / SES / Web Push:** put `AUTH0_DOMAIN`, `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET`, `AWS_REGION`, any required AWS SDK credentials, and `INSIGHTS_*` settings inside `MARKETING_RUNTIME_CONFIG`. Creating standalone GitHub secrets with those names has no effect in this workflow. The canonical names, required values, application boundaries and merge example are in the **Configuration reference** in `docs/insights-integration.md` (linked below this checklist). Main-website secrets must also be configured separately in its host; this pipeline does not forward them there.
 
 ### 4. Paste the complete runtime JSON secrets
 
@@ -184,6 +186,8 @@ Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`
 - [ ] Verify a real Facebook post ID, its reachable article URL and later engagement observations. In Datadog verify app logs/LLM activity and the separate deployment log. A green deployment alone does not prove a successful model call or Facebook publication.
 
 <!-- END GITHUB MVP CONFIGURATION -->
+
+For insights configuration, use the [Auth0, SES and Web Push reference](insights-integration.md#configuration-reference).
 
 ## n8n persistence, recovery and first deployment
 
@@ -426,6 +430,14 @@ Use the marketing Bearer key and explicit client User-Agent, as with `/automatio
 ## Enterprise OTLP telemetry
 
 The runtime configuration map accepts the settings in [the telemetry implementation guide](telemetry-implementation.md). The Collector and its backend stores are separate infrastructure; the current Railway Terraform does not provision them. Configure and verify the endpoint, authentication, durable queue volume, host signals and alert route before enabling `TELEMETRY_ENABLED=true` in a production runtime map. The [architecture standard](enterprise-ai-observability-architecture.md) defines acceptance requirements and optional Kafka/Event Hub buffering.
+
+## Terraform provider download failures
+
+The November 9, 2026 log failed during `terraform init`: GitHub returned HTTP 504 while Terraform fetched the Railway provider's cryptographic signature. This happened before plan/apply and does not indicate an Auth0, AWS or Railway credential problem. No runtime configuration changes are needed for this failure.
+
+CI runs `scripts/init_terraform.py` with the committed dependency lockfile in read-only mode. Recognized transient provider download errors get **three total attempts**, with waits of **5 seconds and 15 seconds**. Each attempt has a 120-second timeout; a timeout stops immediately. Authentication, certificate, signature/checksum integrity, backend and unrecognized errors also stop immediately. After the third transient failure, CI exits unsuccessfully before plan/apply. Check GitHub release/registry availability and start a new workflow from the updated commit after recovery; rerunning an old workflow revision does not include this fix.
+
+The workflow caches only provider binaries, keyed by runner OS, architecture and the lockfile hash. Backend metadata, credentials, plans and state are excluded. The cache reduces repeated downloads but does not guarantee operation without registry access. Provider versions and signature/checksum verification remain enforced; do not bypass verification to recover from a download failure. See HashiCorp's [provider cache documentation](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) and [initialization documentation](https://developer.hashicorp.com/terraform/cli/commands/init).
 
 ## Missing Railway deployment source during Terraform apply
 

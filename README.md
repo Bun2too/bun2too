@@ -49,7 +49,7 @@ Service IDs can be shared across Railway environments in one project; environmen
 
 ### 3. GitHub Environment secrets — individual entries
 
-Create these **eight entries** for the full MVP including Datadog and pipeline-managed runtime configuration. The two `*_RUNTIME_CONFIG` entries contain JSON objects, not file paths.
+Create these **eight base entries** for the full MVP including Datadog and pipeline-managed runtime configuration. Insights settings are additional keys inside `MARKETING_RUNTIME_CONFIG`, not additional standalone GitHub secrets. The two `*_RUNTIME_CONFIG` entries contain JSON objects, not file paths.
 
 | Secret name | Exact contents | Used by |
 | --- | --- | --- |
@@ -63,6 +63,8 @@ Create these **eight entries** for the full MVP including Datadog and pipeline-m
 | `DD_API_KEY` | Datadog API key for the configured site | **GitHub deployment outcome logs**; also supply a runtime Datadog key inside the CrewAI JSON for agent activity |
 
 The two Datadog keys may be the same valid key or separate keys for the same site. Configuring only standalone `DD_API_KEY` does not forward it to CrewAI. The pipeline can run without deployment-log ingestion, but that does not fulfill the requested Datadog observability.
+
+**Insights / Auth0 / SES / Web Push:** put `AUTH0_DOMAIN`, `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET`, `AWS_REGION`, any required AWS SDK credentials, and `INSIGHTS_*` settings inside `MARKETING_RUNTIME_CONFIG`. Creating standalone GitHub secrets with those names has no effect in this workflow. The canonical names, required values, application boundaries and merge example are in the **Configuration reference** in `docs/insights-integration.md` (linked below this checklist). Main-website secrets must also be configured separately in its host; this pipeline does not forward them there.
 
 ### 4. Paste the complete runtime JSON secrets
 
@@ -109,10 +111,15 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | `PUBLIC_API_BASE_URL` | Required public article origin; match `CREWAI_BASE_URL`. Facebook links point to `/articles/{run_id}` here |
 | `FACEBOOK_PAGE_ID` | Required numeric ID for the authorized target Page. The `bun2too` handle or profile URL does not resolve this ID automatically |
 | `FACEBOOK_GRAPH_VERSION` | Required supported version formatted `v<number>.<number>`; configure the version used by your Meta app |
-| `FACEBOOK_PAGE_ACCESS_TOKEN` | Required Page access token authorized to publish to that ID; not an app token, Railway token or n8n token |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | Required authorized Page token, or an authorized user token with existing grants to obtain that exact Page's token. Runtime verifies the resolved Page identity and own-post read access; never use an app token, Railway token or n8n token |
 | `MARKETING_AUTOMATION_ENABLED` | `true` enables scheduled job creation |
 | `AUTO_APPROVAL_ENABLED` | `true` allows policy-based approval when the business profile also selects automatic mode |
 | `PUBLISHING_ENABLED` | `true` enables real publication. Scheduled generation/readiness rejects disabled or missing delivery configuration |
+| `ARTICLE_ARTWORK_ENABLED` | Optional, defaults to `true`. Generates one persistent editorial hero for each approved scheduled article and backfills the latest public article after the first upgraded deployment |
+| `ARTICLE_IMAGE_MODEL` | Optional GPT Image model; defaults to `gpt-image-2.5-flare` |
+| `ARTICLE_IMAGE_QUALITY` | Optional `low`, `medium`, or `high`; defaults to `medium` |
+| `ARTICLE_IMAGE_SIZE` | Optional `1024x1024`, `1536x1024`, or `1024x1536`; the editorial default is `1536x1024` |
+| `ARTICLE_IMAGE_TIMEOUT_SECONDS` | Optional 30–600 second request bound; defaults to `240` |
 | `WORKER_ENABLED` | `true` starts the durable scheduled-generation worker; default is true, included explicitly |
 | `DD_API_KEY`, `DD_SITE` | Runtime Datadog credentials/site; no automatic inheritance from the standalone GitHub entries |
 | `DD_LOGS_ENABLED` | `true` exports durable application and n8n callback events to Datadog Logs |
@@ -183,6 +190,8 @@ Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`
 - [ ] Verify a real Facebook post ID, its reachable article URL and later engagement observations. In Datadog verify app logs/LLM activity and the separate deployment log. A green deployment alone does not prove a successful model call or Facebook publication.
 
 <!-- END GITHUB MVP CONFIGURATION -->
+
+For insights configuration, use the [Auth0, SES and Web Push reference](docs/insights-integration.md#configuration-reference).
 
 ## Current deployment and implementation status
 
