@@ -67,6 +67,9 @@ def prepare(env):
         raise ValueError('MARKETING_API_KEY is required for deployment')
     if key:
         config['MARKETING_API_KEY'] = key
+    for name in ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY'):
+        if env.get(name, '').strip():
+            config[name] = env[name]
     if env.get('GITHUB_SHA'):
         config.setdefault('SERVICE_VERSION', env['GITHUB_SHA'])
     if env.get('DEPLOY_OPERATION', 'deploy') == 'deploy':

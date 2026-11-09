@@ -144,13 +144,20 @@ class OperationsTests(unittest.TestCase):
 
     def test_heartbeat_and_recovery_with_no_auto_restart(self):
         with patch.dict(os.environ, WORKFLOW_HEARTBEAT_ENABLED='true'):
-            operations.save(self.db, 'watchdog_started', {'at': (datetime.now(timezone.utc)-timedelta(hours=1)).isoformat()})
+            operations.save(self.db, 'watchdog_started', {'at': (datetime.now(timezone.utc)-timedelta(hours=27)).isoformat()})
             operations.heartbeat_check(self.db)
-            self.assertEqual(len(notifications.status(self.db)['incidents']), 2)
+            self.assertEqual(len(notifications.status(self.db)['incidents']), 1)
             for operation in ('Generate daily campaign', 'Publish approved content'):
                 self.db.event('n8n:1','n8n_execution_failed', operation=operation)
             operations.heartbeat_check(self.db)
             self.assertTrue(all(x['status']=='resolved' for x in notifications.status(self.db)['incidents']))
+
+    def test_daily_heartbeat_does_not_alert_between_daily_runs(self):
+        with patch.dict(os.environ, WORKFLOW_HEARTBEAT_ENABLED='true', WORKFLOW_HEARTBEAT_SECONDS='1200'):
+            operations.save(self.db, 'watchdog_started', {'at': (datetime.now(timezone.utc)-timedelta(hours=27)).isoformat()})
+            self.db.event('n8n:daily', 'n8n_execution_completed', operation='Generate daily campaign')
+            operations.heartbeat_check(self.db)
+            self.assertEqual(notifications.status(self.db)['incidents'], [])
 
     def test_real_channel_adapters_use_secure_smtp_and_check_slack_business_error(self):
         item = {'id':'test-id','channel':'email','incident':{'status':'open','title':'Failure','reason':'No credits',

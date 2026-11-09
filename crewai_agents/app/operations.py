@@ -121,13 +121,15 @@ def heartbeat_check(db):
         return
     instant = datetime.now(timezone.utc)
     started = state(db, 'watchdog_started')
-    threshold = max(300, int(os.getenv('WORKFLOW_HEARTBEAT_SECONDS', '1200')))
+    # Daily generation has a 26-hour grace; old five-minute settings must not alert all day.
+    threshold = max(93600, int(os.getenv('WORKFLOW_HEARTBEAT_SECONDS', '93600')))
     if not started or (instant - datetime.fromisoformat(started['at'])).total_seconds() < threshold:
         return
     with db.connect() as connection:
         rows = connection.execute("SELECT data FROM events WHERE run_id LIKE 'n8n:%' ORDER BY id DESC LIMIT 2000").fetchall()
     events = [json.loads(row[0]) for row in rows]
-    for operation in ('Generate daily campaign', 'Publish approved content'):
+    # Publication is conditional; inspect_runs monitors campaign failures/deadlines.
+    for operation in ('Generate daily campaign',):
         latest = next((e for e in events if e.get('operation') == operation and e['kind'].startswith('n8n_execution_')), None)
         key = 'heartbeat:' + operation
         if not latest or (instant - datetime.fromisoformat(latest['at'])).total_seconds() > threshold:

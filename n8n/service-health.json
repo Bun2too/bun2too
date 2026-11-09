@@ -1,0 +1,96 @@
+{
+  "name": "Marketing service health (__DEPLOY_ENVIRONMENT__)",
+  "nodes": [
+    {
+      "id": "ops-schedule",
+      "name": "Operational health schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        720
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 */6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ops-health",
+      "name": "Read operational health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "parameters": {
+        "url": "__CREWAI_BASE_URL__/automation/operations/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      }
+    },
+    {
+      "id": "ops-check",
+      "name": "Check operational health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        550,
+        720
+      ],
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nif (!s.enabled || !s.watchdog?.at || Date.now() - Date.parse(s.watchdog.at) > 5 * 60 * 1000) {\n  throw new Error('Operational watchdog is disabled or stale; inspect CrewAI service.');\n}\nconst counts = s.notifications?.deliveries || {};\nif (!s.notifications?.enabled || !s.notifications?.configured?.slack || Object.entries(counts).some(([key, value]) => key.endsWith(':exhausted') && value > 0)) {\n  throw new Error('Operational alert delivery is disabled, unconfigured, or exhausted; inspect notification outbox.');\n}\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Operational health schedule": {
+      "main": [
+        [
+          {
+            "node": "Read operational health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read operational health": {
+      "main": [
+        [
+          {
+            "node": "Check operational health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 660
+  }
+}

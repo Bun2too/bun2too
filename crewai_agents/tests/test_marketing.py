@@ -271,7 +271,7 @@ class MarketingTests(unittest.TestCase):
         response = self.client.get('/articles/'+run_id)
         self.assertNotIn('<script>', response.text)
         self.assertIn('&lt;script&gt;', response.text)
-        self.assertIn('BUN2TOO', response.text)
+        self.assertIn('alt="Bun2Too"', response.text)
         self.assertIn('class="hero fallback"', response.text)
         self.assertIn("frame-ancestors 'none'", response.headers['content-security-policy'])
 

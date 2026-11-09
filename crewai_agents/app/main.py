@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,7 @@ from .crews import build_crew, generation_settings
 from .models import ApprovalRequest, CampaignRequest, GenerationRequest, MarketingArtifact, LessonRequest
 from .store import Store, now
 from .observability import redact, workflow_span, error_details, trace_context
+from . import insights as insights_data, insights_brand, insights_delivery
 from . import article_view, atlassian, marketing, telemetry, otel, ai_telemetry, evaluation, langsmith_trace, recovery, operations, notifications
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -46,6 +47,11 @@ async def lifespan(app):
         operations.bootstrap(store())
         operations_worker = threading.Thread(target=operations.loop, args=(operations_stop, store()), daemon=True, name='operations-watchdog')
         operations_worker.start()
+    insights_stop = threading.Event()
+    insights_worker = None
+    if insights_delivery.enabled('INSIGHTS_PUSH_ENABLED') or insights_delivery.enabled('INSIGHTS_DIGEST_ENABLED'):
+        insights_worker = threading.Thread(target=insights_delivery.loop, args=(insights_stop, store(), DATA_DIR), daemon=True, name='insights-delivery')
+        insights_worker.start()
     worker = None
     if os.getenv('WORKER_ENABLED', 'true').lower() == 'true':
         worker = threading.Thread(target=worker_loop, args=(stop,), daemon=True)
@@ -53,6 +59,9 @@ async def lifespan(app):
     try:
         yield
     finally:
+        insights_stop.set()
+        if insights_worker:
+            await asyncio.to_thread(insights_worker.join, 5)
         stop.set()
         if worker:
             await asyncio.to_thread(worker.join, 5)
@@ -839,7 +848,7 @@ def public_article(run_id):
 
 ARTICLE_HEADERS = {
     'Cache-Control': 'public, max-age=300',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; frame-src " + insights_data.site_url(),
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-Content-Type-Options': 'nosniff',
 }
@@ -858,7 +867,104 @@ def insights():
         run = db.get(candidate['id'])
         if run['status'] in PUBLIC_ARTICLE_STATES and run.get('approval') and (run.get('artifact') or {}).get('articles'):
             items.append((run['id'], run, bool(marketing.artwork_path(DATA_DIR, run.get('article_artwork')))))
-    return HTMLResponse(article_view.render_index(items), headers=ARTICLE_HEADERS)
+    return HTMLResponse(insights_brand.decorate(article_view.render_index(items)), headers=ARTICLE_HEADERS)
+
+
+@app.get('/insights/api/articles')
+def public_insights_api():
+    return JSONResponse({'articles': insights_data.entries(store(), DATA_DIR)},
+                        headers={'Cache-Control': 'public, max-age=60'})
+
+
+@app.get('/insights/api/articles/{run_id}')
+def public_insight_api(run_id: str):
+    items = insights_data.entries(store(), DATA_DIR, run_id=run_id)
+    if not items: raise HTTPException(404, 'Article not published')
+    return JSONResponse(items[0], headers={'Cache-Control': 'public, max-age=60'})
+
+
+@app.get('/insights/feed.xml')
+@app.get('/insights/feed.atom')
+def insights_feed(request: Request):
+    atom = request.url.path.endswith('.atom')
+    return Response(insights_data.feed(insights_data.entries(store(), DATA_DIR), atom),
+                    media_type='application/atom+xml' if atom else 'application/rss+xml',
+                    headers={'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff'})
+
+
+@app.get('/automation/insights/status', dependencies=[Depends(authorize)])
+def insights_delivery_status():
+    db=store(); insights_delivery.initialize(db)
+    with db.connect() as conn:
+        statuses={row[0]:row[1] for row in conn.execute('SELECT status,count(*) FROM insights_deliveries GROUP BY status')}
+        count=conn.execute('SELECT count(*) FROM insights_push').fetchone()[0]
+    return {'digest_enabled':insights_delivery.enabled('INSIGHTS_DIGEST_ENABLED'),
+            'push_enabled':insights_delivery.enabled('INSIGHTS_PUSH_ENABLED'), 'push_subscriptions':count,
+            'deliveries':statuses}
+
+
+@app.get('/insights/push-config')
+def insights_push_config():
+    return {'public_key': os.getenv('INSIGHTS_VAPID_PUBLIC_KEY') if insights_delivery.enabled('INSIGHTS_PUSH_ENABLED') else None}
+
+
+@app.post('/insights/push-subscriptions')
+async def insights_push_subscribe(request: Request):
+    if not insights_delivery.enabled('INSIGHTS_PUSH_ENABLED'):
+        raise HTTPException(503, 'Browser notifications are not available yet')
+    allowed = {insights_data.site_url(), os.getenv('PUBLIC_API_BASE_URL', '').rstrip('/')}
+    if request.headers.get('origin') not in allowed or not request.headers.get('content-type', '').startswith('application/json'):
+        raise HTTPException(403, 'Submit from the Bun2Too website')
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 4096: raise HTTPException(413, 'Request too large')
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or data.get('consent') is not True: raise ValueError('Notification consent is required')
+        insights_delivery.subscribe_push(store(), data.get('subscription'), request.client.host if request.client else 'unknown')
+    except (ValueError, TypeError):
+        raise HTTPException(400, 'Invalid subscription or registration limit reached') from None
+    return JSONResponse({'accepted': True}, status_code=201, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/insights/unsubscribe', response_class=HTMLResponse)
+def insights_unsubscribe_page(token: str):
+    import html
+    try: insights_delivery.token_subject(token)
+    except ValueError: raise HTTPException(400, 'Invalid or expired link; use your Bun2Too account') from None
+    return HTMLResponse('<!doctype html><html lang="en"><title>Unsubscribe | Bun2Too</title><h1>Unsubscribe from email updates?</h1>'
+        '<form method="post"><input type="hidden" name="token" value="'+html.escape(token, quote=True)+'">'
+        '<button type="submit">Unsubscribe</button></form></html>', headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+
+
+@app.post('/insights/unsubscribe')
+async def insights_unsubscribe(request: Request):
+    from urllib.parse import parse_qs
+    token = request.query_params.get('token')
+    if not token:
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body)>4096: raise HTTPException(413, 'Request too large')
+        token = parse_qs(body.decode()).get('token', [''])[0]
+    try: subject = insights_delivery.token_subject(token)
+    except ValueError: raise HTTPException(400, 'Invalid or expired link; use your Bun2Too account') from None
+    directory = None
+    try:
+        directory = insights_delivery.Directory(); directory.unsubscribe(subject)
+    except Exception: raise HTTPException(503, 'Could not save preferences; please try again') from None
+    finally:
+        if directory: directory.close()
+    return HTMLResponse('<!doctype html><html lang="en"><title>Unsubscribed | Bun2Too</title><h1>You are unsubscribed.</h1><p>You can manage topics in your Bun2Too account.</p></html>', headers={'Cache-Control':'no-store'})
+
+
+@app.get('/insights-assets/{name}')
+def insights_asset(name: str):
+    if name not in {'logoHighRes.png', 'logo.png', 'logo.ico'}:
+        raise HTTPException(404, 'Asset not found')
+    return FileResponse(Path(__file__).parent / 'assets' / 'bun2too' / name,
+                        headers={'Cache-Control': 'public, max-age=86400'})
 
 
 @app.get('/articles/{run_id}', response_class=HTMLResponse)
@@ -866,7 +972,7 @@ def article(run_id: str):
     run = public_article(run_id)
     artwork = marketing.artwork_path(DATA_DIR, run.get('article_artwork'))
     page = article_view.render(run, run_id, os.getenv('PUBLIC_API_BASE_URL', ''), artwork=bool(artwork))
-    return HTMLResponse(page, headers=ARTICLE_HEADERS)
+    return HTMLResponse(insights_brand.decorate(page, run_id), headers=ARTICLE_HEADERS)
 
 
 @app.get('/articles/{run_id}/artwork.webp', response_class=FileResponse)

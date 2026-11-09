@@ -100,6 +100,9 @@ jobs:
         env:
           MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
           MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python3 scripts/prepare_runtime_config.py
 
       - name: Install deployment dependencies
@@ -191,6 +194,12 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |
           python3 scripts/run_deployment_step.py python3 -m scripts.deploy_crewai
+
+      - name: Verify provider credentials reached Railway
+        if: env.DEPLOY_OPERATION != 'import-state'
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: python3 scripts/run_deployment_step.py python3 -m scripts.check_provider_config
 
       - name: Verify deployed marketing runtime before installing schedules
         if: env.DEPLOY_OPERATION == 'deploy'

@@ -49,6 +49,23 @@ class BootstrapTests(unittest.TestCase):
             deploy_crewai.deploy(self.env, self.run, Mock(return_value=self.response('BUILDING')),
                                  self.sleep, Mock(side_effect=[0, 0, 901]))
 
+    def test_ten_status_checks_then_stop_without_another_upload(self):
+        request = Mock(return_value=self.response('BUILDING'))
+        with self.assertRaisesRegex(RuntimeError, '10/10 checks; last status=BUILDING'):
+            deploy_crewai.deploy(self.env, self.run, request, self.sleep,
+                                 monotonic=Mock(return_value=0))
+        self.assertEqual(request.call_count, 10)
+        self.assertEqual(self.sleep.call_count, 9)
+        self.sleep.assert_called_with(5)
+        self.run.assert_called_once()
+
+    def test_success_on_last_check_proceeds(self):
+        request = Mock(side_effect=[self.response('QUEUED')] * 9 + [self.response('SUCCESS')])
+        deploy_crewai.deploy(self.env, self.run, request, self.sleep,
+                             monotonic=Mock(return_value=0))
+        self.assertEqual(request.call_count, 10)
+        self.assertEqual(self.sleep.call_count, 9)
+
     def test_recovery_does_not_pass_terraform_token_to_cli(self):
         env = dict(self.env, RAILWAY_TOKEN='account-token-in-provider-alias', PATH='/bin')
         deploy_crewai.deploy(env, self.run, Mock(return_value=self.response('SUCCESS')), self.sleep)

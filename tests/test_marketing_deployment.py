@@ -65,15 +65,15 @@ assert.equal(guard(input({failed:false})).length, 1);
                 saved[path.split('/')[-2]]['active']=True
                 return {}
             if method=='POST' and path=='/workflows':
-                key='error-id' if 'errors' in payload['name'] else 'main-id'
+                key='error-id' if 'errors' in payload['name'] else ('health-id' if 'service health' in payload['name'] else 'main-id')
                 saved[key]=dict(payload,id=key,active=False)
                 return {'id':key}
             return {}
         deploy_n8n.deploy(dict(self.env(), MARKETING_API_KEY='private-marketing-key', N8N_MARKETING_CREDENTIAL_ID='MARKETING_API_KEY'),api)
         creates=[c[2] for c in calls if c[:2]==('/workflows','POST')]
-        self.assertEqual(len(creates),2)
+        self.assertEqual(len(creates),3)
         self.assertEqual(creates[1]['settings']['errorWorkflow'],'error-id')
-        self.assertEqual([c[0] for c in calls if c[0].endswith('/activate')],['/workflows/main-id/activate'])
+        self.assertEqual([c[0] for c in calls if c[0].endswith('/activate')],['/workflows/main-id/activate', '/workflows/health-id/activate'])
         self.assertNotIn('__CREWAI',json.dumps(creates))
         self.assertNotIn('secret',json.dumps(creates))
         self.assertNotIn('private-marketing-key',json.dumps(creates))
@@ -95,7 +95,8 @@ assert.equal(guard(input({failed:false})).length, 1);
             calls.append((path,method))
             if path.startswith('/workflows?'):
                 return {'data':[{'name':'Bun2too marketing errors (qa)','id':'error','active':False},
-                                {'name':'[qa] Marketing daily operations','id':'main','active':True}]}
+                                {'name':'[qa] Marketing daily operations','id':'main','active':True},
+                                {'name':'Marketing service health (qa)','id':'health','active':True}]}
             if method=='GET': return saved[path.split('/')[-1]]
             if method=='PUT':
                 key=path.split('/')[-1];saved[key]=dict(payload,id=key,active=False)
@@ -192,7 +193,7 @@ class OperationalWorkflowTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         error = json.loads((root/'n8n/00-error-handler.json').read_text())
         operations = json.loads((root/'n8n/marketing-operations.json').read_text())
-        codes = {n['name']: n['parameters']['jsCode'] for n in error['nodes']+operations['nodes'] if n['type']=='n8n-nodes-base.code'}
+        codes = {n['name']: n['parameters']['jsCode'] for n in error['nodes']+operations['nodes']+json.loads((root/'n8n/service-health.json').read_text())['nodes'] if n['type']=='n8n-nodes-base.code'}
         program = r'''
 const assert = require('node:assert/strict');
 const codes = JSON.parse(process.argv[1]);

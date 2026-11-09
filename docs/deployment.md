@@ -62,7 +62,7 @@ The two Datadog keys may be the same valid key or separate keys for the same sit
 
 ### 4. Paste the complete runtime JSON secrets
 
-For production, save `MARKETING_RUNTIME_CONFIG` under the repository's **Settings → Environments → production → Environment secrets**. A pipeline environment showing `TF_VAR_marketing_runtime_config` with only `MARKETING_API_KEY` means no additional runtime fields reached Terraform. Separate GitHub secrets named `LLM_MODEL` or `OPENAI_API_KEY` are not read by this workflow.
+For production, save `MARKETING_RUNTIME_CONFIG` under the repository's **Settings → Environments → production → Environment secrets**. A pipeline environment showing `TF_VAR_marketing_runtime_config` with only `MARKETING_API_KEY` means no additional runtime fields reached Terraform. A nonempty standalone `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` secret overrides the corresponding value in this JSON. Rotate provider keys in those standalone secrets; omit duplicate JSON keys when using them. `LLM_MODEL` still comes from the JSON.
 
 Full deployments validate the declared model, automation, worker and Facebook delivery settings locally before Terraform changes anything. This does not contact CrewAI, so it supports first deployment. It validates configuration shape, not provider credentials, model access, Facebook permissions or the business profile. Supply the chosen model provider's credentials in the map as well. Infrastructure-only and import operations do not require the scheduled-application configuration.
 
@@ -101,7 +101,7 @@ CrewAI and n8n runtime maps use `railway_variable_collection`, which batches eac
 | Keys inside `MARKETING_RUNTIME_CONFIG` | Function / requirement |
 | --- | --- |
 | `MARKETING_API_KEY` | Injected from the standalone GitHub secret before Terraform apply; overrides any legacy JSON value. Must match the n8n credential |
-| `LLM_MODEL`, `OPENAI_API_KEY` | Required model selection and provider authorization. Choose an available provider-qualified model; for another provider replace/add its required key name and dependencies. These are not separate GitHub entries read by the workflow |
+| `LLM_MODEL`, `OPENAI_API_KEY` | Required model selection and provider authorization. Choose an available provider-qualified model; for another provider replace/add its required key name and dependencies. `LLM_MODEL` comes from this JSON; a nonempty standalone `OPENAI_API_KEY` secret takes precedence over the JSON key |
 | `PUBLIC_API_BASE_URL` | Required public article origin; match `CREWAI_BASE_URL`. Facebook links point to `/articles/{run_id}` here |
 | `FACEBOOK_PAGE_ID` | Required numeric ID for the authorized target Page. The `bun2too` handle or profile URL does not resolve this ID automatically |
 | `FACEBOOK_GRAPH_VERSION` | Required supported version formatted `v<number>.<number>`; configure the version used by your Meta app |
@@ -168,7 +168,7 @@ GitHub DD_SITE = MARKETING_RUNTIME_CONFIG.DD_SITE (for the same Datadog site)
 
 The workflow already supplies `DEPLOY_ENVIRONMENT`, `DEPLOY_OPERATION`, `MARKETING_TIMEZONE`, `TF_IN_AUTOMATION`, all `TF_VAR_*` mappings, the provider's `RAILWAY_TOKEN` alias and GitHub's `GITHUB_*` values. Terraform sets CrewAI `DATA_DIR=/data`; **do not add `DATA_DIR` to the runtime JSON**, where it is explicitly rejected. Railway/application defaults handle `PORT` (default 8000).
 
-Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `OPENAI_API_KEY`, `LLM_MODEL`, `DD_ENV`, `DD_LOGS_ENABLED` or `N8N_ENCRYPTION_KEY` are **not consumed** by this workflow. Put them in the appropriate JSON secret above. `MARKETING_API_KEY` is automatically merged into the runtime map from the standalone secret. `DD_API_KEY` and `DD_SITE` still need runtime JSON entries because CI and the runtime use them separately.
+Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `LLM_MODEL`, `DD_ENV`, `DD_LOGS_ENABLED` or `N8N_ENCRYPTION_KEY` are **not consumed** by this workflow. Put them in the appropriate JSON secret above. `MARKETING_API_KEY` is automatically merged into the runtime map from the standalone secret. Nonempty standalone `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` secrets also override their JSON entries; absent/empty standalone secrets preserve the JSON values. CI compares configured provider keys with Railway after deployment without printing values; this does not test provider authorization. `DD_API_KEY` and `DD_SITE` still need runtime JSON entries because CI and the runtime use them separately.
 
 `N8N_WEBHOOK_URL` and `N8N_WEBHOOK_TOKEN` belong to the legacy manual dispatch endpoint and are not required for the scheduled MVP. `CREWAI_TRACING_ENABLED`, `AGENT_VERBOSE`, CrewAI cloud credentials, Atlassian/Jira/Confluence settings and email-provider keys are not required for this Facebook MVP. The agents run in Railway; no CrewAI cloud registration is performed.
 
@@ -180,7 +180,7 @@ Standalone GitHub entries named `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`
 - [ ] Run `.venv/bin/python scripts/verify_marketing.py --terraform` locally before committing the reviewed revision.
 - [ ] Run **Actions → Infrastructure and Core Deployment Pipeline → Run workflow → operation `deploy`** on `main` or `qa`. A push to either branch also requests full deploy. `infrastructure-only` applies Terraform without uploading CrewAI/installing workflows; `import-state` on main imports and plans without applying.
 - [ ] GitHub's summary contains workflow IDs/links and shows `[production] Marketing daily operations` (or QA equivalent) active. Its error-handler workflow is referenced and does not require its own active schedule.
-- [ ] Within five minutes, inspect n8n Executions and authenticated `/automation/status`. Polls outside the generation window may correctly return `not_due`; repeat polls reuse the day's run.
+- [ ] After the daily 08:05 Chicago trigger (or one intentional manual execution within the generation window), inspect n8n Executions and authenticated `/automation/status`. The same execution waits for generation and publication; repeated manual starts are unnecessary.
 - [ ] Verify a real Facebook post ID, its reachable article URL and later engagement observations. In Datadog verify app logs/LLM activity and the separate deployment log. A green deployment alone does not prove a successful model call or Facebook publication.
 
 <!-- END GITHUB MVP CONFIGURATION -->
@@ -451,3 +451,17 @@ Use one GitHub environment secret named `RAILWAY_API_TOKEN` containing an accoun
 Reserve `RAILWAY_TOKEN` for actual Railway project tokens in other projects that deliberately use that authentication type. Do not populate it with an account token. The CrewAI and n8n application runtimes do not need this deployment credential merely because they run on Railway. This repository change does not modify secrets in external projects, GitHub settings, or local ignored environment files. Production and QA may use different authorized token values while sharing this naming convention.
 
 Deployment-history diagnosis needs read access to the selected project/environment/service deployment records (IDs, status, timestamps), not write access or an additional dedicated history secret. A GraphQL error alone does not prove a missing permission: verify token validity, target access and query schema before requesting wider access. Local `.env` credentials are independent of GitHub environment secrets.
+
+
+### Short deployment status-check budget
+
+Fresh uploads now receive at most **10 status checks**, with five seconds between checks (nine sleeps, about 45 seconds plus API latency). A separate 120-second polling deadline can stop checks earlier; an in-flight API call retains its 30-second request timeout. The upload itself retains a separate five-minute timeout. Every check reports its attempt number, deployment ID and status. Terminal failures stop immediately; exhausted checks fail CI with the last observed status and deployment ID.
+
+This deliberately shorter budget can fail CI while a valid build is still queued or building. Inspect the existing deployment before rerunning; exhausting checks does not cancel it. Missing old source already triggers one fresh source upload, not repeated attempts to rebuild the unavailable source. Do not recreate the service or its volumes because a deployment is slow. Terraform reconciliation still requires a successful deployment, a fresh guarded plan, and at most one apply retry.
+
+
+### October 28 provider key rotation wiring
+
+The workflow previously passed only `MARKETING_RUNTIME_CONFIG` and `MARKETING_API_KEY` to runtime preparation. A separately rotated GitHub `OPENAI_API_KEY` was ignored, and Terraform continued to write the key contained in the JSON. The workflow now explicitly forwards standalone OpenAI, Anthropic and Gemini secrets and merges nonempty values over the JSON configuration. Existing JSON-only installations remain supported. A Railway read-back gate compares the prepared provider keys against the selected CrewAI service/environment and stops on mismatch, missing/unreadable values, or API lookup failure.
+
+Use the secret selected for the deployment's GitHub environment (`production` on main, `qa` on qa). An environment secret can shadow a repository secret of the same name. If you rotated the JSON entry itself rather than a standalone secret, the ignored-standalone defect does not establish your cause; check environment selection and the read-back result. No external GitHub secret values were inspected during this code change. Deploy the changed workflow revision, verify the read-back gate and actual provider authorization, then clear the persisted generation pause. Do not replay an expired campaign.

@@ -29,7 +29,7 @@ def cli_failure(exc):
 
 
 def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
-           monotonic=time.monotonic, timeout=900):
+           monotonic=time.monotonic, timeout=120):
     command = ['railway', 'up', '--project', env['RAILWAY_PROJECT_ID'],
                '--service', env['CREWAI_SERVICE_ID'], '--environment',
                env['RAILWAY_ENVIRONMENT_ID'], '--detach', '--json']
@@ -55,7 +55,12 @@ def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
         raise ValueError('Railway did not return a deployment ID')
     print('Uploaded Railway deployment ID: ' + deployment_id, flush=True)
     deadline = monotonic() + timeout
-    while monotonic() < deadline:
+    status = 'UNKNOWN'
+    checks = 0
+    for attempt in range(1, 11):
+        if monotonic() >= deadline:
+            break
+        checks = attempt
         result = request('https://backboard.railway.com/graphql/v2', env['RAILWAY_API_TOKEN'], {
             'query': 'query($id: String!) { deployment(id: $id) { id status } }',
             'variables': {'id': deployment_id},
@@ -64,14 +69,21 @@ def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
         if result.get('errors') or not deployment or deployment.get('id') != deployment_id:
             raise RuntimeError('Cannot read the uploaded Railway deployment status')
         status = deployment.get('status')
+        print(f'Deployment {deployment_id}: check {attempt}/10, status={status}', flush=True)
         if status == 'SUCCESS':
             print('Uploaded Railway deployment reached SUCCESS; HTTP readiness can now run.', flush=True)
             return
         if status in {'FAILED', 'CRASHED', 'REMOVED', 'SKIPPED', 'CANCELED', 'CANCELLED'}:
             raise RuntimeError('Uploaded Railway deployment failed: ' + status)
-        print('Waiting for uploaded Railway deployment to reach SUCCESS.', flush=True)
-        sleep(5)
-    raise RuntimeError('Timed out waiting for the uploaded Railway deployment; inspect Railway build/deploy logs')
+        if monotonic() >= deadline:
+            break
+        if attempt < 10:
+            sleep(5)
+    raise RuntimeError(
+        f'Timed out waiting for deployment {deployment_id} after {checks}/10 checks; '
+        f'last status={status}. Inspect this deployment in Railway before rerunning CI. '
+        'No replacement service or additional recovery deployment was created; '
+        'the uploaded deployment may still finish.')
 
 
 if __name__ == '__main__':

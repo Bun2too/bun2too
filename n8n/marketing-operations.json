@@ -15,7 +15,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "*/5 * * * *"
+              "expression": "5 8 * * *"
             }
           ]
         }
@@ -50,26 +50,6 @@
       "waitBetweenTries": 5000
     },
     {
-      "id": "trigger-1",
-      "name": "Publish approved content schedule",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        0,
-        240
-      ],
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "*/5 * * * *"
-            }
-          ]
-        }
-      }
-    },
-    {
       "id": "operation-1",
       "name": "Publish approved content",
       "type": "n8n-nodes-base.httpRequest",
@@ -93,9 +73,7 @@
           "name": "Marketing API"
         }
       },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "id": "trigger-2",
@@ -278,43 +256,35 @@
       }
     },
     {
-      "id": "ops-schedule",
-      "name": "Operational health schedule",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "name": "Wait for generation",
+      "id": "wait-for-generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
       "position": [
-        0,
-        720
+        900,
+        1100
       ],
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "*/5 * * * *"
-            }
-          ]
-        }
+        "resume": "timeInterval",
+        "amount": 15,
+        "unit": "minutes"
       }
     },
     {
-      "id": "ops-health",
-      "name": "Read operational health",
+      "id": "read-daily-campaign",
+      "name": "Read daily campaign",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         300,
-        720
+        0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000,
       "parameters": {
-        "url": "__CREWAI_BASE_URL__/automation/operations/status",
+        "url": "={{ '__CREWAI_BASE_URL__/runs/' + $('Generate daily campaign').first().json.run_id }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "credentials": {
@@ -322,19 +292,104 @@
           "id": "__MARKETING_CREDENTIAL_ID__",
           "name": "Marketing API"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
-      "id": "ops-check",
-      "name": "Check operational health",
+      "name": "Plan daily continuation",
+      "id": "plan-daily-continuation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        550,
-        720
+        900,
+        1300
       ],
       "parameters": {
-        "jsCode": "const s = $input.first().json;\nif (!s.enabled || !s.watchdog?.at || Date.now() - Date.parse(s.watchdog.at) > 5 * 60 * 1000) {\n  throw new Error('Operational watchdog is disabled or stale; inspect CrewAI service.');\n}\nconst counts = s.notifications?.deliveries || {};\nif (!s.notifications?.enabled || !s.notifications?.configured?.slack || Object.entries(counts).some(([key, value]) => key.endsWith(':exhausted') && value > 0)) {\n  throw new Error('Operational alert delivery is disabled, unconfigured, or exhausted; inspect notification outbox.');\n}\nreturn $input.all();"
+        "jsCode": "const run = $input.first().json;\nconst id = run.id || run.run_id;\nconst expected = $('Generate daily campaign').first().json.run_id;\nif (!id || id !== expected) throw new Error('Daily campaign identity mismatch');\nconst now = Date.now();\nconst deadline = Date.parse(run.publish_before);\nif (!Number.isFinite(deadline) || now >= deadline) throw new Error('Daily campaign publishing window expired; runs=' + id);\nif (run.status === 'published') return [{json: {pending: false, publish: false, run_id: id}}];\nif (run.status === 'approved') {\n  const target = Date.parse(run.publish_after);\n  if (!Number.isFinite(target) || target >= deadline) throw new Error('Invalid publication time; runs=' + id);\n  return [{json: {pending: false, publish: true, run_id: id, publish_at: new Date(Math.max(now, target)).toISOString()}}];\n}\nif (['queued', 'running'].includes(run.status) || (run.status === 'failed' && run.retryable)) {\n  if ($runIndex >= 5 || now + 15 * 60 * 1000 >= deadline) throw new Error('Daily generation wait exhausted (maximum six checks); inspect campaign before manual recovery; runs=' + id);\n  return [{json: {pending: true, publish: false, run_id: id}}];\n}\nthrow new Error('Campaign requires intervention: ' + run.status + '; runs=' + id);\n"
+      }
+    },
+    {
+      "name": "Generation still pending",
+      "id": "generation-still-pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        1400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pending",
+              "leftValue": "={{ $json.pending }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Campaign ready to publish",
+      "id": "campaign-ready-to-publish",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        1500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "publish",
+              "leftValue": "={{ $json.publish }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Wait until publication time",
+      "id": "wait-until-publication-time",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        1600
+      ],
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.publish_at }}"
       }
     }
   ],
@@ -344,17 +399,6 @@
         [
           {
             "node": "Generate daily campaign",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Publish approved content schedule": {
-      "main": [
-        [
-          {
-            "node": "Publish approved content",
             "type": "main",
             "index": 0
           }
@@ -438,22 +482,85 @@
         ]
       ]
     },
-    "Operational health schedule": {
+    "Check Generate daily campaign outcome": {
       "main": [
         [
           {
-            "node": "Read operational health",
+            "node": "Wait for generation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Read operational health": {
+    "Wait for generation": {
       "main": [
         [
           {
-            "node": "Check operational health",
+            "node": "Read daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Plan daily continuation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan daily continuation": {
+      "main": [
+        [
+          {
+            "node": "Generation still pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generation still pending": {
+      "main": [
+        [
+          {
+            "node": "Wait for generation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Campaign ready to publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign ready to publish": {
+      "main": [
+        [
+          {
+            "node": "Wait until publication time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Wait until publication time": {
+      "main": [
+        [
+          {
+            "node": "Publish approved content",
             "type": "main",
             "index": 0
           }
@@ -466,6 +573,6 @@
     "timezone": "America/Chicago",
     "saveDataErrorExecution": "all",
     "saveDataSuccessExecution": "all",
-    "executionTimeout": 660
+    "executionTimeout": -1
   }
 }

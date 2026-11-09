@@ -8,6 +8,7 @@ This repository runs a FastAPI/CrewAI marketing team, deterministic article/Face
 - `scripts/AGENTS.md`: deployment, package publishing and verification helpers.
 - `.github/workflows/deploy.yml`: verify → GitHub Packages → deployment. Explicit infrastructure-only/import-state operations skip publishing.
 - `docs/agent-context.md`: work ownership and how to update persistent context.
+- `docs/insights-integration.md`: main-site integration, public feeds, Auth0 consent, SES digests and browser push.
 - `docs/package-publishing.md`: package destinations, prerequisites and release versions.
 - `docs/operational-recovery.md`: recovery limits, alerts and operator endpoints.
 - `docs/incident-*.md`: dated evidence, not current service status. Recheck live status when needed.
