@@ -9,7 +9,7 @@ Run helpers from the repository root. Most deployment scripts read explicit envi
 - `prepare_terraform_state.py`, `ensure_n8n_volume.py`, `check_n8n_storage_plan.py`: preserve existing resources and mounted data.
 - `init_terraform.py`: at most three attempts for transient provider downloads; committed lockfile and signature/checksum verification remain mandatory.
 - `apply_terraform.py`: bounded missing-CrewAI-source recovery; fresh upload, replan and storage guard before one retry. Infrastructure-only never uploads.
-- `deploy_crewai.py`: upload and wait for the exact Railway deployment ID; a healthy older deployment is insufficient.
+- `deploy_crewai.py`: upload once, then observe the exact deployment with at most ten checks one minute apart (600-second deadline). `--wait-for ID` observes only, without upload; a healthy older deployment is insufficient.
 - `check_marketing_runtime.py`, `deploy_n8n.py`: validate runtime before enabling schedules; read back workflow activation.
 - `marketing_batch.py`: operator-driven offline enrichment, not publication. Ambiguous submission must be reconciled before resubmission.
 

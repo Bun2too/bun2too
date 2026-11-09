@@ -481,12 +481,21 @@ Reserve `RAILWAY_TOKEN` for actual Railway project tokens in other projects that
 Deployment-history diagnosis needs read access to the selected project/environment/service deployment records (IDs, status, timestamps), not write access or an additional dedicated history secret. A GraphQL error alone does not prove a missing permission: verify token validity, target access and query schema before requesting wider access. Local `.env` credentials are independent of GitHub environment secrets.
 
 
-### Short deployment status-check budget
+### Deployment observation and build time budget
 
-Fresh uploads now receive at most **10 status checks**, with five seconds between checks (nine sleeps, about 45 seconds plus API latency). A separate 120-second polling deadline can stop checks earlier; an in-flight API call retains its 30-second request timeout. The upload itself retains a separate five-minute timeout. Every check reports its attempt number, deployment ID and status. Terminal failures stop immediately; exhausted checks fail CI with the last observed status and deployment ID.
+The November 9 deployment `baea1494-959c-4412-bb9f-ac0bf3458781` was still `BUILDING` when CI stopped after about 47 seconds. The ten GraphQL calls were reads of the same deployment ID, not service searches, updates or repeated uploads. The log establishes an observation timeout, not a failed Railway build or a missing resource. Its eventual live outcome must be checked separately.
 
-This deliberately shorter budget can fail CI while a valid build is still queued or building. Inspect the existing deployment before rerunning; exhausting checks does not cancel it. Missing old source already triggers one fresh source upload, not repeated attempts to rebuild the unavailable source. Do not recreate the service or its volumes because a deployment is slow. Terraform reconciliation still requires a successful deployment, a fresh guarded plan, and at most one apply retry.
+`deploy_crewai.py` separates source upload from `wait_for_deployment`, which only reads status. It uploads once per invocation, then makes at most **10 status checks**, one minute apart (nine waits, about nine minutes plus API latency), with a **600-second polling deadline**. An in-flight API call retains its 30-second timeout; upload has a separate five-minute timeout. Terminal failures stop immediately. Only `SUCCESS` permits HTTP readiness and downstream workflow installation. Exhaustion fails CI and leaves the existing deployment intact; it does not create a service or submit another deployment.
 
+To check an existing deployment without uploading again, supply the normal `RAILWAY_API_TOKEN` securely and run:
+
+```sh
+python3 -m scripts.deploy_crewai --wait-for baea1494-959c-4412-bb9f-ac0bf3458781
+```
+
+This is read-only diagnosis, not automatic resumption of the CI pipeline: it does not prove the deployment belongs to the current checkout, reconcile Terraform or install n8n workflows. It cannot turn an old deployment's success into approval for a new release. Inspect the exact build before rerunning a full deployment; a full rerun uploads source again.
+
+Terraform continues to reconcile infrastructure separately. Its variable collection updates can trigger provider-managed redeployments. The missing-source recovery remains a single fresh upload followed by a guarded replan/apply; a full pipeline also has its final application upload. These are distinct mutations, not polling retries. They are not deduplicated based solely on an earlier success because configuration may change during reconciliation. This change fixes premature observation failure without changing resource ownership, recreating services or bypassing mounted-state checks. A future move to deploying the published container digest would require separately configuring Railway image access and replacing source deployment ownership.
 
 ### October 28 provider key rotation wiring
 

@@ -1,4 +1,5 @@
 """Upload CrewAI and wait for that exact Railway deployment before HTTP readiness."""
+import argparse
 import json
 import os
 import subprocess
@@ -29,7 +30,7 @@ def cli_failure(exc):
 
 
 def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
-           monotonic=time.monotonic, timeout=120):
+           monotonic=time.monotonic, timeout=600):
     command = ['railway', 'up', '--project', env['RAILWAY_PROJECT_ID'],
                '--service', env['CREWAI_SERVICE_ID'], '--environment',
                env['RAILWAY_ENVIRONMENT_ID'], '--detach', '--json']
@@ -54,6 +55,12 @@ def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
     if not isinstance(deployment_id, str) or not deployment_id:
         raise ValueError('Railway did not return a deployment ID')
     print('Uploaded Railway deployment ID: ' + deployment_id, flush=True)
+    return wait_for_deployment(deployment_id, env, request, sleep, monotonic, timeout)
+
+
+def wait_for_deployment(deployment_id, env, request=request_json, sleep=time.sleep,
+                        monotonic=time.monotonic, timeout=600):
+    """Read one exact deployment at most ten times; never mutate or upload."""
     deadline = monotonic() + timeout
     status = 'UNKNOWN'
     checks = 0
@@ -69,7 +76,7 @@ def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
         if result.get('errors') or not deployment or deployment.get('id') != deployment_id:
             raise RuntimeError('Cannot read the uploaded Railway deployment status')
         status = deployment.get('status')
-        print(f'Deployment {deployment_id}: check {attempt}/10, status={status}', flush=True)
+        print(f'Deployment {deployment_id}: status check {attempt}/10, status={status} (read-only)', flush=True)
         if status == 'SUCCESS':
             print('Uploaded Railway deployment reached SUCCESS; HTTP readiness can now run.', flush=True)
             return
@@ -78,17 +85,25 @@ def deploy(env, run=subprocess.run, request=request_json, sleep=time.sleep,
         if monotonic() >= deadline:
             break
         if attempt < 10:
-            sleep(5)
+            sleep(min(60, max(0, deadline - monotonic())))
     raise RuntimeError(
         f'Timed out waiting for deployment {deployment_id} after {checks}/10 checks; '
         f'last status={status}. Inspect this deployment in Railway before rerunning CI. '
         'No replacement service or additional recovery deployment was created; '
-        'the uploaded deployment may still finish.')
+        'the uploaded deployment may still finish. Check it without uploading with: '
+        f'python3 -m scripts.deploy_crewai --wait-for {deployment_id}')
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--wait-for', metavar='DEPLOYMENT_ID',
+                        help='Only observe this existing deployment; never upload or apply infrastructure')
+    args = parser.parse_args()
     try:
-        deploy(os.environ)
+        if args.wait_for:
+            wait_for_deployment(args.wait_for, os.environ)
+        else:
+            deploy(os.environ)
     except RuntimeError as exc:
         print('::error::' + str(exc), file=sys.stderr)
         sys.exit(1)

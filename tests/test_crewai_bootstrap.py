@@ -56,7 +56,7 @@ class BootstrapTests(unittest.TestCase):
                                  monotonic=Mock(return_value=0))
         self.assertEqual(request.call_count, 10)
         self.assertEqual(self.sleep.call_count, 9)
-        self.sleep.assert_called_with(5)
+        self.sleep.assert_called_with(60)
         self.run.assert_called_once()
 
     def test_success_on_last_check_proceeds(self):
@@ -132,3 +132,31 @@ class BootstrapTests(unittest.TestCase):
         prepared = json.loads(prepare_runtime_config.prepare({
             'MARKETING_API_KEY': 'api-key', 'MARKETING_RUNTIME_CONFIG': json.dumps(config)}))
         self.assertEqual(prepared, dict(config, MARKETING_API_KEY='api-key'))
+
+    def test_build_can_take_several_minutes_without_more_uploads(self):
+        clock = [0]
+        def sleep(seconds):
+            clock[0] += seconds
+        request = Mock(side_effect=[self.response('BUILDING')] * 8 + [self.response('SUCCESS')])
+        deploy_crewai.deploy(self.env, self.run, request, sleep, monotonic=lambda: clock[0])
+        self.assertEqual(clock[0], 480)
+        self.assertEqual(request.call_count, 9)
+        self.run.assert_called_once()
+
+    def test_wait_only_observes_existing_deployment(self):
+        request = Mock(return_value=self.response('SUCCESS', 'existing-id'))
+        with unittest.mock.patch.object(deploy_crewai.subprocess, 'run') as run:
+            deploy_crewai.wait_for_deployment('existing-id', self.env, request, self.sleep)
+        run.assert_not_called()
+        self.assertEqual(request.call_args.args[2]['variables'], {'id': 'existing-id'})
+
+    def test_sleep_never_exceeds_remaining_deadline(self):
+        clock = [0]
+        def sleep(seconds):
+            clock[0] += seconds
+        request = Mock(return_value=self.response('BUILDING'))
+        with self.assertRaisesRegex(RuntimeError, 'Timed out'):
+            deploy_crewai.wait_for_deployment('new-deployment', self.env, request, sleep,
+                                             monotonic=lambda: clock[0], timeout=20)
+        self.assertEqual(clock[0], 20)
+        self.assertEqual(request.call_count, 1)
