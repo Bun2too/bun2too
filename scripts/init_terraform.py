@@ -41,6 +41,11 @@ def initialize(run=subprocess.run, sleep=time.sleep):
             return 127
         print(result.stdout or '', end='', flush=True)  # Normal masked CI command output.
         if result.returncode == 0:
+            if 'Warning: Provider lock file not updated' in (result.stdout or ''):
+                print('::error::Provider lockfile lacks required selections/checksums for this runner. '
+                      'Run terraform providers lock for linux_amd64 and supported developer platforms, '
+                      'review and commit the lockfile, then rerun CI. No plan/apply attempted.', flush=True)
+                return 1
             return 0
         if not transient_provider_failure(result.stdout or ''):
             return result.returncode

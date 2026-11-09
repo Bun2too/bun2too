@@ -441,6 +441,20 @@ The cache preparation step exports `TF_PLUGIN_CACHE_DIR` through `GITHUB_ENV` us
 
 The workflow caches only provider binaries, keyed by runner OS, architecture and the lockfile hash. Backend metadata, credentials, plans and state are excluded. The cache reduces repeated downloads but does not guarantee operation without registry access. Provider versions and signature/checksum verification remain enforced; do not bypass verification to recover from a download failure. See HashiCorp's [provider cache documentation](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) and [initialization documentation](https://developer.hashicorp.com/terraform/cli/commands/init).
 
+### Read-only lockfile and platform checksums
+
+The subsequent November 9 checksum failure was a pipeline/lockfile incompatibility: the lockfile had an unpacked-package `h1` hash for `darwin_arm64` only. Linux archive `zh` hashes were present, but read-only initialization could not persist the Linux unpacked-package hash used by validation. Terraform returned success with “Provider lock file not updated,” then validation rejected the installed package. This is separate from the earlier GitHub 504 and does not require credential rotation.
+
+The lockfile now includes hashes verified against the origin registry for `linux_amd64`, `darwin_arm64` and `darwin_amd64`, retaining Railway 0.6.2. The changed lockfile hash automatically selects a fresh CI cache key. The init helper treats that warning as a failure even if Terraform exits zero, so an incomplete lockfile cannot silently advance to validation.
+
+When updating providers, generate and review platform hashes before committing:
+
+```sh
+terraform -chdir=terraform providers lock -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64
+```
+
+Use the origin registry, not a cached package as the trust source. HashiCorp documents [multi-platform provider locking](https://developer.hashicorp.com/terraform/cli/commands/providers/lock). Keep CI read-only and never suppress checksum verification. Local checks do not prove a subsequent hosted deployment succeeds.
+
 ## Missing Railway deployment source during Terraform apply
 
 The October 27, 2026 failure occurred after the CrewAI variable collection update, when the provider requested `serviceInstanceRedeploy`. Railway reported that the previous deployment source was no longer available. The successful authenticated checks and variable mutation distinguish this failure from token rejection; the log does not establish why Railway lost the source. Variables may already have changed even though Terraform apply failed.

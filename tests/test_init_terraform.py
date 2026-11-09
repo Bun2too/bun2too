@@ -52,3 +52,10 @@ class InitTerraformTests(unittest.TestCase):
         run=Mock(return_value=self.result(0));sleep=Mock()
         self.assertEqual(initialize(run,sleep),0)
         run.assert_called_once();sleep.assert_not_called()
+
+    def test_readonly_lock_warning_stops_even_when_init_returns_success(self):
+        run = Mock(return_value=self.result(0, 'Warning: Provider lock file not updated\nHCP Terraform has been successfully initialized!'))
+        sleep = Mock()
+        self.assertEqual(initialize(run, sleep), 1)
+        run.assert_called_once()
+        sleep.assert_not_called()
