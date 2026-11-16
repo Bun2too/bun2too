@@ -1,0 +1,22 @@
+name: Bug
+description: Something a Bun2too product does wrong
+labels: [needs-triage]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product
+      options: [support-agent, crew-team, website, root / factory]
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      { label: What happened, description: For the support agent, include the case ID and trace ID if you have them. }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: What should have happened }
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes: { label: How to reproduce, description: Steps, inputs and environment (dev, qa or prod). }

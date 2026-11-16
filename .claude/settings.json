@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm -C bun2too-support-agent check)",
+      "Bash(pnpm -C bun2too-support-agent fix)",
+      "Bash(pnpm -C bun2too-support-agent test:*)",
+      "Bash(pnpm -C bun2too-support-agent lint:*)",
+      "Bash(pnpm -C bun2too-support-agent typecheck)",
+      "Bash(pnpm -C bun2too-support-agent contracts:*)",
+      "Bash(pnpm -C bun2too-support-agent eval)",
+      "Bash(uv run --directory bun2too-support-agent/services/agents pytest:*)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform test:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/.secrets/**)",
+      "Read(**/*.tfvars)",
+      "Bash(git push --force:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git subtree push:*)",
+      "Bash(terraform apply:*)",
+      "Bash(railway up:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-paths.sh" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format-file.sh" }]
+      }
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "addy-agent-skills": { "source": { "source": "github", "repo": "addyosmani/agent-skills" } }
+  },
+  "enabledPlugins": {
+    "agent-skills@addy-agent-skills": true,
+    "mattpocock-skills@claude-plugins-official": true
+  }
+}

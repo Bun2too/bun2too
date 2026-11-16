@@ -1,0 +1,33 @@
+name: subtree-sync
+# Manual on purpose: a mirror's main can deploy production (the website's does).
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        type: choice
+        options: [bun2too-support-agent, crew-team, bun2too-website]
+        required: true
+permissions:
+  contents: read
+concurrency: { group: "subtree-sync-${{ inputs.prefix }}", cancel-in-progress: false }
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: subtree-sync
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Split and push to the mirror's main (never forced)
+        env:
+          TOKEN: ${{ secrets.SUBTREE_SYNC_TOKEN }}
+          PREFIX: ${{ inputs.prefix }}
+        run: |
+          case "$PREFIX" in
+            bun2too-support-agent) repo=Bun2too/bun2too-support-agent ;;
+            crew-team) repo=Bun2too/bun2too-crew-team ;;
+            bun2too-website) repo=Bun2too/bun2too-website ;;
+          esac
+          git subtree split --prefix="$PREFIX" -b mirror
+          git push "https://x-access-token:${TOKEN}@github.com/${repo}.git" mirror:refs/heads/main
+          echo "Pushed $(git rev-parse --short mirror) of $PREFIX to $repo main" >> "$GITHUB_STEP_SUMMARY"

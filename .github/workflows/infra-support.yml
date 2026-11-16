@@ -1,0 +1,40 @@
+name: infra-support
+on:
+  pull_request:
+    paths: ['bun2too-support-agent/infra/terraform/railway/project/**']
+  push:
+    branches: [main]
+    paths: ['bun2too-support-agent/infra/terraform/railway/project/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+concurrency: { group: infra-support, cancel-in-progress: false }
+jobs:
+  plan-or-apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ github.event_name == 'pull_request' && 'support-infra-plan' || 'support-infra' }}
+    env:
+      TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+      TF_WORKSPACE: bun2too-support-project
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
+      TF_VAR_workspace_id: ${{ vars.RAILWAY_WORKSPACE_ID }}
+    defaults: { run: { working-directory: bun2too-support-agent/infra/terraform/railway/project } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}", terraform_wrapper: false }
+      - run: terraform init -input=false
+      - name: Plan
+        run: terraform plan -input=false -no-color -lock-timeout=5m | tee plan.txt
+      - name: Comment the plan on the PR
+        if: github.event_name == 'pull_request'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo '### Railway project plan'; echo '```'; tail -c 60000 plan.txt; echo '```'; } > body.md
+          gh pr comment ${{ github.event.pull_request.number }} -R ${{ github.repository }} --body-file body.md
+      - name: Apply (support-infra approval required)
+        if: github.event_name != 'pull_request'
+        run: terraform apply -input=false -auto-approve

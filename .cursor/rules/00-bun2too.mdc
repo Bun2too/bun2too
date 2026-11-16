@@ -1,0 +1,9 @@
+---
+description: Bun2too monorepo rules (always on)
+alwaysApply: true
+---
+Read and follow @AGENTS.md, then the AGENTS.md of the product you are changing. Follow the lifecycle in @docs/sdlc.md. Shared skills are in `.claude/skills/` and product skills in `<product>/.claude/skills/` or `<product>/.agents/skills/`: open the SKILL.md and follow it.
+
+Install the shared workflow skills for Cursor:
+- Addy Osmani's agent-skills: sync `agent-skills/skills/` into `.cursor/skills/` (see its docs/cursor-setup.md).
+- Matt Pocock's skills: `npx skills@latest add mattpocock/skills -a cursor`.

@@ -1,0 +1,68 @@
+name: deploy-support
+on:
+  push:
+    branches: [main]
+    paths: ['bun2too-support-agent/**', '!bun2too-support-agent/infra/terraform/railway/project/**', '.github/workflows/deploy-support.yml', '.github/workflows/_deploy-support-env.yml']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy or roll back
+        type: choice
+        options: [dev, qa, prod]
+        required: true
+      ref:
+        description: Commit SHA on main to deploy (blank = latest main)
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy-support-${{ github.event.inputs.environment || 'pipeline' }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    defaults: { run: { working-directory: bun2too-support-agent } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.ref || github.sha }}", fetch-depth: 0 }
+      - name: Only commits on main can deploy
+        id: sha
+        run: |
+          sha=$(git rev-parse HEAD)
+          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$sha is not on main"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: bun2too-support-agent/package.json }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: bun2too-support-agent/.nvmrc
+          cache: pnpm
+          cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v6
+      - run: pnpm install --frozen-lockfile && uv sync --directory services/agents --frozen
+      - run: pnpm check
+
+  dev:
+    needs: verify
+    if: github.event_name == 'push' || inputs.environment == 'dev'
+    uses: ./.github/workflows/_deploy-support-env.yml
+    with: { environment: dev, sha: "${{ needs.verify.outputs.sha }}" }
+    secrets: inherit
+
+  qa:
+    needs: [verify, dev]
+    if: always() && needs.verify.result == 'success' && (github.event_name == 'push' && needs.dev.result == 'success' || inputs.environment == 'qa')
+    uses: ./.github/workflows/_deploy-support-env.yml
+    with: { environment: qa, sha: "${{ needs.verify.outputs.sha }}" }
+    secrets: inherit
+
+  prod:
+    needs: [verify, qa]
+    if: always() && needs.verify.result == 'success' && (github.event_name == 'push' && needs.qa.result == 'success' || inputs.environment == 'prod')
+    uses: ./.github/workflows/_deploy-support-env.yml
+    with: { environment: prod, sha: "${{ needs.verify.outputs.sha }}" }
+    secrets: inherit

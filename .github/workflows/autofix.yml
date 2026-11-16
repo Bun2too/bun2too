@@ -1,0 +1,40 @@
+name: hygiene-autofix
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: write
+concurrency:
+  group: autofix-${{ github.head_ref }}
+  cancel-in-progress: true
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'bun2too-factory[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.head_ref }}", token: "${{ secrets.FACTORY_TOKEN }}" }
+      - name: Does the PR touch the support agent?
+        id: touched
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: echo "support=$(gh pr diff ${{ github.event.pull_request.number }} -R ${{ github.repository }} --name-only | grep -c '^bun2too-support-agent/' || true)" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+        if: steps.touched.outputs.support != '0'
+        with: { package_json_file: bun2too-support-agent/package.json }
+      - uses: actions/setup-node@v4
+        if: steps.touched.outputs.support != '0'
+        with: { node-version-file: bun2too-support-agent/.nvmrc, cache: pnpm, cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml }
+      - uses: astral-sh/setup-uv@v6
+        if: steps.touched.outputs.support != '0'
+      - if: steps.touched.outputs.support != '0'
+        working-directory: bun2too-support-agent
+        run: pnpm install --frozen-lockfile && uv sync --directory services/agents --frozen && pnpm fix
+      - name: Commit fixes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "bun2too-factory[bot]"
+            git config user.email "bun2too-factory[bot]@users.noreply.github.com"
+            git commit -am "style(support-agent): autofix formatting and lint"
+            git push
+          fi

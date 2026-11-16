@@ -1,0 +1,39 @@
+name: ratchet
+on:
+  schedule: [{ cron: "0 6 * * *" }]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+concurrency: { group: ratchet, cancel-in-progress: false }
+jobs:
+  ratchet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: { token: "${{ secrets.FACTORY_TOKEN }}" }
+      - name: Skip if a ratchet PR is open
+        id: open
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: echo "count=$(gh pr list --label ratchet --state open --json number -q length)" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+        if: steps.open.outputs.count == '0'
+        with: { package_json_file: bun2too-support-agent/package.json }
+      - uses: actions/setup-node@v4
+        if: steps.open.outputs.count == '0'
+        with: { node-version-file: bun2too-support-agent/.nvmrc, cache: pnpm, cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml }
+      - uses: astral-sh/setup-uv@v6
+        if: steps.open.outputs.count == '0'
+      - if: steps.open.outputs.count == '0'
+        run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
+      - uses: anthropics/claude-code-action@v1
+        if: steps.open.outputs.count == '0'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.FACTORY_TOKEN }}
+          prompt: |
+            Act as the Ratchet role in docs/factory.md for the support agent. Remove the first entry from bun2too-support-agent/docs/factory/ratchet.txt, make that path pass the named stricter rule,
+            run pnpm -C bun2too-support-agent check, and open a PR labelled ratchet on a branch named agent/ratchet-<today, YYYYMMDD>. Change nothing else.
+          claude_args: --max-turns 60

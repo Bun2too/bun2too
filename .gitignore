@@ -14,3 +14,7 @@ __pycache__/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Shared agent specs are part of this repo (overrides a global ignore).
+!AGENTS.md
+!CLAUDE.md

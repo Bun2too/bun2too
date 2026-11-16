@@ -1,0 +1,64 @@
+name: agent-rework
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+concurrency:
+  group: agent-rework-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  rework:
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'VERDICT: FAIL') &&
+      !contains(github.event.issue.labels.*.name, 'ready-for-human')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Count rounds
+        id: round
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          labels=$(gh pr view ${{ github.event.issue.number }} -R ${{ github.repository }} --json labels -q '.labels[].name')
+          n=0; for i in 1 2 3; do echo "$labels" | grep -qx "rework-$i" && n=$i; done
+          echo "next=$((n+1))" >> "$GITHUB_OUTPUT"
+      - name: Hand to a human after three rounds
+        if: steps.round.outputs.next > 3
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh pr edit ${{ github.event.issue.number }} -R ${{ github.repository }} --add-label ready-for-human
+          gh pr comment ${{ github.event.issue.number }} -R ${{ github.repository }} --body "Three rework rounds did not pass review. Handing to a human; see the latest review for open findings."
+      - uses: actions/checkout@v4
+        if: steps.round.outputs.next <= 3
+        with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
+      - name: Check out the PR branch
+        if: steps.round.outputs.next <= 3
+        env: { GH_TOKEN: "${{ secrets.FACTORY_TOKEN }}" }
+        run: gh pr checkout ${{ github.event.issue.number }}
+      - uses: pnpm/action-setup@v4
+        if: steps.round.outputs.next <= 3
+        with: { package_json_file: bun2too-support-agent/package.json }
+      - uses: actions/setup-node@v4
+        if: steps.round.outputs.next <= 3
+        with: { node-version-file: bun2too-support-agent/.nvmrc, cache: pnpm, cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml }
+      - uses: astral-sh/setup-uv@v6
+        if: steps.round.outputs.next <= 3
+      - if: steps.round.outputs.next <= 3
+        run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
+      - name: Mark round
+        if: steps.round.outputs.next <= 3
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh pr edit ${{ github.event.issue.number }} -R ${{ github.repository }} --add-label rework-${{ steps.round.outputs.next }}
+      - uses: anthropics/claude-code-action@v1
+        if: steps.round.outputs.next <= 3
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.FACTORY_TOKEN }}
+          prompt: |
+            Act as the Rework role in docs/factory.md for PR #${{ github.event.issue.number }}.
+            This is rework round ${{ steps.round.outputs.next }} of 3.
+          claude_args: --max-turns 60

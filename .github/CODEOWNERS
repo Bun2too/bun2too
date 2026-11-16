@@ -1,0 +1,11 @@
+# Replace @Bun2too/maintainers with the real team before enabling branch protection.
+/.github/                         @Bun2too/maintainers
+/.claude/                         @Bun2too/maintainers
+/.cursor/                         @Bun2too/maintainers
+/AGENTS.md                        @Bun2too/maintainers
+/CLAUDE.md                        @Bun2too/maintainers
+/docs/factory.md                  @Bun2too/maintainers
+/docs/sdlc.md                     @Bun2too/maintainers
+/bun2too-support-agent/AGENTS.md  @Bun2too/maintainers
+/bun2too-support-agent/tenants/   @Bun2too/maintainers
+/bun2too-support-agent/infra/     @Bun2too/maintainers

@@ -1,0 +1,66 @@
+name: deploy-support-env
+on:
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+      sha: { type: string, required: true }
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # support-prod has required reviewers: this is the human gate for production.
+    environment:
+      name: support-${{ inputs.environment }}
+      url: ${{ steps.tf.outputs.gateway_url }}
+    env:
+      TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+      TF_WORKSPACE: bun2too-support-${{ inputs.environment }}
+      TF_IN_AUTOMATION: "true"
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+    defaults: { run: { working-directory: bun2too-support-agent } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.sha }}" }
+      - uses: hashicorp/setup-terraform@v3
+        with: { cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}", terraform_wrapper: false }
+      - name: Apply environment config (variables, secrets, domain)
+        id: tf
+        working-directory: bun2too-support-agent/infra/terraform/railway/environment
+        env:
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
+          TF_VAR_tfc_organization: ${{ vars.TF_CLOUD_ORGANIZATION }}
+          TF_VAR_otel_endpoint: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          TF_VAR_runtime_secrets: ${{ secrets.SUPPORT_RUNTIME_SECRETS || '{}' }}
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve
+          for o in gateway_url environment_id project_id postgres_service_id; do
+            echo "$o=$(terraform output -raw $o)" >> "$GITHUB_OUTPUT"
+          done
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - run: npm install -g @railway/cli@5.71.0
+      - name: Ensure the Postgres volume for this environment
+        env: { RAILWAY_PROJECT_ID: "${{ steps.tf.outputs.project_id }}" }
+        run: scripts/deploy/ensure-volume.sh "${{ steps.tf.outputs.postgres_service_id }}" "${{ steps.tf.outputs.environment_id }}" /var/lib/postgresql/data
+      - name: Deploy agents, then gateway, and wait for each exact deployment
+        env:
+          RAILWAY_PROJECT_ID: ${{ steps.tf.outputs.project_id }}
+          GITHUB_SHA: ${{ inputs.sha }}
+        run: |
+          scripts/deploy/railway-up.sh agents "${{ inputs.environment }}"
+          scripts/deploy/railway-up.sh gateway "${{ inputs.environment }}"
+      - name: Smoke (read-only)
+        run: scripts/verify/smoke.sh "${{ steps.tf.outputs.gateway_url }}"
+      - name: Intake journey (dev offline, qa against ticket sandboxes; never prod)
+        if: inputs.environment != 'prod'
+        env:
+          RELAY_GATEWAY: ${{ steps.tf.outputs.gateway_url }}
+          RELAY_TENANT_KEY: ${{ secrets.SMOKE_TENANT_KEY }}
+        run: scripts/verify/intake.sh "How do I send a private inquiry?"
+      - name: Record
+        if: always()
+        run: echo "${{ inputs.environment }} → ${{ job.status }} at ${{ inputs.sha }} (${{ steps.tf.outputs.gateway_url }})" >> "$GITHUB_STEP_SUMMARY"
