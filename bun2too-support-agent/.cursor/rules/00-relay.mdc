@@ -1,5 +1,6 @@
 ---
-description: Relay repository rules (always on)
-alwaysApply: true
+description: Relay (support agent) rules
+globs: bun2too-support-agent/**
+alwaysApply: false
 ---
-Read and follow @AGENTS.md. Use the vocabulary in @GLOSSARY.md. Project skills in `.claude/skills/` (verify-relay, add-specialist, add-ticket-connector, add-tenant, factory-review) apply in Cursor too: open the SKILL.md and follow it. Install pstack (`/add-plugin pstack`) and Matt Pocock's skills (`npx skills@latest add mattpocock/skills -a cursor`) for the shared workflow skills.
+Read and follow @AGENTS.md (this product) after the root AGENTS.md. Use the vocabulary in @GLOSSARY.md. Product skills in `.claude/skills/` (verify-relay, add-specialist, add-ticket-connector, add-tenant) apply in Cursor too: open the SKILL.md and follow it.

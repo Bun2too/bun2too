@@ -3,7 +3,7 @@
 White-label, multi-agent support intake. A channel (website widget, retail system, marketplace, partner agent) hands Relay a customer problem over **REST** or **A2A**. Relay opens a tracked **case**, raises one **Jira** issue and one **ServiceNow** record, and sends a **specialist** agent to resolve it, escalating to people only when policy or confidence requires it. `bun2too` is the demo tenant.
 
 - Architecture: https://claude.ai/artifact/Hje8YdHV3njx2TXgywGS1D
-- Execution plan: https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
+- Execution plan (three weeks): https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
 - Pitch deck: https://claude.ai/artifact/Pz9GdCothnDgwBEFVqWmae
 
 ## Quick start (offline, no keys needed)
@@ -33,21 +33,20 @@ Offline mode replaces only external systems (model calls, Jira, ServiceNow) with
 | `services/agents`    | Python (LangGraph + LangChain): orchestrator, specialists, policy, case store, Jira and ServiceNow connectors |
 | `tenants/`           | White-label tenant configs                                                                                    |
 | `evals/`             | Golden intakes; `pnpm eval`                                                                                   |
-| `infra/`             | docker-compose, OTel Collector, Terraform                                                                     |
+| `infra/`             | docker-compose, OTel Collector; Terraform for Railway (POC) and GCP Cloud Run (GA candidate)                  |
+| `scripts/deploy/`    | Railway upload and deploy wait, volume check (used by CI only)                                                |
+
+## Deployment
+
+| Environment | Where                                             | When                                      |
+| ----------- | ------------------------------------------------- | ----------------------------------------- |
+| dev         | Railway `bun2too-support` / `dev`                 | every merge to `main` (offline mode)      |
+| qa          | Railway `bun2too-support` / `qa`                  | after dev smoke passes (ticket sandboxes) |
+| prod        | Railway `bun2too-support` / `prod`                | after qa, with a person's approval        |
+| GA          | Google Cloud Run (`infra/terraform/gcp-cloudrun`) | after the POC                             |
+
+Pipeline: root `.github/workflows/deploy-support.yml`. Terraform: [infra/terraform/railway/README.md](infra/terraform/railway/README.md). Release and rollback: [../docs/sop/environments-and-release.md](../docs/sop/environments-and-release.md).
 
 ## How work gets done here
 
-This repo is an agentic application factory. Agents implement, review, rework and autofix; people approve specs and merge finished PRs. Start with [AGENTS.md](AGENTS.md), then [docs/factory/README.md](docs/factory/README.md).
-
-It builds on two open-source skill sets, enabled as plugins in `.claude/settings.json`:
-
-- Matt Pocock's [skills](https://github.com/mattpocock/skills): grilling, `to-spec`, `to-tickets`, `tdd`, two-axis `code-review`, `pr`, and the software-factory vocabulary.
-- Lauren Tan's [pstack](https://github.com/cursor/plugins/tree/main/pstack): named engineering principles, `poteto-mode` playbooks, verification skills, `interrogate`, `no-comments`.
-
-### One-time repository setup (a person must do this)
-
-1. `git init`, push to GitHub, and protect `main` (required checks: `ci`; require one human approval).
-2. Add secrets: `ANTHROPIC_API_KEY`, and `FACTORY_TOKEN` (a GitHub App or fine-grained token with contents, pull-requests and issues write; not workflows).
-3. Create the labels in `docs/agents/triage-labels.md` (`gh label create ...`).
-4. Install the Claude GitHub app on the repo so `anthropics/claude-code-action` can comment.
-5. `pnpm exec lefthook install` for local pre-commit hooks.
+This product is a subtree of the Bun2too monorepo, and is built by the shared agent factory there. Start with the root [AGENTS.md](../AGENTS.md) and [docs/sdlc.md](../docs/sdlc.md), then this folder's [AGENTS.md](AGENTS.md). The lifecycle follows Addy Osmani's [agent-skills](https://github.com/addyosmani/agent-skills), with Matt Pocock's [skills](https://github.com/mattpocock/skills) used for the GitHub Issues bridge and grilling.

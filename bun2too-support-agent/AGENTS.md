@@ -1,19 +1,23 @@
 # Relay: agent guide
 
+This product lives at `bun2too-support-agent/` in the Bun2too monorepo. Read the root [AGENTS.md](../AGENTS.md) first: its rules, lifecycle and shared agents apply here. This file adds only what is specific to Relay.
+
 Relay is a white-label, multi-agent support intake platform. Channels hand Relay a customer problem over REST or A2A; Relay opens a **case**, raises one Jira issue and one ServiceNow record, and sends **specialists** to resolve it or **escalate** it. `bun2too` is the demo **tenant**. Read [GLOSSARY.md](GLOSSARY.md) before naming anything; use its terms and avoid the words it lists under _Avoid_.
 
 ## Map
 
-| Path                 | Language                       | Owns                                                              |
-| -------------------- | ------------------------------ | ----------------------------------------------------------------- |
-| `apps/gateway`       | TypeScript (Hono)              | REST `/v1/*`, A2A `/a2a` + agent card, SSE, webhooks, tenant auth |
-| `apps/widget`        | TypeScript                     | `<relay-support>` embeddable web component                        |
-| `packages/contracts` | TypeScript (Zod)               | Wire contracts. Source of truth; exports JSON Schema to `schema/` |
-| `packages/telemetry` | TypeScript                     | OpenTelemetry bootstrap for every Node process                    |
-| `services/agents`    | Python (LangGraph + LangChain) | Orchestrator graph, specialists, case store, ticket connectors    |
-| `tenants/`           | YAML                           | White-label tenant configs. Data, never code branches             |
-| `evals/`             | JSONL                          | Golden intakes and expected routing                               |
-| `docs/adr/`          | Markdown                       | Decisions. Read the ADRs in the area you touch                    |
+| Path                 | Language                       | Owns                                                               |
+| -------------------- | ------------------------------ | ------------------------------------------------------------------ |
+| `apps/gateway`       | TypeScript (Hono)              | REST `/v1/*`, A2A `/a2a` + agent card, SSE, webhooks, tenant auth  |
+| `apps/widget`        | TypeScript                     | `<relay-support>` embeddable web component                         |
+| `packages/contracts` | TypeScript (Zod)               | Wire contracts. Source of truth; exports JSON Schema to `schema/`  |
+| `packages/telemetry` | TypeScript                     | OpenTelemetry bootstrap for every Node process                     |
+| `services/agents`    | Python (LangGraph + LangChain) | Orchestrator graph, specialists, case store, ticket connectors     |
+| `tenants/`           | YAML                           | White-label tenant configs. Data, never code branches              |
+| `evals/`             | JSONL                          | Golden intakes and expected routing                                |
+| `docs/adr/`          | Markdown                       | Decisions. Read the ADRs in the area you touch                     |
+| `infra/terraform/`   | Terraform                      | `railway/` (POC: dev, qa, prod) and `gcp-cloudrun/` (GA candidate) |
+| `scripts/deploy/`    | Bash                           | Railway upload, deploy wait and volume checks used by CI           |
 
 Architecture and plan (published for the team): see [docs/architecture.md](docs/architecture.md).
 
@@ -45,44 +49,30 @@ A change is done when `pnpm check` passes **and** you have proved the behaviour 
 
 Full standards with examples: [CODING_STANDARDS.md](CODING_STANDARDS.md). Every rule above is paired with what enforces it in [docs/factory/enforcement.md](docs/factory/enforcement.md); when you find yourself repeating advice, add an enforcer there, not more prose here.
 
-## Workflow (the factory)
+## Workflow
 
-Work moves through tasks, triggers and runs as defined in [docs/factory/README.md](docs/factory/README.md). In short:
-
-1. **Align.** Grill the requester (`/grill-with-docs`) until the design tree is resolved; update `GLOSSARY.md` and write an ADR for any hard-to-reverse decision.
-2. **Spec, then tickets.** `/to-spec` then `/to-tickets`: thin tracer-bullet tickets with blocking edges.
-3. **Implement test-first.** `/tdd` at pre-agreed seams, one vertical slice at a time.
-4. **Review on two axes.** `/code-review` runs Standards and Spec reviewers in separate fresh contexts. Do not merge their findings.
-5. **Rework, capped.** Fix only what the review named. Three failed review rounds ends the loop with the `ready-for-human` label.
-6. **Open the PR** following `/pr`: smallest visual summary, before/after evidence, merge-danger call.
-
-A run never waits for a human. It finishes, and the human's later label or comment starts a new run.
+Follow the root lifecycle in [docs/sdlc.md](../docs/sdlc.md): `/spec` → `/plan` + `/to-tickets` → `/build` → `/test` with `verify-relay` → `factory-review` → `/ship`. Automated runs play the roles in [docs/factory.md](../docs/factory.md). Merges to `main` deploy to dev, then qa, then prod after approval ([environments SOP](../docs/sop/environments-and-release.md)).
 
 ## Prove it works
 
-"It compiles" is not evidence. Use `.claude/skills/verify-relay/SKILL.md` to launch the stack, drive the real API, and capture evidence (response bodies, case event log, trace ID). Put the commands and outputs in the PR body. If a check could not run, say **inconclusive** and why.
+"It compiles" is not evidence. Use `.claude/skills/verify-relay/SKILL.md` (or the shared `verifier` agent) to launch the stack, drive the real API, and capture evidence: response bodies, the case event log, the trace ID. Put the commands and outputs in the PR body. If a check could not run, say **inconclusive** and why. After a deploy, `scripts/verify/smoke.sh <gateway-url>` checks the environment read-only.
 
-## Principles to cite
+## Rules to cite
 
-When a principle changes a decision, name it in your reply or PR with the decision it changed (pstack convention): Laziness Protocol, Boundary Discipline, Type System Discipline, Model the Domain, Make Operations Idempotent, Prove It Works, Fix Root Causes, Test Behavior Not Implementation, Encode Lessons in Structure, Never Block on the Human.
+When a rule changes a decision, name it in the PR with the decision it changed. For example: "Rule 3, idempotent external writes: used `ensure_ticket` instead of create." Lessons that recur become enforcers in [docs/factory/enforcement.md](docs/factory/enforcement.md).
 
 ## Safety
 
 - Never commit secrets. `.env*` is ignored except `.env.example`.
 - Never call live Jira, ServiceNow, CIAM or LLM endpoints from tests. Run with `RELAY_OFFLINE=1` wiring: the keyword classifier, `KnowledgeLookupSpecialist` and the fakes in `relay_agents.connectors.fakes`.
 - Never push to `main`, force-push, or change CI permissions from an agent run.
-- Changes under `.claude/`, `.cursor/`, `.github/`, `AGENTS.md` and `docs/factory/` change the factory itself and always need human review.
+- Changes to this file, `.claude/`, `.cursor/`, `infra/` and `docs/factory/` change the factory or production and always need human review (root rule 10).
+- Deploys happen only through `deploy-support.yml`. Never run `terraform apply` or `railway up` from a workstation.
 
-## Agent skills
+## Product skills
 
-### Issue tracker
+- `verify-relay`: launch the stack and prove behaviour (features: rest-intake, escalation, a2a-intake, idempotency).
+- `add-specialist`, `add-ticket-connector`, `add-tenant`: the safe path for each common extension.
+- Shared: `factory-review`, `railway-deploy`, `subtree-sync` and the `spec-reviewer` and `verifier` agents (root `.claude/`).
 
-GitHub Issues on this repo, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default five canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Issue tracker, triage labels and domain-doc layout are shared: see `../docs/agents/`. Relay's glossary is [GLOSSARY.md](GLOSSARY.md) and its decisions are in [docs/adr/](docs/adr/).

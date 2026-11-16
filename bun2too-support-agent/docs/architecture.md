@@ -3,7 +3,7 @@
 The full architecture document, execution plan and pitch deck are published as Claude artifacts for the team:
 
 - Architecture: https://claude.ai/artifact/Hje8YdHV3njx2TXgywGS1D
-- Execution plan: https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
+- Execution plan (three weeks): https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
 - Pitch deck: https://claude.ai/artifact/Pz9GdCothnDgwBEFVqWmae
 
 When this repo's ADRs and the published document disagree, the ADRs win.
@@ -20,5 +20,7 @@ Jira / ServiceNow ─webhooks─┘                                 │  → res
                                                               └─▶ CaseStore: Postgres (RLS per tenant)
 all processes ──OTLP──▶ otel-collector ──▶ traces / metrics / logs
 ```
+
+Runtime: Railway project `bun2too-support` with environments dev, qa and prod, each running `gateway` (public), `agents` (private network) and `postgres` (its own volume). GA candidate: Google Cloud Run. See the root `docs/adr/0004-railway-poc-gcp-ga.md`.
 
 Key decisions: see `docs/adr/`.

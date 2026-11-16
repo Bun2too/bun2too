@@ -1,6 +1,6 @@
 # Coding standards
 
-The Standards reviewer checks diffs against this file. Anything tooling already enforces (Biome, Ruff, mypy, tsc) is not repeated here. Where this file and the Fowler smell baseline in `/code-review` disagree, this file wins.
+Addy's `code-reviewer` checks diffs against this file during `factory-review`. Anything tooling already enforces (Biome, Ruff, mypy, tsc) is not repeated here. Where this file and a generic review checklist disagree, this file wins.
 
 ## Both languages
 
