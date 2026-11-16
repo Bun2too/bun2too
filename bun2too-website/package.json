@@ -1,0 +1,66 @@
+{
+  "name": "bun2too-website",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:cms": "npm run dev --",
+    "support:setup": "node scripts/setup-local-support.mjs",
+    "support:email:check": "node --env-file-if-exists=.env.local --import tsx scripts/check-support-email.mjs",
+    "support:ai:check": "node --env-file-if-exists=.env.local --import tsx scripts/check-support-ai.mjs",
+    "eval:component": "node --import tsx evals/run.mjs component",
+    "eval:trajectory": "node --import tsx evals/run.mjs trajectory",
+    "eval:all": "node --import tsx evals/run.mjs all",
+    "eval:check": "node --env-file-if-exists=.env.secrets --import tsx scripts/check-agent-evals.mjs",
+    "dev:support": "npm run dev --",
+    "contentful:plan": "node scripts/contentful-sync.mjs --plan",
+    "contentful:check": "node --env-file-if-exists=.env.contentful.local scripts/contentful-sync.mjs",
+    "contentful:delivery:check": "node --env-file-if-exists=.env.contentful.local scripts/contentful-check.mjs",
+    "contentful:seed": "node --env-file-if-exists=.env.contentful.local scripts/contentful-sync.mjs --apply",
+    "build": "next build --webpack",
+    "build:test": "node scripts/build-test.mjs",
+    "security:check": "node scripts/check-public-repo.mjs",
+    "security:scan": "node scripts/gitleaks.mjs",
+    "deploy:check": "node scripts/sync-netlify-env.mjs --check",
+    "deploy:configure": "node scripts/sync-netlify-env.mjs",
+    "deploy:inspect": "node scripts/sync-netlify-env.mjs --inspect-site",
+    "insights:check": "node --env-file-if-exists=.env.local scripts/check-insights.mjs",
+    "postbuild": "node scripts/validate-build.mjs",
+    "start": "next start --port 3000",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:smoke": "node scripts/smoke.mjs",
+    "docs:check": "node scripts/check-docs.mjs"
+  },
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "overrides": {
+    "picomatch@^2.0.0": "2.3.2"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "2.30.0",
+    "@netlify/blobs": "11.1.8",
+    "auth0": "7.7.0",
+    "jose": "6.2.15",
+    "next": "16.4.5",
+    "nodemailer": "10.5.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@netlify/plugin-nextjs": "5.16.6",
+    "@playwright/test": "1.65.0",
+    "@types/node": "22.14.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "autoprefixer": "^10.4.21",
+    "netlify-cli": "27.16.2",
+    "postcss": "^8.5.3",
+    "prettier": "3.9.10",
+    "tailwindcss": "^3.4.17",
+    "tsx": "4.23.15",
+    "typescript": "5.8.2"
+  }
+}
