@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: Crew observability
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

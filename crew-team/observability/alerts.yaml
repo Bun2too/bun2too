@@ -1,0 +1,61 @@
+groups:
+  - name: crew-runtime
+    rules:
+      - alert: CrewTelemetryMissing
+        expr: absent(app_runtime_heartbeat) or (time() - app_runtime_heartbeat > 120)
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Application metrics heartbeat missing; inspect runtime and Collector"}
+      - alert: CrewLogExportDelayed
+        expr: telemetry_logs_oldest_pending_seconds > 60
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Durable operational events are not reaching the Collector promptly"}
+      - alert: CrewTelemetryQuarantined
+        expr: telemetry_logs_quarantined_count > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Review telemetry_dead_letters before explicitly requeueing rejected events"}
+      - alert: CrewAPIErrors
+        expr: sum(rate(http_server_request_count{http_response_status_code=~"5.."}[5m])) / clamp_min(sum(rate(http_server_request_count[5m])), 0.001) > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "API 5xx ratio exceeds the 99% availability target"}
+      - alert: CrewGenerationFailed
+        expr: increase(app_event_count{operation="run_failed"}[15m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Campaign generation failed; correlate event run_id and trace_id"}
+      - alert: CrewPublicationOverdue
+        expr: app_publication_age > 93600
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "No successful daily publication for more than 26 hours"}
+      - alert: CrewWorkflowHeartbeatMissing
+        expr: app_workflow_heartbeat_age > 1800
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "No n8n execution callback for 30 minutes"}
+      - alert: CrewEngagementStale
+        expr: app_engagement_observation_age > 93600
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Engagement observations are over 26 hours old"}
+      - alert: CrewStoragePressure
+        expr: app_storage_used_ratio > 0.85
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Application volume is over 85% used"}
+      - alert: CollectorQueuePressure
+        expr: otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Collector persistent export queue exceeds 80% capacity"}
+      - alert: CollectorExportFailure
+        expr: (sum(rate(otelcol_exporter_send_failed_spans[5m])) > 0) or (sum(rate(otelcol_exporter_send_failed_log_records[5m])) > 0)
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Collector cannot deliver traces or logs to storage"}
+      - alert: CrewCostCoverageMissing
+        expr: increase(gen_ai_client_usage_unavailable[15m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Model usage or pricing is missing; cost reporting is incomplete"}

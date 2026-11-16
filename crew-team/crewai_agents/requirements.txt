@@ -1,0 +1,17 @@
+fastapi>=0.110.0
+uvicorn>=0.31.1
+crewai[anthropic,google-genai]==1.15.22
+pydantic>=2.11.9,<2.13
+httpx>=0.28.1,<1
+openai>=2.54.0,<3
+python-dotenv>=1.2.1,<2
+ddtrace==4.15.1
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-instrumentation-httpx==0.65b0
+psutil>=5.9,<8
+langsmith==0.14.8
+
+boto3>=1.35,<2
+pywebpush>=2,<3

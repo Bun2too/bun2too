@@ -1,0 +1,250 @@
+name: Infrastructure and Core Deployment Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy the full application, apply infrastructure only, or import state and plan
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - infrastructure-only
+          - import-state
+  push:
+    branches: [ main, qa ]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.packages.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify application and deployment logic locally
+        run: |
+          python3 -m pip install -r crewai_agents/requirements.txt
+          python3 scripts/verify_marketing.py
+      - name: Validate package targets
+        id: packages
+        run: python3 scripts/publish_package.py matrix
+
+  packages:
+    needs: verify
+    if: inputs.operation == '' || inputs.operation == 'deploy'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      kind: ${{ matrix.kind }}
+      directory: ${{ matrix.directory }}
+      image-name: ${{ matrix.image || 'bun2too-crew-team' }}
+
+  deploy:
+    needs: [verify, packages]
+    if: ${{ always() && !cancelled() && needs.verify.result == 'success' && (needs.packages.result == 'success' || inputs.operation == 'infrastructure-only' || inputs.operation == 'import-state') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
+    # Both branches share one Railway project; serialize infrastructure changes.
+    concurrency:
+      group: railway-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      DEPLOY_OPERATION: ${{ inputs.operation || 'deploy' }}
+      DEPLOY_ENVIRONMENT: ${{ github.ref_name == 'main' && 'production' || 'qa' }}
+      # Set TF_WORKSPACE separately in each GitHub environment.
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
+      TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      POSTGRES_SERVICE_ID: ${{ vars.POSTGRES_SERVICE_ID }}
+      CREWAI_SERVICE_ID: ${{ vars.CREWAI_SERVICE_ID }}
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Verify requested deployment scope before changes
+        env:
+          CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          N8N_MARKETING_CREDENTIAL_ID: ${{ vars.N8N_MARKETING_CREDENTIAL_ID }}
+          N8N_ACTIVATE_WORKFLOWS: ${{ vars.N8N_ACTIVATE_WORKFLOWS }}
+          MARKETING_DEPLOY_ENABLED: ${{ vars.MARKETING_DEPLOY_ENABLED }}
+        run: python3 scripts/check_deployment_scope.py
+
+      - name: Prepare CrewAI runtime configuration for Terraform
+        env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python3 scripts/prepare_runtime_config.py
+
+      - name: Install deployment dependencies
+        run: python3 -m pip install -r crewai_agents/requirements.txt
+
+      - name: Verify environment, credentials and deployment targets
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+        run: |
+          git log -1 --format="Deployment checkout: %H"
+          python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py
+
+      - name: Install and Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Prepare Terraform provider cache directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/terraform-plugin-cache"
+          printf 'TF_PLUGIN_CACHE_DIR=%s\n' "$RUNNER_TEMP/terraform-plugin-cache" >> "$GITHUB_ENV"
+
+      - name: Cache locked Terraform providers
+        uses: actions/cache@v4
+        with:
+          # Only provider binaries; never cache backend metadata, credentials, plans or state.
+          path: ${{ runner.temp }}/terraform-plugin-cache
+          key: terraform-providers-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('terraform/.terraform.lock.hcl') }}
+
+      - name: Set up Node.js 24 for Railway CLI
+        if: env.DEPLOY_OPERATION == 'deploy'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install Railway CLI Engine
+        if: env.DEPLOY_OPERATION == 'deploy'
+        run: |
+          python3 scripts/run_deployment_step.py node --version
+          python3 scripts/run_deployment_step.py npm install -g @railway/cli
+          python3 scripts/run_deployment_step.py railway --version
+
+      - name: Terraform initialize, prepare state and plan or apply
+        env:
+          # Native provider input; do not set the CLI project-token variable.
+          TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          N8N_SERVICE_ID: ${{ vars.N8N_SERVICE_ID }}
+          N8N_VOLUME_READY: ${{ vars.N8N_VOLUME_READY || 'false' }}
+          TF_VAR_deployment_environment: ${{ env.DEPLOY_ENVIRONMENT }}
+          TF_VAR_railway_project_id: ${{ env.RAILWAY_PROJECT_ID }}
+          TF_VAR_railway_environment_id: ${{ env.RAILWAY_ENVIRONMENT_ID }}
+          TF_VAR_postgres_service_id: ${{ env.POSTGRES_SERVICE_ID }}
+          TF_VAR_crewai_service_id: ${{ env.CREWAI_SERVICE_ID }}
+          TF_VAR_n8n_service_id: ${{ vars.N8N_SERVICE_ID }}
+          TF_VAR_n8n_volume_ready: ${{ vars.N8N_VOLUME_READY || 'false' }}
+          TF_VAR_n8n_runtime_config: ${{ secrets.N8N_RUNTIME_CONFIG || '{}' }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+          TF_VAR_postgres_user: ${{ vars.POSTGRES_USER || 'postgres' }}
+          TF_VAR_postgres_database: ${{ vars.POSTGRES_DB || 'bun2too' }}
+          TF_IN_AUTOMATION: 'true'
+        run: |
+          run() { python3 "$GITHUB_WORKSPACE/scripts/run_deployment_step.py" "$@"; }
+          cd terraform
+          run terraform version
+          run python3 "$GITHUB_WORKSPACE/scripts/init_terraform.py"
+          run terraform validate -no-color
+          if [[ "$DEPLOY_OPERATION" == import-state ]]; then
+            run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py" --import-existing
+            run terraform plan -input=false -no-color
+          else
+            if [[ "$DEPLOY_ENVIRONMENT" == production ]]; then
+              run python3 "$GITHUB_WORKSPACE/scripts/prepare_terraform_state.py"
+            fi
+            run python3 "$GITHUB_WORKSPACE/scripts/ensure_n8n_volume.py"
+            # Saved plan may contain secrets; keep it local and remove it on exit.
+            plan_file="$RUNNER_TEMP/crew-deploy.tfplan"
+            trap 'rm -f "$plan_file"' EXIT
+            run terraform plan -input=false -no-color -out="$plan_file"
+            run python3 "$GITHUB_WORKSPACE/scripts/check_n8n_storage_plan.py" "$plan_file"
+            run python3 "$GITHUB_WORKSPACE/scripts/apply_terraform.py" "$plan_file"
+            run python3 "$GITHUB_WORKSPACE/scripts/ensure_n8n_volume.py" --verify-only
+          fi
+
+      - name: Verify Postgres password reached Railway
+        if: env.DEPLOY_OPERATION != 'import-state'
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: python3 scripts/run_deployment_step.py python3 scripts/check_deployment.py --verify-postgres
+
+      - name: Deploy CrewAI and wait for Railway deployment success
+        if: env.DEPLOY_OPERATION == 'deploy'
+        timeout-minutes: 21
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          python3 scripts/run_deployment_step.py python3 -m scripts.deploy_crewai
+
+      - name: Verify provider credentials reached Railway
+        if: env.DEPLOY_OPERATION != 'import-state'
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: python3 scripts/run_deployment_step.py python3 -m scripts.check_provider_config
+
+      - name: Verify deployed marketing runtime before installing schedules
+        if: env.DEPLOY_OPERATION == 'deploy'
+        env:
+          CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+        run: python3 scripts/run_deployment_step.py python3 scripts/check_marketing_runtime.py
+
+      - name: Deploy version-controlled n8n workflows
+        if: env.DEPLOY_OPERATION == 'deploy'
+        env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
+          N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
+          N8N_MARKETING_CREDENTIAL_ID: ${{ vars.N8N_MARKETING_CREDENTIAL_ID }}
+          N8N_ACTIVATE_WORKFLOWS: ${{ vars.N8N_ACTIVATE_WORKFLOWS || 'false' }}
+          MARKETING_TIMEZONE: America/Chicago
+        run: python3 scripts/run_deployment_step.py python3 scripts/deploy_n8n.py
+
+      - name: Report deployment to Datadog
+        if: always()
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SITE: ${{ vars.DD_SITE || 'us5.datadoghq.com' }}
+          DEPLOY_STATUS: ${{ job.status }}
+        run: python3 scripts/run_deployment_step.py python3 scripts/report_deployment.py
+
+      - name: Deployment result
+        if: always()
+        env:
+          DEPLOY_JOB_STATUS: ${{ job.status }}
+        run: |
+          printf 'Deployment result: %s; commit: %s; run: %s; attempt: %s\n' "$DEPLOY_JOB_STATUS" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          printf '\nDeployment result: **%s**. Run %s, attempt %s.\n' "$DEPLOY_JOB_STATUS" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"

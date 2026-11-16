@@ -1,0 +1,42 @@
+flowchart TB
+  Operator[Business owner: facts, audience, rules]
+  Git[Git repository: agents, profile, workflows, Terraform]
+  CI[GitHub Actions: test, apply, build, verify, install workflows]
+  HCP[(HCP Terraform state and locks)]
+  Operator --> Git --> CI
+  CI --> HCP
+  subgraph Railway[Railway environment: production or QA]
+    N8N[n8n: scheduler and execution journal]
+    NVol[(n8n volume: database, credentials, config)]
+    API[CrewAI FastAPI: authenticated operations]
+    Worker[Single durable generation worker]
+    Crew[PO → BA → Research → Creative → Writer → Engineering → Tester → Editor → Delivery]
+    Gate[Evidence and business-rule checks; approval hash]
+    Publish[Deterministic Facebook publisher; quota and atomic claim]
+    Volume[(CrewAI volume: runs, tasks, articles, publications, events)]
+    Articles[Public approved article pages]
+    PG[(Existing Postgres: reserved for future shared storage)]
+    N8N --- NVol
+    N8N -->|tick every 5 minutes| API
+    API --> Worker --> Crew --> Gate
+    Worker --- Volume
+    Gate --> Volume
+    N8N -->|publish poll every 5 minutes| Publish
+    Publish --- Volume
+    Articles --- Volume
+    API --- Volume
+  end
+  CI -->|Terraform infrastructure; Railway upload| Railway
+  CI -->|n8n public API: upsert and activate| N8N
+  Sources[Approved HTTPS sources] -->|bounded fetch| Worker
+  LLM[Configured model provider] <--> Crew
+  Publish -->|Page feed: message and article link| FB[Bun2too Facebook Page]
+  FB -->|reads public article| Articles
+  N8N -->|daily 07:45 Central| Metrics[Read Facebook engagement]
+  FB --> Metrics --> Volume
+  Volume -->|last 20 outcomes and hypotheses| Crew
+  DD[Datadog: logs and LLM Observability]
+  Volume -->|durable operational log export| DD
+  Crew -->|agentless LLM spans| DD
+  N8N -->|completion and error events via API| Volume
+  CI -->|deployment outcome| DD

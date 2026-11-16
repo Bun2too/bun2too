@@ -1,0 +1,578 @@
+{
+  "name": "[__DEPLOY_ENVIRONMENT__] Marketing daily operations",
+  "nodes": [
+    {
+      "id": "trigger-0",
+      "name": "Generate daily campaign schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "operation-0",
+      "name": "Generate daily campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/tick",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "operation-1",
+      "name": "Publish approved content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/publish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": false
+    },
+    {
+      "id": "trigger-2",
+      "name": "Collect Facebook results schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        480
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "operation-2",
+      "name": "Collect Facebook results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/metrics",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "event-operation-0",
+      "name": "Record Generate daily campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Generate daily campaign\", node: \"Generate daily campaign\", result: $json}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "event-operation-1",
+      "name": "Record Publish approved content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Publish approved content\", node: \"Publish approved content\", result: $json}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "event-operation-2",
+      "name": "Record Collect Facebook results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        550,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($execution.id), workflow_name: $workflow.name, status: \"completed\", operation: \"Collect Facebook results\", node: \"Collect Facebook results\", result: $json}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "check-outcome-0",
+      "name": "Check Generate daily campaign outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "check-outcome-1",
+      "name": "Check Publish approved content outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        240
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "check-outcome-2",
+      "name": "Check Collect Facebook results outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        480
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.failed) {\n  throw new Error((result.reason || \"Marketing operation failed\") + \"; runs=\" + (result.run_ids || []).join(\",\"));\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "name": "Wait for generation",
+      "id": "wait-for-generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        1100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 15,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "read-daily-campaign",
+      "name": "Read daily campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "url": "={{ '__CREWAI_BASE_URL__/runs/' + $('Generate daily campaign').first().json.run_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "name": "Plan daily continuation",
+      "id": "plan-daily-continuation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        1300
+      ],
+      "parameters": {
+        "jsCode": "const run = $input.first().json;\nconst id = run.id || run.run_id;\nconst expected = $('Generate daily campaign').first().json.run_id;\nif (!id || id !== expected) throw new Error('Daily campaign identity mismatch');\nconst now = Date.now();\nconst deadline = Date.parse(run.publish_before);\nif (!Number.isFinite(deadline) || now >= deadline) throw new Error('Daily campaign publishing window expired; runs=' + id);\nif (run.status === 'published') return [{json: {pending: false, publish: false, run_id: id}}];\nif (run.status === 'approved') {\n  const target = Date.parse(run.publish_after);\n  if (!Number.isFinite(target) || target >= deadline) throw new Error('Invalid publication time; runs=' + id);\n  return [{json: {pending: false, publish: true, run_id: id, publish_at: new Date(Math.max(now, target)).toISOString()}}];\n}\nif (['queued', 'running'].includes(run.status) || (run.status === 'failed' && run.retryable)) {\n  if ($runIndex >= 5 || now + 15 * 60 * 1000 >= deadline) throw new Error('Daily generation wait exhausted (maximum six checks); inspect campaign before manual recovery; runs=' + id);\n  return [{json: {pending: true, publish: false, run_id: id}}];\n}\nthrow new Error('Campaign requires intervention: ' + run.status + '; runs=' + id);\n"
+      }
+    },
+    {
+      "name": "Generation still pending",
+      "id": "generation-still-pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        1400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pending",
+              "leftValue": "={{ $json.pending }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Campaign ready to publish",
+      "id": "campaign-ready-to-publish",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        1500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "publish",
+              "leftValue": "={{ $json.publish }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Wait until publication time",
+      "id": "wait-until-publication-time",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        1600
+      ],
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.publish_at }}"
+      }
+    }
+  ],
+  "connections": {
+    "Generate daily campaign schedule": {
+      "main": [
+        [
+          {
+            "node": "Generate daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Facebook results schedule": {
+      "main": [
+        [
+          {
+            "node": "Collect Facebook results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Record Generate daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish approved content": {
+      "main": [
+        [
+          {
+            "node": "Record Publish approved content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Facebook results": {
+      "main": [
+        [
+          {
+            "node": "Record Collect Facebook results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Generate daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Check Generate daily campaign outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Publish approved content": {
+      "main": [
+        [
+          {
+            "node": "Check Publish approved content outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Collect Facebook results": {
+      "main": [
+        [
+          {
+            "node": "Check Collect Facebook results outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Generate daily campaign outcome": {
+      "main": [
+        [
+          {
+            "node": "Wait for generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for generation": {
+      "main": [
+        [
+          {
+            "node": "Read daily campaign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read daily campaign": {
+      "main": [
+        [
+          {
+            "node": "Plan daily continuation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan daily continuation": {
+      "main": [
+        [
+          {
+            "node": "Generation still pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generation still pending": {
+      "main": [
+        [
+          {
+            "node": "Wait for generation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Campaign ready to publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign ready to publish": {
+      "main": [
+        [
+          {
+            "node": "Wait until publication time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Wait until publication time": {
+      "main": [
+        [
+          {
+            "node": "Publish approved content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": -1
+  }
+}

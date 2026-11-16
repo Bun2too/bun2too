@@ -1,0 +1,21 @@
+// Only the named GitHub destination is published; project-defined publications supply coordinates.
+gradle.projectsEvaluated {
+    def publicationCount = 0
+    allprojects {
+        plugins.withId('maven-publish') {
+            publicationCount += publishing.publications.size()
+            def destination = publishing.repositories.findByName('GitHubPackages')
+            if (destination == null) {
+                destination = publishing.repositories.maven { name = 'GitHubPackages' }
+            }
+            destination.url = uri('https://maven.pkg.github.com/' + System.getenv('GITHUB_REPOSITORY').toLowerCase())
+            destination.credentials {
+                username = System.getenv('GITHUB_ACTOR')
+                password = System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
+    if (publicationCount == 0) {
+        throw new GradleException('Configure at least one Maven publication before publishing to GitHub Packages')
+    }
+}

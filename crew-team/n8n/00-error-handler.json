@@ -1,0 +1,258 @@
+{
+  "name": "Bun2too marketing errors (__DEPLOY_ENVIRONMENT__)",
+  "nodes": [
+    {
+      "id": "error-trigger",
+      "name": "Workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "report-error",
+      "name": "Record failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "__CREWAI_BASE_URL__/automation/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({execution_id: String($json.execution?.id || \"trigger\"), workflow_name: $json.workflow?.name || \"marketing\", status: \"failed\", node: $json.execution?.lastNodeExecuted || $json.trigger?.error?.node?.name || null, execution_url: $json.execution?.url || null, error_message: String($json.execution?.error?.message || $json.trigger?.error?.message || \"Workflow failed; inspect execution\").slice(0, 2000)}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MARKETING_CREDENTIAL_ID__",
+          "name": "Marketing API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "prepare-fallback",
+      "name": "Prepare independent fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const recorded = $input.first().json;\nconst source = $('Workflow error').first().json;\nconst node = source.execution?.lastNodeExecuted || source.trigger?.error?.node?.name || 'unknown';\nif (recorded.recorded && recorded.notifications_managed && !node.toLowerCase().includes('operational health')) return [];\nconst key = String(source.workflow?.id || 'marketing') + ':' + node;\n// Keep content independent of potentially sensitive HTTP/provider error bodies.\nconst text = '[FB workflow failure] ' + (source.workflow?.name || 'Marketing') + '\\nNode: ' + node + '\\nExecution: ' + (source.execution?.id || 'trigger') + '\\n' + (source.execution?.url || '') + '\\nPrimary alert service unavailable or degraded. Inspect n8n execution and CrewAI operations status.';\nreturn [{json: {key, text}}];"
+      }
+    },
+    {
+      "id": "slack-fallback",
+      "name": "Slack fallback notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({channel: \"__ALERT_SLACK_CHANNEL__\", text: $json.text, mrkdwn: false, unfurl_links: false, unfurl_media: false}) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__ALERT_SLACK_CREDENTIAL_ID__",
+          "name": "Operational Slack"
+        }
+      }
+    },
+    {
+      "id": "remember-slack",
+      "name": "Remember Slack fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ],
+      "parameters": {
+        "jsCode": "if ($input.first().json.ok === true) {\n  const state = $getWorkflowStaticData('global');\n  state.alerts = state.alerts || {};\n  state.alerts[$('Gate slack fallback').first().json.key] = Date.now();\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "email-fallback",
+      "name": "Email fallback notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        750,
+        220
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "fromEmail": "__ALERT_EMAIL_FROM__",
+        "toEmail": "__ALERT_EMAIL_TO__",
+        "subject": "[FB workflow] Independent failure alert",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "__ALERT_SMTP_CREDENTIAL_ID__",
+          "name": "Operational SMTP"
+        }
+      }
+    },
+    {
+      "id": "gate-slack",
+      "name": "Gate slack fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst key = item.key + ':slack';\nconst state = $getWorkflowStaticData('global');\nif (Date.now() - (state.alerts?.[key] || 0) < 60 * 60 * 1000) return [];\nreturn [{json: {...item, key}}];"
+      }
+    },
+    {
+      "id": "gate-email",
+      "name": "Gate email fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst key = item.key + ':email';\nconst state = $getWorkflowStaticData('global');\nif (Date.now() - (state.alerts?.[key] || 0) < 60 * 60 * 1000) return [];\nreturn [{json: {...item, key}}];"
+      }
+    },
+    {
+      "id": "remember-email",
+      "name": "Remember email fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (!result.error && Array.isArray(result.accepted) && result.accepted.length > 0) {\n  const state = $getWorkflowStaticData('global');\n  state.alerts = state.alerts || {};\n  state.alerts[$('Gate email fallback').first().json.key] = Date.now();\n}\nreturn $input.all();"
+      }
+    }
+  ],
+  "connections": {
+    "Workflow error": {
+      "main": [
+        [
+          {
+            "node": "Record failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record failure": {
+      "main": [
+        [
+          {
+            "node": "Prepare independent fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare independent fallback": {
+      "main": [
+        [
+          {
+            "node": "Gate slack fallback",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate email fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack fallback notification": {
+      "main": [
+        [
+          {
+            "node": "Remember Slack fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate slack fallback": {
+      "main": [
+        [
+          {
+            "node": "Slack fallback notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate email fallback": {
+      "main": [
+        [
+          {
+            "node": "Email fallback notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email fallback notification": {
+      "main": [
+        [
+          {
+            "node": "Remember email fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 180
+  }
+}

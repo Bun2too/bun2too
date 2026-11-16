@@ -1,0 +1,7 @@
+deployment_environment = "production"
+github_repository = "YOUR_OWNER/YOUR_REPOSITORY"
+railway_project_id = "f5a4899e-a958-4353-b6a3-99a57b80ebad"
+railway_environment_id = "72e3af2d-37a3-430f-92ed-e0941b0b6435"
+postgres_service_id = "dd68258c-7986-46e8-b8a7-e2830403ba17"
+crewai_service_id = "YOUR_CREWAI_SERVICE_ID"
+# Set the secret through TF_VAR_postgres_password, not this example.
