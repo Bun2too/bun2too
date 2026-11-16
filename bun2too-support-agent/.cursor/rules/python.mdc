@@ -1,0 +1,6 @@
+---
+description: Python rules for the agents service
+globs: services/agents/**/*.py
+alwaysApply: false
+---
+Follow the Python section of @CODING_STANDARDS.md. Status changes go through `case_machine`. External writes go through `TicketPort.ensure_*`. Models come from `llm.chat_model`. Customer text enters prompts via `as_untrusted()`. New graph nodes use `@traced_node`. Run `pnpm check` before finishing.

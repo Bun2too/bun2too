@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "caseId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "received",
+        "triaged",
+        "ticketed",
+        "in_progress",
+        "awaiting_customer",
+        "escalated",
+        "resolved",
+        "rejected"
+      ]
+    },
+    "traceId": {
+      "type": "string"
+    },
+    "created": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "caseId",
+    "status",
+    "traceId",
+    "created"
+  ],
+  "additionalProperties": false
+}

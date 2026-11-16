@@ -1,0 +1,32 @@
+# Copy to tenants/<slug>.yaml. The file name must equal `tenant`.
+tenant: your-brand
+brand:
+  name: Your Brand
+  primary: "#1f2937"
+  accent: "#f59e0b"
+  logo_url: null
+  voice: clear, warm, concise
+channels: [web_widget, a2a, email]
+specialists: [knowledge, identity, integration, commerce, privacy]
+models:
+  classifier: anthropic:claude-opus-5-5
+  specialist: anthropic:claude-opus-5-5
+tickets:
+  jira:
+    project: SUP
+    issue_type: Task
+    base_url_env: YOURBRAND_JIRA_BASE_URL
+    email_env: YOURBRAND_JIRA_EMAIL
+    token_env: YOURBRAND_JIRA_API_TOKEN
+  servicenow:
+    table: incident
+    assignment_group: null
+    instance_url_env: YOURBRAND_SNOW_INSTANCE_URL
+    user_env: YOURBRAND_SNOW_USER
+    password_env: YOURBRAND_SNOW_PASSWORD
+policy:
+  auto_resolve_min_confidence: 0.75
+  always_escalate_intents: [privacy]
+  escalate_severities: [sev1]
+  max_attempts: 2
+knowledge_seed: []

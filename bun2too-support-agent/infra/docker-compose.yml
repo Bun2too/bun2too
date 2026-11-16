@@ -1,0 +1,17 @@
+name: relay
+services:
+  postgres:
+    image: postgres:17
+    environment: { POSTGRES_USER: relay, POSTGRES_PASSWORD: relay, POSTGRES_DB: relay }
+    ports: ["5432:5432"]
+    volumes: ["../services/agents/migrations:/docker-entrypoint-initdb.d:ro"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "relay"], interval: 2s, retries: 30 }
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.135.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes: ["./otel-collector.yaml:/etc/otel/config.yaml:ro"]
+    ports: ["4318:4318"]
+    depends_on: [jaeger]
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    ports: ["16686:16686"]

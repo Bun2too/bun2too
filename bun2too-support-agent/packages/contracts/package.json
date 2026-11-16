@@ -1,0 +1,23 @@
+{
+  "name": "@relay/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "export": "tsx src/export-json-schema.ts write",
+    "check": "tsx src/export-json-schema.ts check",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "vitest": "^3.2.4",
+    "@types/node": "^24.6.0"
+  }
+}

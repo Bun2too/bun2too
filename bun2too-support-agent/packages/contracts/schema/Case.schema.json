@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "tenant": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "received",
+        "triaged",
+        "ticketed",
+        "in_progress",
+        "awaiting_customer",
+        "escalated",
+        "resolved",
+        "rejected"
+      ]
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "web_widget",
+        "a2a",
+        "email",
+        "marketplace",
+        "retail"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "traceId": {
+      "type": "string"
+    },
+    "classification": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string",
+              "enum": [
+                "knowledge",
+                "identity",
+                "integration",
+                "commerce",
+                "privacy",
+                "other"
+              ]
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "sev1",
+                "sev2",
+                "sev3",
+                "sev4"
+              ]
+            },
+            "sentiment": {
+              "type": "string",
+              "enum": [
+                "negative",
+                "neutral",
+                "positive"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent",
+            "severity",
+            "sentiment",
+            "summary",
+            "language"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tickets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "system": {
+            "type": "string",
+            "enum": [
+              "jira",
+              "servicenow"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "system",
+          "key",
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "resolution": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "auto_resolved",
+                "escalated",
+                "rejected"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "message",
+            "citations"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pendingQuestion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "tenant",
+    "status",
+    "channel",
+    "createdAt",
+    "updatedAt",
+    "traceId",
+    "classification",
+    "tickets",
+    "resolution",
+    "pendingQuestion"
+  ],
+  "additionalProperties": false
+}

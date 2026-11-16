@@ -1,0 +1,31 @@
+name: hygiene-autofix
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: write
+concurrency:
+  group: autofix-${{ github.head_ref }}
+  cancel-in-progress: true
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'relay-factory[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.head_ref }}", token: "${{ secrets.FACTORY_TOKEN }}" }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - uses: astral-sh/setup-uv@v6
+      - run: pnpm install --frozen-lockfile && uv sync --directory services/agents --frozen
+      - run: pnpm fix
+      - name: Commit fixes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "relay-factory[bot]"
+            git config user.email "relay-factory[bot]@users.noreply.github.com"
+            git commit -am "style: autofix formatting and lint"
+            git push
+          fi

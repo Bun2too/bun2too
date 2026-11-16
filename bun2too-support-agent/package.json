@@ -1,0 +1,28 @@
+{
+  "name": "relay",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "stack:up": "docker compose -f infra/docker-compose.yml up -d",
+    "stack:down": "docker compose -f infra/docker-compose.yml down",
+    "lint:ts": "biome check .",
+    "lint:py": "uv run --directory services/agents ruff check . && uv run --directory services/agents ruff format --check .",
+    "typecheck": "pnpm -r --if-present typecheck && uv run --directory services/agents mypy",
+    "test:ts": "pnpm -r --if-present test",
+    "test:py": "uv run --directory services/agents pytest -q",
+    "contracts:export": "pnpm --filter @relay/contracts export",
+    "contracts:check": "pnpm --filter @relay/contracts check",
+    "check": "pnpm lint:ts && pnpm lint:py && pnpm contracts:check && pnpm typecheck && pnpm test:ts && pnpm test:py",
+    "fix": "biome check --write . && uv run --directory services/agents ruff check --fix . && uv run --directory services/agents ruff format .",
+    "eval": "RELAY_OFFLINE=${RELAY_OFFLINE-1} uv run --directory services/agents python -m relay_agents.evals"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
+    "lefthook": "^1.13.0",
+    "typescript": "^5.9.2"
+  }
+}

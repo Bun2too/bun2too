@@ -1,0 +1,26 @@
+name: retro
+on:
+  pull_request:
+    types: [closed]
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+jobs:
+  retro:
+    if: github.event.pull_request.merged && github.event.pull_request.number % 10 == 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.FACTORY_TOKEN }}
+          prompt: |
+            Retro task for merged PR #${{ github.event.pull_request.number }}. Read the PR, its linked issue, review comments and rework commits.
+            Name mistakes that recurred or that a human caught. For each, propose the strongest enforcer per docs/factory/enforcement.md
+            (architecture > types > lint/CI > tests > review > docs), implement it, add a row to enforcement.md, and open one PR labelled retro.
+            If nothing recurred, do nothing.
+          claude_args: --max-turns 60

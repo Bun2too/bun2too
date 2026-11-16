@@ -1,0 +1,23 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{ts,tsx,js,mjs,json}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    ruff:
+      glob: "services/agents/**/*.py"
+      run: uv run --directory services/agents ruff check --fix . && uv run --directory services/agents ruff format .
+      stage_fixed: true
+    gitleaks:
+      run: command -v gitleaks >/dev/null && gitleaks protect --staged --redact || true
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+' {1} \
+          || { echo "Use Conventional Commits, e.g. feat(agents): add privacy specialist"; exit 1; }
+pre-push:
+  commands:
+    check:
+      run: pnpm check

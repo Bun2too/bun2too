@@ -1,0 +1,6 @@
+---
+description: TypeScript rules for gateway, widget and packages
+globs: apps/**/*.ts,packages/**/*.ts
+alwaysApply: false
+---
+Follow the TypeScript section of @CODING_STANDARDS.md. Wire types come from `@relay/contracts` only. Handlers parse, call one function, map the result. Tests go through `app.request()`. Run `pnpm check` before finishing.

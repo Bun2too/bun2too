@@ -1,0 +1,57 @@
+tenant: bun2too
+brand:
+  name: Bun2Too
+  primary: "#10211c"
+  accent: "#d0ed9a"
+  logo_url: null
+  voice: warm, human, curious; plain words, no jargon
+channels: [web_widget, a2a, email]
+specialists: [knowledge, identity, integration, privacy]
+models:
+  classifier: anthropic:claude-opus-5-5
+  specialist: anthropic:claude-opus-5-5
+tickets:
+  jira:
+    project: SUP
+    issue_type: Task
+    base_url_env: BUN2TOO_JIRA_BASE_URL
+    email_env: BUN2TOO_JIRA_EMAIL
+    token_env: BUN2TOO_JIRA_API_TOKEN
+  servicenow:
+    table: incident
+    assignment_group: null
+    instance_url_env: BUN2TOO_SNOW_INSTANCE_URL
+    user_env: BUN2TOO_SNOW_USER
+    password_env: BUN2TOO_SNOW_PASSWORD
+policy:
+  auto_resolve_min_confidence: 0.75
+  always_escalate_intents: [privacy]
+  escalate_severities: [sev1]
+  max_attempts: 2
+# Demo seed drawn from the public behaviour of bun2too.com's support dialog
+# (see the website repo's docs/support.md). Replace with Contentful FAQ entries approved for AI use.
+knowledge_seed:
+  - id: kb-private-inquiry
+    title: How to send a private inquiry
+    keywords: [send, private, inquiry, contact, message, team, form]
+    answer: >-
+      Open the Contact Bun2Too dialog from the "Let's connect" button, choose "Send a private inquiry",
+      fill in your details, and give consent to store the inquiry. You will get a reference number once
+      it is saved. If email confirmation is enabled you will also receive an acknowledgment.
+  - id: kb-inquiry-retention
+    title: How long inquiries are kept
+    keywords: [long, kept, retention, delete, stored, days, inquiry]
+    answer: >-
+      Private inquiries are stored for 90 days and then removed automatically by a daily cleanup.
+  - id: kb-email-fallback
+    title: Emailing the team directly
+    keywords: [email, directly, mail, address, reach, team]
+    answer: >-
+      In the Contact dialog, "Email our team directly" opens your own email app. It does not submit the
+      form and does not include your draft.
+  - id: kb-inquiry-not-ai
+    title: Are inquiries read by AI
+    keywords: [ai, inquiry, read, chatbot, questions, attached]
+    answer: >-
+      No. AI questions and private inquiries are separate. Opening the dialog never sends anything to
+      an AI service, and AI questions are never attached to inquiries.
