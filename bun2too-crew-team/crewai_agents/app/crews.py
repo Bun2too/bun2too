@@ -44,7 +44,7 @@ def generation_settings():
                 max_output_tokens=integer('LLM_MAX_COMPLETION_TOKENS', 6000, 1000, 16000))
 
 
-def build_crew(brief: dict, record_task, social_only: bool = False, record_event=None):
+def build_crew(brief: dict, record_task, social_only: bool = False, record_event=None, evaluation_observer=None):
     # Import after main.py has configured dotenv and local CrewAI storage.
     from crewai import Agent, Crew, LLM, Process, Task
 
@@ -112,6 +112,19 @@ def build_crew(brief: dict, record_task, social_only: bool = False, record_event
         llm = LLM(**model_routing.llm_options(selected, settings))
         model_routing.enable_prompt_cache(llm, selected['provider'])
         ai_telemetry.instrument_llm(llm, record_event, configured_model=model)
+        # Opt-in CI observer sees each visible completion, including format retries.
+        # Production leaves this unset; raw messages/reasoning are never logged.
+        if evaluation_observer is not None:
+            original_call = llm.call
+            def evaluated_call(*args, _call=original_call, _role=key, **kwargs):
+                try:
+                    output = _call(*args, **kwargs)
+                except BaseException:
+                    evaluation_observer(_role, None, 'failed')
+                    raise
+                evaluation_observer(_role, output, 'completed')
+                return output
+            object.__setattr__(llm, 'call', evaluated_call)
         if record_event:
             record_event('model_route_selected', agent=key, **selected)
 

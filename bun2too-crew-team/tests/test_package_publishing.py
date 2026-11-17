@@ -61,7 +61,12 @@ class PackagePublishingTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         workflow=yaml.safe_load((root/'.github/workflows/deploy.yml').read_text())
         jobs=workflow['jobs']
-        self.assertEqual(jobs['packages']['needs'],'verify')
+        self.assertEqual(set(jobs['packages']['needs']), {'verify', 'agent_evaluations', 'human_evaluation'})
+        for name in ('packages', 'deploy'):
+            self.assertIn("needs.agent_evaluations.result == 'success'", jobs[name]['if'])
+            self.assertIn("needs.human_evaluation.result == 'success'", jobs[name]['if'])
+            self.assertIn("github.event_name != 'pull_request'", jobs[name]['if'])
+        self.assertEqual(jobs['human_evaluation']['environment'], 'agent-production-review')
         self.assertIn('packages',jobs['deploy']['needs'])
         self.assertIn("needs.packages.result == 'success'",jobs['deploy']['if'])
         self.assertNotIn('packages',workflow['permissions'])

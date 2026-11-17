@@ -77,3 +77,6 @@ Desktop.ini
 # Share the repository context requested for coding agents, even with a global ignore.
 !AGENTS.md
 !**/AGENTS.md
+
+# Synthetic CI evaluation evidence (visible model completions/review records).
+/artifacts/agent-evals/
