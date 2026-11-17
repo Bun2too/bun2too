@@ -5,6 +5,7 @@ on:
     branches: [main]
 permissions:
   contents: read
+  pull-requests: read
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -17,7 +18,7 @@ jobs:
       crew: ${{ steps.filter.outputs.crew }}
       website: ${{ steps.filter.outputs.website }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -34,10 +35,10 @@ jobs:
     timeout-minutes: 20
     defaults: { run: { working-directory: bun2too-support-agent } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
         with: { package_json_file: bun2too-support-agent/package.json }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: bun2too-support-agent/.nvmrc
           cache: pnpm
@@ -55,7 +56,7 @@ jobs:
     defaults:
       { run: { working-directory: bun2too-support-agent/infra/terraform } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
       - run: terraform fmt -check -recursive
       - name: Validate and test both Railway layers (mocked providers, no credentials)
@@ -73,10 +74,10 @@ jobs:
     timeout-minutes: 20
     defaults: { run: { working-directory: bun2too-crew-team } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: "24" }
       - run: python3 -m pip install -r crewai_agents/requirements.txt
       - run: python3 scripts/verify_marketing.py
@@ -90,8 +91,8 @@ jobs:
     defaults: { run: { working-directory: bun2too-website } }
     env: { NEXT_TELEMETRY_DISABLED: "1" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: bun2too-website/.nvmrc
           cache: npm
@@ -103,11 +104,17 @@ jobs:
 
   secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v2
-        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_ENABLE_COMMENTS: "true"
 
   ci:
     # The single required status check for branch protection.

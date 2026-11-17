@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     environment: subtree-sync
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - name: Split and push to the mirror's main (never forced)
         env:

@@ -2,7 +2,13 @@ name: deploy-support
 on:
   push:
     branches: [main]
-    paths: ['bun2too-support-agent/**', '!bun2too-support-agent/infra/terraform/railway/project/**', '.github/workflows/deploy-support.yml', '.github/workflows/_deploy-support-env.yml']
+    paths:
+      [
+        "bun2too-support-agent/**",
+        "!bun2too-support-agent/infra/terraform/railway/project/**",
+        ".github/workflows/deploy-support.yml",
+        ".github/workflows/_deploy-support-env.yml",
+      ]
   workflow_dispatch:
     inputs:
       environment:
@@ -27,7 +33,7 @@ jobs:
       sha: ${{ steps.sha.outputs.sha }}
     defaults: { run: { working-directory: bun2too-support-agent } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { ref: "${{ inputs.ref || github.sha }}", fetch-depth: 0 }
       - name: Only commits on main can deploy
         id: sha
@@ -37,7 +43,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v4
         with: { package_json_file: bun2too-support-agent/package.json }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: bun2too-support-agent/.nvmrc
           cache: pnpm
