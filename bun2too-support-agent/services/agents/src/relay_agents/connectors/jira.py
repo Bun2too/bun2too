@@ -1,15 +1,26 @@
 """Jira Cloud REST v3. https://developer.atlassian.com/cloud/jira/platform/rest/v3/"""
 
-from typing import Any, Literal
+from typing import Literal
 
 import httpx
+from pydantic import BaseModel
 
 from relay_agents.connectors.ports import TicketDraft, TicketWriteError
 from relay_agents.contracts import TicketRef
 from relay_agents.tenants import JiraConfig
 
+type Json = dict[str, Json] | list[Json] | str | int | bool | None
 
-def _adf(text: str) -> dict[str, Any]:
+
+class _IssueKey(BaseModel):
+    key: str
+
+
+class _Search(BaseModel):
+    issues: list[_IssueKey] = []
+
+
+def _adf(text: str) -> Json:
     paragraphs = [p for p in text.split("\n\n") if p.strip()] or [" "]
     return {
         "type": "doc",
@@ -34,13 +45,13 @@ class JiraTicketPort:
             "/rest/api/3/search/jql",
             params={"jql": f'labels = "{correlation_key}"', "fields": "key", "maxResults": "1"},
         )
-        issues = response.json().get("issues", [])
-        return str(issues[0]["key"]) if issues else None
+        issues = _Search.model_validate_json(response.content).issues
+        return issues[0].key if issues else None
 
     async def ensure_ticket(self, draft: TicketDraft) -> TicketRef:
         key = await self._find(draft.correlation_key)
         if key is None:
-            fields: dict[str, Any] = {
+            fields: Json = {
                 "project": {"key": self._config.project},
                 "issuetype": {"name": self._config.issue_type},
                 "summary": draft.title[:250],
@@ -49,7 +60,7 @@ class JiraTicketPort:
                 "priority": {"name": self._config.priority_map[draft.severity]},
             }
             created = await self._send("POST", "/rest/api/3/issue", json={"fields": fields})
-            key = str(created.json()["key"])
+            key = _IssueKey.model_validate_json(created.content).key
         return TicketRef(system="jira", key=key, url=f"{self._base}/browse/{key}")
 
     async def add_note(self, correlation_key: str, text: str) -> None:
@@ -72,9 +83,18 @@ class JiraTicketPort:
             raise TicketWriteError(f"no Jira issue labelled {correlation_key}")
         return key
 
-    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: Json = None,
+    ) -> httpx.Response:
         try:
-            response = await self._client.request(method, f"{self._base}{path}", **kwargs)
+            response = await self._client.request(
+                method, f"{self._base}{path}", params=params, json=json
+            )
         except httpx.HTTPError as error:
             raise TicketWriteError(f"jira {method} {path}: {error}") from error
         if response.status_code >= 400:

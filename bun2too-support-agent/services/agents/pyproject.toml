@@ -63,6 +63,10 @@ plugins = ["pydantic.mypy"]
 module = ["langgraph.*", "langchain.*", "langchain_core.*"]
 follow_untyped_imports = true
 
+[[tool.mypy.overrides]]
+module = ["relay_agents.connectors.jira"]
+disallow_any_expr = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

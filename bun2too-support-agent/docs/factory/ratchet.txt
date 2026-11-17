@@ -1,4 +1,3 @@
 # Paths exempt from the strictest rules. The Ratchet task removes one per day.
 # Format: <path>  <rule>
-services/agents/src/relay_agents/connectors/jira.py  mypy:disallow-any-expr
 services/agents/src/relay_agents/connectors/servicenow.py  mypy:disallow-any-expr
