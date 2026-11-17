@@ -13,14 +13,16 @@ on:
           - infrastructure-only
           - import-state
   push:
-    branches: [ main, qa ]
+    branches: [ main, qa, dev ]
+  pull_request:
+    branches: [ main, qa, dev ]
 
 permissions:
   contents: read
 
 jobs:
   verify:
-    if: github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
+    if: github.event_name == 'pull_request' || github.ref_name == 'dev' || github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.packages.outputs.matrix }}
@@ -37,13 +39,91 @@ jobs:
         run: |
           python3 -m pip install -r crewai_agents/requirements.txt
           python3 scripts/verify_marketing.py
+          node --test evals/*.test.mjs
       - name: Validate package targets
         id: packages
         run: python3 scripts/publish_package.py matrix
 
-  packages:
+  agent_evaluations:
+    name: Agent component / trajectory quality gate
     needs: verify
-    if: inputs.operation == '' || inputs.operation == 'deploy'
+    if: (inputs.operation == '' || inputs.operation == 'deploy') && github.event_name != 'pull_request' && github.ref_type == 'branch' && contains(fromJSON('["dev","qa","main"]'), github.ref_name)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || github.ref_name }}
+    outputs:
+      report_sha256: ${{ steps.evaluate.outputs.report_sha256 }}
+      human_scorecard_required: ${{ vars.AI_EVAL_HUMAN_SCORECARD_REQUIRED || 'false' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install -r crewai_agents/requirements.txt
+      - name: Evaluate every registered agent call and workflow
+        id: evaluate
+        env:
+          MARKETING_RUNTIME_CONFIG: ${{ secrets.MARKETING_RUNTIME_CONFIG || '{}' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_EVAL_JUDGE_URL: ${{ secrets.AI_EVAL_JUDGE_URL }}
+          AI_EVAL_JUDGE_API_KEY: ${{ secrets.AI_EVAL_JUDGE_API_KEY }}
+          AI_EVAL_JUDGE_MODEL: ${{ secrets.AI_EVAL_JUDGE_MODEL }}
+          EVAL_SUITE: ${{ github.ref_name == 'dev' && 'component' || github.ref_name == 'qa' && 'trajectory' || 'all' }}
+        run: node evals/run.mjs "$EVAL_SUITE"
+      - name: Preserve sanitized evaluation evidence for remediation and human review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agent-evaluation
+          path: artifacts/agent-evals/
+          if-no-files-found: error
+          retention-days: 14
+
+  human_evaluation:
+    name: Human evaluation of the exact production candidate
+    needs: agent_evaluations
+    if: github.ref_name == 'main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: agent-production-review
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: agent-evaluation
+          path: artifacts/agent-evals/
+      - name: Verify human approval and configured scorecard policy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AI_EVAL_REPORT_SHA256: ${{ needs.agent_evaluations.outputs.report_sha256 }}
+          AI_EVAL_HUMAN_SCORECARD_REQUIRED: ${{ needs.agent_evaluations.outputs.human_scorecard_required }}
+        run: node evals/human-review.mjs artifacts/agent-evals/report.json artifacts/agent-evals/human-evaluation.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: human-evaluation
+          path: artifacts/agent-evals/human-evaluation.json
+          if-no-files-found: error
+          retention-days: 30
+
+  packages:
+    needs: [verify, agent_evaluations, human_evaluation]
+    if: always() && !cancelled() && github.event_name != 'pull_request' && contains(fromJSON('["main","qa"]'), github.ref_name) && needs.verify.result == 'success' && needs.agent_evaluations.result == 'success' && (github.ref_name != 'main' || needs.human_evaluation.result == 'success') && (inputs.operation == '' || inputs.operation == 'deploy')
     permissions:
       contents: read
       packages: write
@@ -57,8 +137,8 @@ jobs:
       image-name: ${{ matrix.image || 'bun2too-crew-team' }}
 
   deploy:
-    needs: [verify, packages]
-    if: ${{ always() && !cancelled() && needs.verify.result == 'success' && (needs.packages.result == 'success' || inputs.operation == 'infrastructure-only' || inputs.operation == 'import-state') }}
+    needs: [verify, packages, agent_evaluations, human_evaluation]
+    if: ${{ always() && !cancelled() && github.event_name != 'pull_request' && contains(fromJSON('["main","qa"]'), github.ref_name) && needs.verify.result == 'success' && ((needs.packages.result == 'success' && needs.agent_evaluations.result == 'success' && (github.ref_name != 'main' || needs.human_evaluation.result == 'success')) || inputs.operation == 'infrastructure-only' || inputs.operation == 'import-state') }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.ref_name == 'main' && 'production' || 'qa' }}

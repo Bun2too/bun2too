@@ -277,3 +277,7 @@ Task-based provider routing and offline batch usage: [model routing and cost con
 
 Build publication: [GitHub Packages pipeline and supported package types](docs/package-publishing.md).
 Agent continuity: [persistent context and ownership](docs/agent-context.md), [repository instructions](AGENTS.md), and task-specific skills under `.agents/skills/`.
+
+## Agent quality gates
+
+See [agent evaluations](docs/agent-evaluations.md) for dev component scores, QA trajectory scores, required human production reviews, CI secrets and local commands. All relevant scores must be at least 0.5; package publication and deployment wait for the applicable gates.
