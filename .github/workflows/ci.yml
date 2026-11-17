@@ -24,7 +24,7 @@ jobs:
           filters: |
             support: ['bun2too-support-agent/**', '!bun2too-support-agent/infra/terraform/**']
             infra: ['bun2too-support-agent/infra/terraform/**']
-            crew: ['crew-team/**']
+            crew: ['bun2too-crew-team/**']
             website: ['bun2too-website/**']
 
   support-agent:
@@ -52,7 +52,8 @@ jobs:
     if: needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults: { run: { working-directory: bun2too-support-agent/infra/terraform } }
+    defaults:
+      { run: { working-directory: bun2too-support-agent/infra/terraform } }
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -70,7 +71,7 @@ jobs:
     if: needs.changes.outputs.crew == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults: { run: { working-directory: crew-team } }
+    defaults: { run: { working-directory: bun2too-crew-team } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

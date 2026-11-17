@@ -9,7 +9,7 @@ Every agent, whatever tool runs it, reads this file first and then the `AGENTS.m
 | Path                     | Product                                                     | Stack                                   | Deploys to                                | Its own spec                                                         |
 | ------------------------ | ----------------------------------------------------------- | --------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------- |
 | `bun2too-support-agent/` | **Relay**: multi-agent support intake (REST + A2A)          | TypeScript (Hono) + Python (LangGraph)  | Railway POC: dev, qa, prod. GCP for GA    | [AGENTS.md](bun2too-support-agent/AGENTS.md)                         |
-| `crew-team/`             | Marketing crew: CrewAI agents, publishing, n8n schedules    | Python (FastAPI, CrewAI), n8n           | Railway (its own pipeline, mirror repo)   | [AGENTS.md](crew-team/AGENTS.md)                                     |
+| `bun2too-crew-team/`             | Marketing crew: CrewAI agents, publishing, n8n schedules    | Python (FastAPI, CrewAI), n8n           | Railway (its own pipeline, mirror repo)   | [AGENTS.md](bun2too-crew-team/AGENTS.md)                                     |
 | `bun2too-website/`       | bun2too.com                                                 | Next.js on Netlify                      | Netlify (its own pipeline, mirror repo)   | [AGENTS.md](bun2too-website/AGENTS.md)                               |
 | `.claude/`               | Shared agents, skills, hooks and plugin settings            |                                         |                                           |                                                                      |
 | `.github/`               | Monorepo CI/CD and the agent factory workflows              |                                         |                                           | [docs/factory.md](docs/factory.md)                                   |
@@ -58,7 +58,7 @@ These ship from the root and serve every product.
 | Skill    | [subtree-sync](.claude/skills/subtree-sync/SKILL.md)             | Pull from or push to a product's mirror repo                                                  |
 | Spec     | [docs/factory.md](docs/factory.md)                               | The roles automated runs play (Explore, Implement, Review, Rework, Hygiene, Ratchet, Retro)   |
 
-Product skills live with the product and are listed in its `AGENTS.md`. Examples: `bun2too-support-agent/.claude/skills/verify-relay`, `crew-team/.agents/skills/*` and `bun2too-website/.agents/skills/*`.
+Product skills live with the product and are listed in its `AGENTS.md`. Examples: `bun2too-support-agent/.claude/skills/verify-relay`, `bun2too-crew-team/.agents/skills/*` and `bun2too-website/.agents/skills/*`.
 
 ## SOPs
 
