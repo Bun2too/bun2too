@@ -5,16 +5,16 @@ The Bun2too monorepo: shared agent specs, skills and SOPs at the root, one subtr
 | Product                                              | What                                         |
 | ---------------------------------------------------- | -------------------------------------------- |
 | [bun2too-support-agent](bun2too-support-agent/)      | Relay: multi-agent support intake            |
-| [crew-team](crew-team/)                              | Marketing crew (CrewAI, n8n)                 |
+| [bun2too-crew-team](bun2too-crew-team/)                              | Marketing crew (CrewAI, n8n)                 |
 | [bun2too-website](bun2too-website/)                  | bun2too.com (Next.js on Netlify)             |
 
 Start here: [AGENTS.md](AGENTS.md) → [docs/sdlc.md](docs/sdlc.md) → the product's `AGENTS.md`.
 
 Published for the team:
 
-- Relay architecture: https://claude.ai/artifact/Hje8YdHV3njx2TXgywGS1D
-- Relay three-week execution plan: https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
-- Relay pitch deck: https://claude.ai/artifact/Pz9GdCothnDgwBEFVqWmae
+- Relay architecture: <https://claude.ai/artifact/Hje8YdHV3njx2TXgywGS1D>
+- Relay three-week execution plan: <https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM>
+- Relay pitch deck: <https://claude.ai/artifact/Pz9GdCothnDgwBEFVqWmae>
 
 ## One-time setup (a person)
 

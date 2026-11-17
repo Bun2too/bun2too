@@ -5,7 +5,7 @@ description: Plan, deploy, verify or roll back a Bun2too service on Railway (the
 
 # Railway deploy
 
-Read [docs/sop/environments-and-release.md](../../../docs/sop/environments-and-release.md) and [ADR 0004](../../../docs/adr/0004-railway-poc-gcp-ga.md) first. Crew-team has its own pipeline and skill (`crew-team/.agents/skills/railway-deployment`); the lessons below came from it and apply to both.
+Read [docs/sop/environments-and-release.md](../../../docs/sop/environments-and-release.md) and [ADR 0004](../../../docs/adr/0004-railway-poc-gcp-ga.md) first. Crew-team has its own pipeline and skill (`bun2too-crew-team/.agents/skills/railway-deployment`); the lessons below came from it and apply to both.
 
 ## Rules
 

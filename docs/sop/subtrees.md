@@ -4,8 +4,8 @@ Each product folder is a git subtree. The monorepo is the source of truth. Each 
 
 | Prefix                   | Mirror remote          | Mirror repo                                   |
 | ------------------------ | ---------------------- | --------------------------------------------- |
-| `bun2too-support-agent/` | `bun2too-support-agent` | `Bun2too/bun2too-support-agent` (create it)  |
-| `crew-team/`             | `crew-team`            | `Bun2too/bun2too-crew-team`                   |
+| `bun2too-support-agent/` | `bun2too-support-agent` | `Bun2too/bun2too-support-agent`              |
+| `bun2too-crew-team/`             | `bun2too-crew-team`            | `Bun2too/bun2too-crew-team`                   |
 | `bun2too-website/`       | `bun2too-website`      | `Bun2too/bun2too-website`                     |
 
 ## Rules
@@ -19,7 +19,7 @@ Each product folder is a git subtree. The monorepo is the source of truth. Each 
 Run Actions → `subtree-sync` with the prefix, or locally:
 
 ```sh
-git subtree push --prefix=crew-team crew-team main
+git subtree push --prefix=bun2too-crew-team bun2too-crew-team main
 ```
 
 A rejected push means the mirror moved on. Pull first, then push again. Never force-push a mirror.
@@ -27,8 +27,8 @@ A rejected push means the mirror moved on. Pull first, then push again. Never fo
 ## Pull mirror changes into the monorepo
 
 ```sh
-git fetch crew-team
-git subtree pull --prefix=crew-team crew-team main -m "chore(crew-team): sync from mirror"
+git fetch bun2too-crew-team
+git subtree pull --prefix=bun2too-crew-team bun2too-crew-team main -m "chore(bun2too-crew-team): sync from mirror"
 ```
 
 Resolve conflicts in the monorepo and commit them as part of the merge.

@@ -5,18 +5,19 @@ on:
     inputs:
       prefix:
         type: choice
-        options: [bun2too-support-agent, crew-team, bun2too-website]
+        options: [bun2too-support-agent, bun2too-crew-team, bun2too-website]
         required: true
 permissions:
   contents: read
-concurrency: { group: "subtree-sync-${{ inputs.prefix }}", cancel-in-progress: false }
+concurrency:
+  { group: "subtree-sync-${{ inputs.prefix }}", cancel-in-progress: false }
 jobs:
   push:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: subtree-sync
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - name: Split and push to the mirror's main (never forced)
         env:
@@ -25,7 +26,7 @@ jobs:
         run: |
           case "$PREFIX" in
             bun2too-support-agent) repo=Bun2too/bun2too-support-agent ;;
-            crew-team) repo=Bun2too/bun2too-crew-team ;;
+            bun2too-crew-team) repo=Bun2too/bun2too-crew-team ;;
             bun2too-website) repo=Bun2too/bun2too-website ;;
           esac
           git subtree split --prefix="$PREFIX" -b mirror

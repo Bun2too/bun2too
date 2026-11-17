@@ -28,4 +28,4 @@ There are no release branches. Fix on a short branch, merge to `main`, and let t
 
 ## Legacy products
 
-`bun2too-website` and `crew-team` still have branch-mapped pipelines (`dev`, `qa`, `main`) in their mirror repos. Inside the monorepo they follow this SOP. Their mirrors receive `main` through [subtree sync](subtrees.md). Moving their deploys to trunk-plus-promotion is a follow-up, recorded in [ADR 0003](../adr/0003-trunk-based-development.md).
+`bun2too-website` and `bun2too-crew-team` still have branch-mapped pipelines (`dev`, `qa`, `main`) in their mirror repos. Inside the monorepo they follow this SOP. Their mirrors receive `main` through [subtree sync](subtrees.md). Moving their deploys to trunk-plus-promotion is a follow-up, recorded in [ADR 0003](../adr/0003-trunk-based-development.md).

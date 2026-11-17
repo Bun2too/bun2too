@@ -10,7 +10,7 @@ Bun2too runs three products: the support agent (Relay), the marketing crew and t
 ## Decision
 
 - `bun2too/` is the monorepo and the business's root. It holds shared specs (`AGENTS.md`, `docs/sdlc.md`, `docs/factory.md`), shared agents and skills (`.claude/`), SOPs, organisation-wide ADRs, and all CI/CD.
-- Products are **git subtrees**: `bun2too-support-agent/`, `crew-team/`, `bun2too-website/`. Their GitHub repos become mirrors that receive `main` through `git subtree push`.
+- Products are **git subtrees**: `bun2too-support-agent/`, `bun2too-crew-team/`, `bun2too-website/`. Their GitHub repos become mirrors that receive `main` through `git subtree push`.
 - Roles are specified once, in `docs/factory.md`, instead of one agent file per role. The root keeps only two custom agents (`spec-reviewer`, `verifier`); the other personas come from Addy Osmani's plugin.
 
 ## Consequences
