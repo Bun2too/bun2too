@@ -38,7 +38,7 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `RAILWAY_API_TOKEN`        | secret   | Railway account or workspace token (not a project token)                                      |
 | `TF_API_TOKEN`             | secret   | HCP Terraform token                                                                            |
-| `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
+| `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, the Cloudflare AI Gateway `CF_AIG_*` keys, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
 | `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS` |
 | `TF_CLOUD_ORGANIZATION`    | variable | HCP Terraform organisation                                                                     |
 
