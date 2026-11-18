@@ -20,7 +20,7 @@ RELAY_OFFLINE=1 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 pnpm dev
 scripts/verify/intake.sh "How do I send a private inquiry?"
 ```
 
-Offline mode replaces only external systems (model calls, Jira, ServiceNow) with deterministic stand-ins. To use real models, unset `RELAY_OFFLINE` and set `ANTHROPIC_API_KEY`; to use real ticket systems, set the env vars named in `tenants/bun2too.yaml`.
+Offline mode replaces only external systems (model calls, Jira, ServiceNow) with deterministic stand-ins. To use real models, unset `RELAY_OFFLINE` and set `ANTHROPIC_API_KEY` (add the `CF_AIG_*` keys to route through Cloudflare AI Gateway, as qa and prod do; see [ADR 0007](docs/adr/0007-cloudflare-ai-gateway.md)); to use real ticket systems, set the env vars named in `tenants/bun2too.yaml`.
 
 ## Layout
 

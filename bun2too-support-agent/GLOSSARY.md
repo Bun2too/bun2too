@@ -18,6 +18,12 @@ _Avoid_: agent (reserved for AI agents), rep, human agent
 **Channel**: where an intake comes from: `web_widget`, `a2a`, `email`, `marketplace`, `retail`.
 _Avoid_: source, surface, integration
 
+**Gateway**: `apps/gateway`, Relay's public front door: REST, A2A, SSE and tenant authentication.
+_Avoid_: edge, API (too vague); never use "gateway" alone for the AI Gateway
+
+**AI Gateway**: Cloudflare AI Gateway, the managed proxy every model call passes through in qa and prod (ADR 0007). Always written in full.
+_Avoid_: LLM proxy, model gateway, "the gateway"
+
 ## Work
 
 **Intake**: one inbound request to Relay, before it becomes a case. Validated against `IntakeRequest`.
