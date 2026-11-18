@@ -45,7 +45,7 @@ Offline mode replaces only external systems (model calls, Jira, ServiceNow) with
 | prod        | Railway `bun2too-support` / `prod`                | after qa, with a person's approval        |
 | GA          | Google Cloud Run (`infra/terraform/gcp-cloudrun`) | after the POC                             |
 
-Pipeline: root `.github/workflows/deploy-support.yml`. Terraform: [infra/terraform/railway/README.md](infra/terraform/railway/README.md). Release and rollback: [../docs/sop/environments-and-release.md](../docs/sop/environments-and-release.md).
+Pipeline: root `.github/workflows/deploy-support.yml`. Runtime secrets: [docs/runtime-secrets.md](docs/runtime-secrets.md). Terraform: [infra/terraform/railway/README.md](infra/terraform/railway/README.md). Release and rollback: [../docs/sop/environments-and-release.md](../docs/sop/environments-and-release.md).
 
 ## How work gets done here
 
