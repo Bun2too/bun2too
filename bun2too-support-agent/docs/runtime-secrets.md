@@ -71,11 +71,11 @@ The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants
 
 **What:** model calls in qa and prod go through Cloudflare AI Gateway, which adds spend and usage analytics, rate limits, retries and provider fallback at Cloudflare's edge ([ADR 0007](adr/0007-cloudflare-ai-gateway.md)). Relay never lets the gateway store prompts or responses; only token, cost and latency metadata.
 
-| Key | What | Example shape |
-| --- | --- | --- |
-| `CF_AIG_ACCOUNT_ID` | Your Cloudflare account ID | 32 hex characters |
+| Key                 | What                               | Example shape            |
+| ------------------- | ---------------------------------- | ------------------------ |
+| `CF_AIG_ACCOUNT_ID` | Your Cloudflare account ID         | 32 hex characters        |
 | `CF_AIG_GATEWAY_ID` | The gateway's name in that account | `relay-qa`, `relay-prod` |
-| `CF_AIG_TOKEN` | The gateway's authentication token | (secret) |
+| `CF_AIG_TOKEN`      | The gateway's authentication token | (secret)                 |
 
 Leave all three out to call Anthropic directly (local development). Setting only one of the two IDs stops the agents service at start-up.
 
