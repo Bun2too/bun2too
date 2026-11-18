@@ -13,16 +13,16 @@ Keys must be `UPPER_SNAKE_CASE`; Terraform rejects anything else. Never put thes
 
 `dev` runs with `RELAY_OFFLINE=1` (set by Terraform). Offline mode swaps the model and both ticket systems for deterministic stand-ins, so dev needs only the tenant keys. `qa` and `prod` run live: the agents service reads every key the tenant file names at start-up and fails to start if one is missing.
 
-| Key | dev | qa | prod | Read by |
-| --- | --- | --- | --- | --- |
-| `RELAY_TENANT_KEYS` | required | required | required | gateway |
-| `ANTHROPIC_API_KEY` | not used | required | required | agents |
-| `BUN2TOO_JIRA_BASE_URL` | not used | required (sandbox) | required | agents |
-| `BUN2TOO_JIRA_EMAIL` | not used | required (sandbox) | required | agents |
-| `BUN2TOO_JIRA_API_TOKEN` | not used | required (sandbox) | required | agents |
-| `BUN2TOO_SNOW_INSTANCE_URL` | not used | required (sandbox) | required | agents |
-| `BUN2TOO_SNOW_USER` | not used | required (sandbox) | required | agents |
-| `BUN2TOO_SNOW_PASSWORD` | not used | required (sandbox) | required | agents |
+| Key                         | dev      | qa                 | prod     | Read by |
+| --------------------------- | -------- | ------------------ | -------- | ------- |
+| `RELAY_TENANT_KEYS`         | required | required           | required | gateway |
+| `ANTHROPIC_API_KEY`         | not used | required           | required | agents  |
+| `BUN2TOO_JIRA_BASE_URL`     | not used | required (sandbox) | required | agents  |
+| `BUN2TOO_JIRA_EMAIL`        | not used | required (sandbox) | required | agents  |
+| `BUN2TOO_JIRA_API_TOKEN`    | not used | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_INSTANCE_URL` | not used | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_USER`         | not used | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_PASSWORD`     | not used | required (sandbox) | required | agents  |
 
 **qa uses sandboxes.** The deploy runs the intake journey against qa, which creates real tickets. Point qa at a Jira sandbox project or site and a ServiceNow developer instance, never at production systems. The journey never runs against prod.
 
@@ -43,6 +43,7 @@ The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants
 **How to get it:** you generate the keys yourself; nothing external issues them.
 
 1. Generate one random key per caller, so each can be revoked alone. A key must not contain `:` or `,`.
+
    ```sh
    openssl rand -hex 32
    ```
@@ -67,11 +68,11 @@ The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants
 
 Relay creates a Jira issue per escalated case, labels it with the case's correlation key, adds comments as the case progresses, and comments again when it resolves. It uses Jira Cloud REST v3 with basic authentication (email and API token).
 
-| Key | What | Example shape |
-| --- | --- | --- |
-| `BUN2TOO_JIRA_BASE_URL` | Your Jira Cloud site, without a trailing path | `https://<site>.atlassian.net` |
-| `BUN2TOO_JIRA_EMAIL` | Email of the Atlassian account Relay acts as | `relay-bot@<your-domain>` |
-| `BUN2TOO_JIRA_API_TOKEN` | API token for that account | (secret) |
+| Key                      | What                                          | Example shape                  |
+| ------------------------ | --------------------------------------------- | ------------------------------ |
+| `BUN2TOO_JIRA_BASE_URL`  | Your Jira Cloud site, without a trailing path | `https://<site>.atlassian.net` |
+| `BUN2TOO_JIRA_EMAIL`     | Email of the Atlassian account Relay acts as  | `relay-bot@<your-domain>`      |
+| `BUN2TOO_JIRA_API_TOKEN` | API token for that account                    | (secret)                       |
 
 **How to get them:**
 
@@ -86,11 +87,11 @@ Relay creates a Jira issue per escalated case, labels it with the case's correla
 
 Relay creates a record in the tenant's table (`incident` for Bun2too), finds it again by `correlation_id`, adds work notes, and closes it with `resolve_fields`. It uses the ServiceNow Table API with basic authentication.
 
-| Key | What | Example shape |
-| --- | --- | --- |
+| Key                         | What                                   | Example shape                        |
+| --------------------------- | -------------------------------------- | ------------------------------------ |
 | `BUN2TOO_SNOW_INSTANCE_URL` | Your instance, without a trailing path | `https://<instance>.service-now.com` |
-| `BUN2TOO_SNOW_USER` | User ID of the integration user | `relay.integration` |
-| `BUN2TOO_SNOW_PASSWORD` | That user's password | (secret) |
+| `BUN2TOO_SNOW_USER`         | User ID of the integration user        | `relay.integration`                  |
+| `BUN2TOO_SNOW_PASSWORD`     | That user's password                   | (secret)                             |
 
 **How to get them:**
 
