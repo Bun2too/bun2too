@@ -2,7 +2,7 @@
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authConfig, authConfigured } from "@/lib/auth-config";
+import { authConfig, authConfigured, identityScope } from "@/lib/auth-config";
 export default function AuthProvider({
   children,
 }: {
@@ -21,8 +21,8 @@ export default function AuthProvider({
       clientId={authConfig.clientId}
       authorizationParams={{
         redirect_uri: `${origin}/`,
-        scope: `openid profile email${authConfig.audience ? " manage:subscriptions" : ""}`,
-        ...(authConfig.audience ? { audience: authConfig.audience } : {}),
+        // Account sign-in must not depend on a separate API's access policy.
+        scope: identityScope,
       }}
       cacheLocation="memory"
       onRedirectCallback={(appState) => {

@@ -2,7 +2,11 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { authConfig, authConfigured } from "@/lib/auth-config";
+import {
+  authConfig,
+  authConfigured,
+  preferencesScope,
+} from "@/lib/auth-config";
 import { NewsletterPreference, TOPICS, Topic } from "@/lib/consent";
 import { PageHero } from "./PageArtwork";
 export default function Account() {
@@ -42,7 +46,19 @@ function ConnectedAccount() {
   const [loaded, setLoaded] = useState(false);
   const api = useCallback(
     async (method: "GET" | "PATCH", data?: unknown) => {
-      const token = await getAccessTokenSilently();
+      let token;
+      try {
+        token = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: authConfig.audience,
+            scope: preferencesScope,
+          },
+        });
+      } catch {
+        throw new Error(
+          "You're signed in, but email preferences couldn't be loaded. Try connecting your preferences again or contact our team.",
+        );
+      }
       const response = await fetch("/api/preferences", {
         method,
         headers: {
@@ -117,6 +133,27 @@ function ConnectedAccount() {
       setMessage("Sign-in could not start. Please try again.");
     }
   }
+  async function connectPreferences() {
+    setBusy(true);
+    setMessage("");
+    setFailed(false);
+    try {
+      await loginWithRedirect({
+        appState: { returnTo: "/account" },
+        authorizationParams: {
+          audience: authConfig.audience,
+          scope: preferencesScope,
+        },
+      });
+    } catch {
+      setFailed(true);
+      setMessage(
+        "Email preferences could not connect. Your sign-in account is still available.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <section className="section shell">
       <PageHero artwork="trust-by-design">
@@ -132,7 +169,7 @@ function ConnectedAccount() {
           hands.
         </p>
       </PageHero>
-      {error && (
+      {error && !isAuthenticated && (
         <p role="alert" className="form-message error-message">
           Sign-in could not complete. Please try again. If this continues,{" "}
           <Link href="/contact">contact our team</Link> for help.
@@ -237,13 +274,27 @@ function ConnectedAccount() {
                 <p>
                   Current status:{" "}
                   <strong>
-                    {preference?.status === "subscribed"
-                      ? "Subscribed"
-                      : preference?.status === "pending_verification"
-                        ? "Awaiting your confirmation"
-                        : "Not subscribed"}
+                    {!loaded
+                      ? failed
+                        ? "Unavailable"
+                        : "Loading…"
+                      : preference?.status === "subscribed"
+                        ? "Subscribed"
+                        : preference?.status === "pending_verification"
+                          ? "Awaiting your confirmation"
+                          : "Not subscribed"}
                   </strong>
                 </p>
+                {!loaded && failed && (
+                  <button
+                    className="button button-outline"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void connectPreferences()}
+                  >
+                    Connect email preferences
+                  </button>
+                )}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();

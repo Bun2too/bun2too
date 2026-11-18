@@ -2,6 +2,8 @@
 
 This is a Next.js App Router application with server-rendered public content and client-side Auth0 authentication. Netlify hosts pages, Next.js API handlers, static assets, and a scheduled retention function. Static export is unsuitable because identity preferences, support, and private inquiry collection use server code.
 
+Auth0 login/signup/passwordless redirects request only OIDC identity scopes. The account view requests the preferences API audience and `manage:subscriptions` separately, so an API grant/consent failure cannot block basic sign-in. A signed-in user can explicitly connect preferences when interactive API authorization is needed. Server-side preferences routes retain issuer/audience/client/scope and verified-email checks; see [identity setup](setup.md).
+
 Contentful owns published public page content and block composition through seven content types. `src/content/website-seed.json` is the migration/fallback snapshot; `contentful.ts` reads the Delivery API server-side and `CmsBlocks.tsx` renders the existing design. Core public routes use `ContentPage`; `[...slug]` serves additional validated public CMS paths without taking over private/application routes. Navigation/footer, page metadata, service/FAQ schema, sitemap and `/llms.txt` consume the CMS graph. Insights article records remain external. See the [Contentful design](contentful-design.md) for model/field details, diagrams, caching, failure policy and publishing evidence.
 
 ## Views and discovery routes

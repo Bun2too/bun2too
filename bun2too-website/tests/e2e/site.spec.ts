@@ -137,6 +137,12 @@ for (const action of ["Log in", "Create an account", "Continue with email"])
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("code_challenge")).toBeTruthy();
     expect(url.searchParams.get("state")).toBeTruthy();
+    expect(url.searchParams.has("audience")).toBe(false);
+    expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual([
+      "email",
+      "openid",
+      "profile",
+    ]);
     if (action === "Create an account")
       expect(url.searchParams.get("screen_hint")).toBe("signup");
     if (action === "Continue with email")
@@ -173,7 +179,9 @@ test("rejected Auth0 authorization shows account recovery and clears callback pa
   await expect(
     recovery.getByRole("link", { name: "contact our team" }),
   ).toHaveAttribute("href", "/contact");
-  await expect(page.locator("body")).not.toContainText("private-provider-detail");
+  await expect(page.locator("body")).not.toContainText(
+    "private-provider-detail",
+  );
   await expect(
     page
       .locator(".account-card")

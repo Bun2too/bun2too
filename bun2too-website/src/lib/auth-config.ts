@@ -6,3 +6,5 @@ export const authConfig = {
   emailConnection: process.env.NEXT_PUBLIC_AUTH0_EMAIL_CONNECTION || "email",
 };
 export const authConfigured = Boolean(authConfig.domain && authConfig.clientId);
+export const identityScope = "openid profile email";
+export const preferencesScope = `${identityScope} manage:subscriptions`;
