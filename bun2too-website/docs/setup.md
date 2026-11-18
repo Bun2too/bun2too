@@ -31,15 +31,32 @@ Use Auth0 Universal Login and enable the connections you want for standard accou
 
 ## 3. Custom API for preference management
 
-Create an Auth0 API named **Bun2Too Website API**, with an identifier such as `https://bun2too.com/api` (it is an identifier; it does not need to serve a URL). Use **RS256** signing. Add a permission named:
+`manage:subscriptions` is a custom permission implemented by this site's `/api/preferences` endpoint. It is not an Auth0 built-in permission and must be created on the site's custom API registration.
+
+In **Applications → APIs**, open the custom API whose **Identifier** exactly matches `NEXT_PUBLIC_AUTH0_AUDIENCE` in your ignored `.env.variables` file / selected GitHub environment. Display names can differ. If no API has that Identifier, create one named **Bun2Too Website API**, use that exact configured Identifier, and select **RS256** signing. An API Identifier does not need to serve a URL. Do not create a duplicate API just to match a display name, or replace an already-configured Identifier with an example URL.
+
+Open the custom API's **Permissions** tab and use **Add a Permission (Scope)**:
+
+| Field | Value |
+| --- | --- |
+| Permission (Scope) | `manage:subscriptions` |
+| Description | Manage the signed-in user's newsletter subscription preferences |
+
+Click **Add** to save it; see [Auth0's Add API Permissions instructions](https://auth0.com/docs/get-started/apis/add-api-permissions). This permission belongs to the custom website API, not to the built-in Auth0 Management API or an application's M2M Management permissions list. It appears in the custom API's grant selector after creation. If the **Permissions** tab is absent, first confirm that you selected a custom API under **Applications → APIs**, in the tenant used by `NEXT_PUBLIC_AUTH0_DOMAIN`, and that your Dashboard role can manage APIs. Creating this scope alone does not require enabling RBAC.
+
+The site requests this exact permission name:
 
 ```text
 manage:subscriptions
 ```
 
-Authorize the SPA to request it. For a first-party application, configure the API's consent policy appropriately. If RBAC is enabled, grant this permission to the intended customer role/users so it appears in the issued token's `scope` claim. The application requests `openid profile email manage:subscriptions` and this API audience. The server rejects ID tokens, tokens for another audience/client/issuer, expired tokens, machine identities, and tokens without the scope.
+Authorize the SPA to request it. In **Applications → APIs → the preferences API → Settings → Application Access Policy**, keep per-app authorization for User-Delegated Access, then use **Application Access → Edit** to authorize the website **SPA** for User-Delegated Access with only `manage:subscriptions`. A separate M2M grant does not authorize the browser application. If the user policy is deny-all, an individual grant cannot override it; select per-app authorization and add the intended SPA grant instead of opening access to every application. See [Auth0 API access policies](https://auth0.com/blog/developers-guide-api-access-policies-auth0/).
 
-Set the exact Identifier in the GitHub environment Variable `NEXT_PUBLIC_AUTH0_AUDIENCE`. CI derives server `AUTH0_AUDIENCE` from that one source; the older duplicate GitHub Secret is unused. For local development, set both names to the same Identifier. See [deployment troubleshooting](deployment-troubleshooting.md). Sign out and back in after changing token audience or scopes. Without an audience configured, regular login can still work, but the account UI explains that preferences are not connected.
+For a first-party application, configure the API's consent policy appropriately. If RBAC is enabled, grant this permission to the intended customer role/users so it appears in the issued token's `scope` claim. Normal login, signup and passwordless sign-in request only `openid profile email` with no custom API audience. The account view separately requests `openid profile email manage:subscriptions` with the preferences API audience when reading or changing preferences. The server rejects ID tokens, tokens for another audience/client/issuer, expired tokens, machine identities, and tokens without the scope.
+
+Set the exact Identifier in the GitHub environment Variable `NEXT_PUBLIC_AUTH0_AUDIENCE`. CI derives server `AUTH0_AUDIENCE` from that one source; the older duplicate GitHub Secret is unused. For local development, set both names to the same Identifier. See [deployment troubleshooting](deployment-troubleshooting.md). Without an audience configured, regular login still works, but the account UI explains that preferences are not connected. If the API denies access or requires consent, the user stays signed in and sees a separate preferences message with **Connect email preferences** for interactive API authorization. This button requests the API audience explicitly; ordinary Log in never does.
+
+Auth0 can return `invalid_request` with `Client … is not authorized to access resource server …` before displaying a login form when the SPA lacks the API's user-delegated grant. Previously the site requested this grant during every sign-in, so a preferences configuration problem blocked registration and login. The identity-only sign-in path removes that dependency; configure the separate API grant to enable preferences fully. The site's runtime M2M credentials deliberately lack client-grant administration permissions, and are not broadened to repair tenant configuration.
 
 The API must exist in the same tenant as the SPA. In **Applications → APIs → Bun2Too Website API → Settings**, compare **Identifier** with the requested audience exactly, including any trailing slash. A website URL or Allowed Callback URL does not register an API. Auth0 returns `access_denied` with `Service not found` when the requested API identifier is unavailable; it can return immediately to the root callback without showing a login screen. Correct the API registration or the GitHub environment Variable and rebuild if the browser setting changed. See [Auth0's access-denied troubleshooting](https://support.auth0.com/center/s/article/troubleshooting-the-access-denied-error).
 
