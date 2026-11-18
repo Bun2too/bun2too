@@ -17,6 +17,9 @@ Keys must be `UPPER_SNAKE_CASE`; Terraform rejects anything else. Never put thes
 | --------------------------- | -------- | ------------------ | -------- | ------- |
 | `RELAY_TENANT_KEYS`         | required | required           | required | gateway |
 | `ANTHROPIC_API_KEY`         | not used | required           | required | agents  |
+| `CF_AIG_ACCOUNT_ID`         | not used | required           | required | agents  |
+| `CF_AIG_GATEWAY_ID`         | not used | required           | required | agents  |
+| `CF_AIG_TOKEN`              | not used | required           | required | agents  |
 | `BUN2TOO_JIRA_BASE_URL`     | not used | required (sandbox) | required | agents  |
 | `BUN2TOO_JIRA_EMAIL`        | not used | required (sandbox) | required | agents  |
 | `BUN2TOO_JIRA_API_TOKEN`    | not used | required (sandbox) | required | agents  |
@@ -63,6 +66,30 @@ The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants
 2. Create a workspace per environment (for example `relay-qa` and `relay-prod`), so spend limits and usage are separate.
 3. In **API keys**, create a key in that workspace, named after the environment, and copy it once.
 4. Set a monthly spend limit on the workspace.
+
+### `CF_AIG_*` (Cloudflare AI Gateway)
+
+**What:** model calls in qa and prod go through Cloudflare AI Gateway, which adds spend and usage analytics, rate limits, retries and provider fallback at Cloudflare's edge ([ADR 0007](adr/0007-cloudflare-ai-gateway.md)). Relay never lets the gateway store prompts or responses; only token, cost and latency metadata.
+
+| Key | What | Example shape |
+| --- | --- | --- |
+| `CF_AIG_ACCOUNT_ID` | Your Cloudflare account ID | 32 hex characters |
+| `CF_AIG_GATEWAY_ID` | The gateway's name in that account | `relay-qa`, `relay-prod` |
+| `CF_AIG_TOKEN` | The gateway's authentication token | (secret) |
+
+Leave all three out to call Anthropic directly (local development). Setting only one of the two IDs stops the agents service at start-up.
+
+**How to get them:**
+
+1. Sign in at <https://dash.cloudflare.com> with the Bun2too account. Copy the **Account ID** from the account home page (or **Account details**). This is `CF_AIG_ACCOUNT_ID`.
+2. Go to **AI → AI Gateway → Create Gateway**. Name it `relay-qa` (one per environment: `relay-qa`, `relay-prod`). The name is `CF_AIG_GATEWAY_ID`.
+3. In the gateway's **Settings**:
+   - turn on **Authenticated Gateway**,
+   - select **Create authentication token** and copy it once. This is `CF_AIG_TOKEN`.
+   - Leave **Cache** off; support answers are personal.
+   - Optionally set **Rate limiting** and a spend alert for the environment.
+4. Leave the Anthropic key with Relay (`ANTHROPIC_API_KEY` above). The gateway forwards it; do not also store it in the gateway.
+5. After the next deploy, open the gateway's **Analytics** and **Logs**: requests, tokens and cost should appear, and log entries should show no request or response bodies.
 
 ### `BUN2TOO_JIRA_*` (Jira Cloud)
 
@@ -114,6 +141,9 @@ Build the JSON locally, set it, and delete the file. The shapes below show which
 {
   "RELAY_TENANT_KEYS": "<key>:bun2too,<smoke-key>:bun2too",
   "ANTHROPIC_API_KEY": "<anthropic-key>",
+  "CF_AIG_ACCOUNT_ID": "<cloudflare-account-id>",
+  "CF_AIG_GATEWAY_ID": "relay-qa",
+  "CF_AIG_TOKEN": "<gateway-token>",
   "BUN2TOO_JIRA_BASE_URL": "https://<site>.atlassian.net",
   "BUN2TOO_JIRA_EMAIL": "<relay-account-email>",
   "BUN2TOO_JIRA_API_TOKEN": "<jira-token>",

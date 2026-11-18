@@ -16,11 +16,12 @@ partner agents ─A2A─▶      │                                  │ LangGr
                            │ SSE ◀── case events ─────────────│  classify → open_tickets → route
                            │                                  │  → specialist → assess
 Jira / ServiceNow ─webhooks─┘                                 │  → resolve | await_customer | escalate
+                                                              ├─▶ Cloudflare AI Gateway ──▶ Anthropic (qa, prod)
                                                               ├─▶ TicketPort: Jira, ServiceNow
                                                               └─▶ CaseStore: Postgres (RLS per tenant)
 all processes ──OTLP──▶ otel-collector ──▶ traces / metrics / logs
 ```
 
-Runtime: Railway project `bun2too-support` with environments dev, qa and prod, each running `gateway` (public), `agents` (private network) and `postgres` (its own volume). GA candidate: Google Cloud Run. See the root `docs/adr/0004-railway-poc-gcp-ga.md`.
+Runtime: Railway project `bun2too-support` with environments dev, qa and prod, each running `gateway` (public), `agents` (private network) and `postgres` (its own volume). GA candidate: Google Cloud Run. See the root `docs/adr/0004-railway-poc-gcp-ga.md`. Model calls go through Cloudflare AI Gateway, one gateway per environment ([ADR 0007](adr/0007-cloudflare-ai-gateway.md)).
 
 Key decisions: see `docs/adr/`.
