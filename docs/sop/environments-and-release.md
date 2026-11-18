@@ -38,8 +38,8 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `RAILWAY_API_TOKEN`        | secret   | Railway account or workspace token (not a project token)                                      |
 | `TF_API_TOKEN`             | secret   | HCP Terraform token                                                                            |
-| `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `ANTHROPIC_API_KEY`, `RELAY_TENANT_KEYS`, the `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` keys |
-| `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use                                               |
+| `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
+| `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS` |
 | `TF_CLOUD_ORGANIZATION`    | variable | HCP Terraform organisation                                                                     |
 
 The `support-prod` environment has required reviewers. `support-infra` (required reviewers) and `support-infra-plan` (no reviewers, used for PR plans) hold the Railway and HCP tokens for the project layer, plus the variables `TF_CLOUD_ORGANIZATION` and `RAILWAY_WORKSPACE_ID`. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.
