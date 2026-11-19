@@ -12,6 +12,7 @@ from relay_agents.connectors.servicenow import ServiceNowTicketPort
 from relay_agents.contracts import Intent
 from relay_agents.graph import Deps
 from relay_agents.knowledge import InMemoryKnowledgeBase
+from relay_agents.llm import check_models
 from relay_agents.service import CaseService
 from relay_agents.specialists import build_llm_specialists, build_offline_specialists
 from relay_agents.specialists.base import Specialist
@@ -36,6 +37,10 @@ def _live_tickets(tenant: TenantConfig, env: Mapping[str, str]) -> list[TicketPo
 
 def build_deps(tenants: Mapping[str, TenantConfig], env: Mapping[str, str]) -> Deps:
     offline = env.get("RELAY_OFFLINE") == "1"
+    if not offline:
+        check_models(
+            {m for t in tenants.values() for m in (t.models.classifier, t.models.specialist)}, env
+        )
     specialists: dict[str, Mapping[Intent, Specialist]] = {}
     tickets: dict[str, Sequence[TicketPort]] = {}
     for slug, tenant in tenants.items():
