@@ -51,13 +51,15 @@ Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three review
 
 The loop lives in one workflow, `agent-review.yml`, so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
 
-1. A push to the PR starts the run. It waits for `ci` on that commit and hands any failing step to the reviewers as a Critical finding.
-2. The review posts its comment. The check passes only on `PASS`.
+1. A push to the PR starts the run. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
+2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent writes the review to `.factory/review.md`, and the workflow posts it. The check passes only on `PASS`.
 3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
 4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge.
 5. Otherwise the loop stops with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
 
-If the run ends without that comment (an API error, a usage limit, a crash), the workflow posts "Factory review did not complete" with the run link and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
+If the run ends without a review (an API error, a spent budget, a crash), the workflow posts "Factory review did not complete" with the cause and the run link, and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
+
+In the review and rework runs the agent only reads and writes files in the workspace. It has no GitHub token and no stored git credentials. The workflow posts every comment and does every push, which is what lets any provider run the agent.
 
 The agents run as the `bun2too-software-factory` GitHub App, not the Claude GitHub app. The Claude app refuses to run on a PR that edits its own workflow, and pushes made with the default workflow token do not start new runs, so neither would close the loop.
 
@@ -65,7 +67,7 @@ The agents run as the `bun2too-software-factory` GitHub App, not the Claude GitH
 
 Answer the latest review: fix what it found at the cause, and nothing else.
 
-1. Read the review the workflow names, the PR diff and the `AGENTS.md` of each product the PR touches. List every Critical and Important finding as a checkbox. Suggestions are optional: take one only when it is in code you are already changing, and say so.
+1. Read the review in `.factory/review.md`, the PR diff and the `AGENTS.md` of each product the PR touches. List every Critical and Important finding as a checkbox. Suggestions are optional: take one only when it is in code you are already changing, and say so.
 2. For each finding, confirm it first (reproduce it, or read the code at the `file:line` given). If it is wrong, do not change code: mark it **disputed** with evidence (`file:line`, command output).
 3. Fix the cause, not the symptom:
    - When behaviour changes, add or change a test that fails before the fix and passes after it.
@@ -73,14 +75,14 @@ Answer the latest review: fix what it found at the cause, and nothing else.
    - If a doc, ADR or comment describes the behaviour you changed, update it in the same commit.
 4. Run the product's check command until it passes: `pnpm check` (support agent), `python3 scripts/verify_marketing.py` and `node --test evals/*.test.mjs` (crew team), `npm run docs:check && npm run typecheck && npm test` (website).
 5. Commit one product per commit as `fix(<product>): <what>`, with the review link in the body. Commit only; do not push.
-6. Write the checklist to `rework-report.md` at the repository root and do not commit it. Mark each item **fixed** (with the commit and the test that proves it) or **disputed** (with evidence). List anything you could not run as **inconclusive**.
+6. Write the checklist to `.factory/rework-report.md` and do not commit anything under `.factory/`. Mark each item **fixed** (with the commit and the test that proves it) or **disputed** (with evidence). List anything you could not run as **inconclusive**.
 
 The workflow, not the agent, enforces the rest:
 - Only the review run's own `FAIL` verdict starts a run; a comment typed by a person does not.
 - Findings in factory files are listed as **needs a person**; the agent never edits them.
 - A round with no commits labels the PR `ready-for-human`, since the review would fail again.
 - Before pushing, it runs `.github/scripts/rework-guard.sh` over the new commits. It discards them and labels the PR `ready-for-human` if a commit touches more than one product, leaves the PR's products, edits factory files, or adds a suppression, skipped test or focused test.
-- After `rework-3`, it labels the PR `ready-for-human` and stops.
+- After `FACTORY_MAX_ROUNDS` rounds (default 3), it labels the PR `ready-for-human` and stops.
 
 Its push starts a fresh review, so every round is reviewed again.
 
@@ -106,7 +108,23 @@ Start slow: a person applies `ready-for-agent` until ten agent PRs in a row merg
 
 ## Spend and safety
 
-- Every agent workflow sets `timeout-minutes` and `--max-turns`.
+The factory is set with repository variables (Settings → Secrets and variables → Actions → Variables):
+
+| Variable                 | Default             | Effect                                                                                              |
+| ------------------------ | ------------------- | --------------------------------------------------------------------------------------------------- |
+| `FACTORY_ENABLED`        | on                  | `false` stops every agent run; the workflows still run CI and the free checks                      |
+| `FACTORY_PROVIDER`       | `anthropic`         | `anthropic`, `openai` (Codex) or `gemini` (Gemini CLI) for Review and Rework                        |
+| `FACTORY_MODEL`          | `claude-sonnet-5-5` | The model for that provider. Required for `openai` and `gemini`                                     |
+| `FACTORY_MAX_BUDGET_USD` | `0.50` review, `1.00` other runs | Hard spend cap per run. Enforced by Claude Code only; for the others, set a limit in the provider's console |
+| `FACTORY_MAX_ROUNDS`     | `3`                 | Rework rounds before a person takes over                                                            |
+
+The provider's key lives in the `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` secret. Give the factory its own key, from a workspace or project with a monthly spend limit, so its usage shows up separately in the provider's console.
+
+Explore, Implement, Ratchet and Retro still post to GitHub from inside the agent, so they run only when the provider is `anthropic`. They honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`.
+
+Worst case per PR: one review per commit, plus each rework round and its review. With the defaults that is about $0.50 + 3 × ($1.00 + $0.50) = $5.00. A red CI and a re-triggered review of the same commit cost nothing.
+
+- Every agent workflow sets `timeout-minutes` and a turn cap.
 - Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
 - Runs that touch the factory (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) are never auto-merged and never chained.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.

@@ -12,12 +12,12 @@ description: Run the factory's automated review on a PR or branch in any Bun2too
    - `spec-reviewer` (shared agent): must end with `SPEC: PASS`, `SPEC: FAIL (<n>)` or `SPEC: SKIPPED (no spec)`.
 
    If `code-reviewer` or `security-auditor` is not installed (CI runners do not install plugins), spawn a `general-purpose` subagent in its place. Brief it with the persona's role as described above and the same closing line. Say in that section that the fallback was used.
-3. Do not merge or rerank their findings. Post one PR comment. Its first line is `Reviewed commit: <head sha>` (the workflow gives the head commit; locally use `git rev-parse HEAD`). Then come three sections, `## Code`, `## Security` and `## Spec`, each pasted verbatim.
-4. The comment's last line is the verdict, exactly one of:
+3. Do not merge or rerank their findings. Write one review with three sections, `## Code`, `## Security` and `## Spec`, each pasted verbatim. In CI, write it to the file the workflow names; the workflow adds the `Reviewed commit: <head sha>` line and posts it. Locally, post it yourself as a PR comment whose first line is `Reviewed commit: $(git rev-parse HEAD)`.
+4. The review's last line is the verdict, exactly one of:
    - `VERDICT: PASS`: every reviewer finished and none reported FAIL.
    - `VERDICT: FAIL`: any reviewer reported FAIL.
    - `VERDICT: INCONCLUSIVE`: no reviewer reported FAIL, but one could not finish. Its section says why (for example, the subagent errored). A person decides; no rework starts.
 
-Always post the comment, even when reviewers fail; a review that ends without a comment leaves the PR with no signal. The workflow checks for the `Reviewed commit:` line and reports a missing review on the PR.
+Always write the review, even when reviewers fail; a run that ends without one leaves the PR with no signal, and the workflow reports it on the PR as a review that did not complete.
 
 The `agent-rework` workflow keys off that last line, so never change its format. Suggestion-level findings (for example from `code-simplification`) never fail a PR; they are listed for the person who merges.

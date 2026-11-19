@@ -1,6 +1,7 @@
 name: agent-rework
-# Called by agent-review when a review ends in VERDICT: FAIL. It fixes the findings,
-# checks the commits with rework-guard.sh and pushes them, which starts the next review.
+# Called by agent-review when a review ends in VERDICT: FAIL. The agent fixes the findings
+# and commits locally; this workflow checks the commits with rework-guard.sh and pushes them,
+# which starts the next review.
 on:
   workflow_call:
     inputs:
@@ -16,22 +17,27 @@ jobs:
     outputs:
       round: ${{ steps.plan.outputs.round }}
       scopes: ${{ steps.plan.outputs.scopes }}
+      branch: ${{ steps.plan.outputs.branch }}
       handoff: ${{ steps.plan.outputs.handoff }}
     steps:
       - name: Decide whether an agent may rework this PR
         id: plan
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env: { GH_TOKEN: "${{ github.token }}", MAX_ROUNDS: "${{ vars.FACTORY_MAX_ROUNDS || '3' }}" }
         run: |
           labels=$(gh pr view "$PR" --json labels -q '.labels[].name')
-          n=0; for i in 1 2 3; do echo "$labels" | grep -qx "rework-$i" && n=$i; done
+          n=$(echo "$labels" | sed -n 's/^rework-\([0-9]*\)$/\1/p' | sort -n | tail -n 1)
+          n=${n:-0}
           scopes=$(gh pr diff "$PR" --name-only | awk -F/ 'NF { print ($1 ~ /^bun2too-/ && NF > 1) ? $1 : "root" }' | sort -u | tr '\n' ' ')
           handoff=""
           if echo "$labels" | grep -qx ready-for-human; then
             handoff="This PR is already waiting for a person."
-          elif [ "$n" -ge 3 ]; then
-            handoff="Three rework rounds did not pass review."
+          elif [ "$n" -ge "$MAX_ROUNDS" ]; then
+            handoff="$MAX_ROUNDS rework rounds did not pass review."
           fi
-          { echo "round=$((n+1))"; echo "scopes=$scopes"; echo "handoff=$handoff"; } >> "$GITHUB_OUTPUT"
+          {
+            echo "round=$((n+1))"; echo "scopes=$scopes"; echo "handoff=$handoff"
+            echo "branch=$(gh pr view "$PR" --json headRefName -q .headRefName)"
+          } >> "$GITHUB_OUTPUT"
       # Labels and comments use the workflow token, so they never start another run.
       - name: Hand to a person
         if: steps.plan.outputs.handoff != ''
@@ -49,21 +55,24 @@ jobs:
     env:
       ROUND: ${{ needs.plan.outputs.round }}
       SCOPES: ${{ needs.plan.outputs.scopes }}
+      BRANCH: ${{ needs.plan.outputs.branch }}
     steps:
       - uses: actions/create-github-app-token@v2
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      # No stored credentials: the agent cannot push; the last step does.
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, token: "${{ steps.app.outputs.token }}" }
-      - name: Check out the PR branch
+        with: { ref: "${{ needs.plan.outputs.branch }}", fetch-depth: 0, persist-credentials: false }
+      - name: Prepare the branch and the review
         id: base
-        env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }
+        env: { GH_TOKEN: "${{ github.token }}", REVIEW_URL: "${{ inputs.review_url }}" }
         run: |
-          gh pr checkout "$PR"
           git config user.name "bun2too-software-factory[bot]"
           git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
+          mkdir -p .factory && echo ".factory/" >> .git/info/exclude
+          gh api "repos/$GH_REPO/issues/comments/${REVIEW_URL##*-}" -q .body > .factory/review.md
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Toolchains for the products the PR touches, matching ci.yml.
@@ -104,31 +113,39 @@ jobs:
       - name: Mark round
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND of 3"
+          gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND"
           gh pr edit "$PR" --add-label "rework-$ROUND"
-      - uses: anthropics/claude-code-action@v1
+      - uses: ./.github/actions/factory-agent
+        id: agent
+        continue-on-error: true
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ steps.app.outputs.token }}
-          show_full_output: true
+          provider: ${{ vars.FACTORY_PROVIDER || 'anthropic' }}
+          model: ${{ vars.FACTORY_MODEL }}
+          max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }}
+          max-turns: "60"
+          github-token: ${{ steps.app.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          allowed-tools: Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*)
           prompt: |
-            Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }} of 3.
-            The review to answer is ${{ inputs.review_url }} (read it with `gh pr view ${{ env.PR }} --comments`).
-            Products this PR touches: ${{ env.SCOPES }}. Stay inside them. Factory files (.claude/, .cursor/, .github/,
-            AGENTS.md, CLAUDE.md, docs/factory.md, docs/sdlc.md) are a person's to change: list findings in them as
-            **needs a person** and do not edit them.
-            Commit locally and do not push; the workflow checks your commits and pushes them.
-            Write your checklist to rework-report.md at the repository root and do not commit it.
-          claude_args: >-
-            --max-turns 80
-            --allowedTools "Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*)"
+            Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }}.
+            The review to answer is in .factory/review.md. Products this PR touches: ${{ env.SCOPES }}. Stay inside them.
+            Factory files (.claude/, .cursor/, .github/, AGENTS.md, CLAUDE.md, docs/factory.md, docs/sdlc.md) are a
+            person's to change: list findings in them as **needs a person** and do not edit them.
+            Commit locally; you cannot push, and the workflow checks your commits before it pushes them.
+            Write your checklist to .factory/rework-report.md and do not commit anything under .factory/.
 
       # The push goes last: it starts the next review, which cancels this run.
       - name: Check the rework and push it
-        env: { GH_TOKEN: "${{ github.token }}", BEFORE: "${{ steps.base.outputs.sha }}" }
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSH_TOKEN: ${{ steps.app.outputs.token }}
+          BEFORE: ${{ steps.base.outputs.sha }}
+          CAUSE: ${{ steps.agent.outputs.cause }}
         run: |
-          report=$(cat rework-report.md 2>/dev/null || echo "The Rework run wrote no report.")
-          rm -f rework-report.md
+          report=$(cat .factory/rework-report.md 2>/dev/null || echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}")
           to_person() {
             gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
             gh pr edit "$PR" --add-label ready-for-human
@@ -144,4 +161,4 @@ jobs:
             exit 1
           fi
           gh pr comment "$PR" --body "$(printf '## Rework round %s\n\n%s\n\nPushing %s. The review runs again on this push.' "$ROUND" "$report" "$(git log --format='`%h` %s' "$BEFORE..HEAD" | paste -sd ',' - | sed 's/,/, /g')")"
-          git push origin HEAD
+          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GH_REPO}.git" "HEAD:refs/heads/$BRANCH"

@@ -1,0 +1,91 @@
+name: factory-agent
+description: >-
+  Run one factory agent turn on the provider and model the repository chose
+  (FACTORY_PROVIDER, FACTORY_MODEL). The agent only reads and writes files in the
+  workspace; the calling workflow posts comments and pushes.
+inputs:
+  provider: { description: "anthropic, openai or gemini", required: true }
+  model: { description: "Model name; anthropic defaults to claude-sonnet-5-5", required: false, default: "" }
+  max-budget-usd: { description: "Spend cap for this run (enforced on anthropic only)", required: true }
+  max-turns: { description: "Turn cap (anthropic only)", required: true }
+  allowed-tools: { description: "Claude Code --allowedTools list (anthropic only)", required: true }
+  prompt: { description: "The task", required: true }
+  github-token: { description: "Token claude-code-action needs for its own setup", required: true }
+  anthropic-api-key: { required: false, default: "" }
+  openai-api-key: { required: false, default: "" }
+  gemini-api-key: { required: false, default: "" }
+outputs:
+  cause:
+    description: The agent's last message when it failed, for the PR comment.
+    value: ${{ steps.result.outputs.cause }}
+runs:
+  using: composite
+  steps:
+    - name: Check the provider settings
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        MODEL: ${{ inputs.model }}
+        HAS_KEY: ${{ (inputs.provider == 'anthropic' && inputs.anthropic-api-key != '') || (inputs.provider == 'openai' && inputs.openai-api-key != '') || (inputs.provider == 'gemini' && inputs.gemini-api-key != '') }}
+      run: |
+        case "$PROVIDER" in anthropic | openai | gemini) ;; *)
+          echo "::error::FACTORY_PROVIDER must be anthropic, openai or gemini, not '$PROVIDER'"; exit 1 ;;
+        esac
+        if [ "$PROVIDER" != anthropic ] && [ -z "$MODEL" ]; then
+          echo "::error::Set the FACTORY_MODEL variable to the $PROVIDER model the factory should use"; exit 1
+        fi
+        if [ "$HAS_KEY" != true ]; then
+          echo "::error::The secret for $PROVIDER is missing (ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY)"; exit 1
+        fi
+        echo "Factory agent: $PROVIDER ${MODEL:-claude-sonnet-5-5}"
+
+    - name: Run Claude Code
+      id: claude
+      if: inputs.provider == 'anthropic'
+      uses: anthropics/claude-code-action@v1
+      with:
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        github_token: ${{ inputs.github-token }}
+        show_full_output: true
+        prompt: ${{ inputs.prompt }}
+        claude_args: >-
+          --model ${{ inputs.model || 'claude-sonnet-5-5' }}
+          --max-turns ${{ inputs.max-turns }}
+          --max-budget-usd ${{ inputs.max-budget-usd }}
+          --allowedTools "${{ inputs.allowed-tools }}"
+
+    - name: Run Codex
+      id: codex
+      if: inputs.provider == 'openai'
+      uses: openai/codex-action@v1
+      with:
+        openai-api-key: ${{ inputs.openai-api-key }}
+        model: ${{ inputs.model }}
+        prompt: ${{ inputs.prompt }}
+        # Writes inside the workspace, no network: the workflow does every GitHub write.
+        permission-profile: ":workspace"
+
+    - name: Run Gemini CLI
+      id: gemini
+      if: inputs.provider == 'gemini'
+      uses: google-github-actions/run-gemini-cli@v0
+      with:
+        gemini_api_key: ${{ inputs.gemini-api-key }}
+        gemini_model: ${{ inputs.model }}
+        prompt: ${{ inputs.prompt }}
+        settings: '{"context": {"fileName": ["AGENTS.md"]}}'
+
+    - name: Record the outcome
+      id: result
+      if: always()
+      shell: bash
+      env:
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        GEMINI_ERROR: ${{ steps.gemini.outputs.error }}
+      run: |
+        cause=""
+        if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+          cause=$(jq -r '[.[] | select(.type == "result" and .is_error == true)] | last | .result // empty' "$EXECUTION_FILE")
+        fi
+        cause=${cause:-$GEMINI_ERROR}
+        { echo "cause<<CAUSE_EOF"; printf '%s\n' "${cause:0:500}"; echo "CAUSE_EOF"; } >> "$GITHUB_OUTPUT"
