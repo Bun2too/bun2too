@@ -78,6 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           OUTCOME: ${{ steps.claude.outcome }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           me="${{ steps.app.outputs.app-slug }}[bot]"
@@ -85,7 +86,9 @@ jobs:
             --jq ".[] | select(.user.login == \"$me\" and (.body | contains(\"Reviewed commit: $HEAD_SHA\"))) | {url: .html_url, body}" |
             jq -s 'last // empty')
           if [ -z "$review" ]; then
-            gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was posted for `%s` (agent step: %s). See the run log for the cause: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this job once the cause is fixed.' "$HEAD_SHA" "$OUTCOME" "$RUN_URL")"
+            # The agent's last result names the cause, e.g. "Credit balance is too low".
+            cause=$(jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXECUTION_FILE" 2>/dev/null | head -c 500)
+            gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was posted for `%s` (agent step: %s).\n\nCause: %s\n\nRun log: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this job once the cause is fixed.' "$HEAD_SHA" "$OUTCOME" "${cause:-not reported; see the run log}" "$RUN_URL")"
             exit 1
           fi
           verdict=$(echo "$review" | jq -r .body | grep -oE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' | tail -n 1 | cut -d' ' -f2)
