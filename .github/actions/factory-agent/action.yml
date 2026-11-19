@@ -82,7 +82,8 @@ runs:
             elif . == "Edit" then "replace"
             elif test("^Bash\\(.*:\\*\\)$") then "run_shell_command(\(.[5:-3]))"
             else empty end)
-          | {context: {fileName: ["AGENTS.md"]}, tools: {core: .}}')
+          | {context: {fileName: ["AGENTS.md"]}, tools: {core: .,
+              exclude: ["run_shell_command(git diff --output)", "run_shell_command(git log --output)", "run_shell_command(git show --output)"]}}')
         echo "json=$json" >> "$GITHUB_OUTPUT"
         echo "Gemini settings: $json"
 
