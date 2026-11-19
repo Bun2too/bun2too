@@ -3,6 +3,9 @@ name: agent-review
 # The rework pushes to the PR, which starts this workflow again, until the review
 # passes, the rework rounds run out, or something needs a person.
 #
+# The agent runs in its own job with a read-only token and no app credentials, because
+# it can write anywhere on its runner. Jobs on fresh runners post, push and merge.
+#
 # Settings (repository variables; see docs/factory.md#spend-and-safety):
 #   FACTORY_ENABLED=false stops every agent run. FACTORY_PROVIDER (anthropic|openai|gemini),
 #   FACTORY_MODEL and FACTORY_MAX_BUDGET_USD choose the model and cap each run.
@@ -11,13 +14,16 @@ on:
     types: [opened, synchronize, ready_for_review, labeled]
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
 concurrency:
   group: agent-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
+env:
+  GH_REPO: ${{ github.repository }}
+  PR: ${{ github.event.pull_request.number }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  FACTORY_BOT: bun2too-software-factory[bot]
 jobs:
-  review:
+  prepare:
     # Only the agent-review label starts a run; the loop's own labels must not.
     if: >
       vars.FACTORY_ENABLED != 'false' &&
@@ -25,25 +31,15 @@ jobs:
       (github.event.action != 'labeled' || github.event.label.name == 'agent-review') &&
       (github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'agent-review'))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      GH_REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    timeout-minutes: 45
+    permissions: { contents: read, actions: read, pull-requests: write, issues: write }
     outputs:
-      verdict: ${{ steps.verdict.outputs.verdict }}
-      review_url: ${{ steps.verdict.outputs.url }}
+      earlier: ${{ steps.earlier.outputs.url }}
+      ci: ${{ steps.ci.outputs.result }}
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
-        id: app
-        with:
-          app-id: ${{ vars.FACTORY_APP_ID }}
-          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
-      - uses: actions/checkout@v5
-        with: { fetch-depth: 0, persist-credentials: false }
       # A person's push answers the hand-off, so the loop gets a fresh set of rounds.
       - name: Reopen the loop after a person's push
-        if: github.event.action == 'synchronize' && github.actor != format('{0}[bot]', steps.app.outputs.app-slug)
+        if: github.event.action == 'synchronize' && github.actor != env.FACTORY_BOT
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
@@ -51,11 +47,10 @@ jobs:
           done
       - name: Reuse an earlier review of this commit
         id: earlier
-        env: { GH_TOKEN: "${{ steps.app.outputs.token }}", ME: "${{ steps.app.outputs.app-slug }}[bot]" }
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          mkdir -p .factory && echo ".factory/" >> .git/info/exclude
           url=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
-            --jq ".[] | select(.user.login == \"$ME\" and (.body | startswith(\"Reviewed commit: $HEAD_SHA\"))) | .html_url" | tail -n 1)
+            --jq ".[] | select(.user.login == \"$FACTORY_BOT\" and (.body | startswith(\"Reviewed commit: $HEAD_SHA\"))) | .html_url" | tail -n 1)
           echo "url=$url" >> "$GITHUB_OUTPUT"
           [ -z "$url" ] || echo "This commit was already reviewed, so no model runs: $url"
       - name: Wait for CI on this commit
@@ -63,6 +58,7 @@ jobs:
         if: steps.earlier.outputs.url == ''
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
+          mkdir -p factory
           id=""
           for _ in $(seq 30); do
             id=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --json databaseId -q '.[0].databaseId')
@@ -86,21 +82,34 @@ jobs:
             echo '```'
             echo
             echo "VERDICT: FAIL"
-          } > .factory/review.md
+          } > factory/review.md
+      - uses: actions/upload-artifact@v4
+        if: steps.ci.outputs.result == 'failed'
+        with: { name: review, path: factory/review.md }
+
+  review:
+    needs: prepare
+    if: needs.prepare.outputs.earlier == '' && needs.prepare.outputs.ci != 'failed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Read-only: this job runs the agent. It holds only the model provider's key.
+    permissions: { contents: read, pull-requests: read }
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0, persist-credentials: false }
       - name: Write the PR context for the reviewer
-        if: steps.earlier.outputs.url == '' && steps.ci.outputs.result != 'failed'
         env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh pr view "$PR" --json title,body,files -q '"# \(.title)\n\n\(.body)\n\nFiles:\n\(.files | map("- " + .path) | join("\n"))"' > .factory/pr.md
+        run: |
+          mkdir -p .factory && echo ".factory/" >> .git/info/exclude
+          gh pr view "$PR" --json title,body,files -q '"# \(.title)\n\n\(.body)\n\nFiles:\n\(.files | map("- " + .path) | join("\n"))"' > .factory/pr.md
       - uses: ./.github/actions/factory-agent
         id: agent
-        if: steps.earlier.outputs.url == '' && steps.ci.outputs.result != 'failed'
         continue-on-error: true
         with:
           provider: ${{ vars.FACTORY_PROVIDER || 'anthropic' }}
           model: ${{ vars.FACTORY_MODEL }}
           max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '0.50' }}
           max-turns: "30"
-          # The workflow token, not the app's: the agent never holds a token that can push or merge.
           github-token: ${{ github.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -109,30 +118,60 @@ jobs:
           prompt: |
             Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ env.PR }}.
             The diff is `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD` (head commit ${{ env.HEAD_SHA }}).
-            The PR's title, description and files are in .factory/pr.md. CI result: ${{ steps.ci.outputs.result }}.
+            The PR's title, description and files are in .factory/pr.md. CI result: ${{ needs.prepare.outputs.ci }}.
             Do not post anything and do not change any file except this one: write the review to .factory/review.md
             with the sections `## Code`, `## Security` and `## Spec`, and end it with exactly one line:
             `VERDICT: PASS`, `VERDICT: FAIL` or `VERDICT: INCONCLUSIVE`.
             If you cannot run subagents, do the three reviews yourself, one after another.
+      - name: Hand the review on
+        if: ${{ !cancelled() }}
+        env: { CAUSE: "${{ steps.agent.outputs.cause }}", OUTCOME: "${{ steps.agent.outcome }}" }
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp .factory/review.md "$RUNNER_TEMP/out/" 2>/dev/null || true
+          printf 'agent step: %s. Cause: %s' "$OUTCOME" "${CAUSE:-not reported; see the run log}" > "$RUNNER_TEMP/out/cause.txt"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with: { name: review, path: "${{ runner.temp }}/out/" }
+
+  # A fresh runner: the only job here that holds the app token is one no agent touched.
+  verdict:
+    needs: [prepare, review]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
+      review_url: ${{ steps.verdict.outputs.url }}
+    steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - uses: actions/download-artifact@v4
+        if: needs.prepare.outputs.earlier == ''
+        continue-on-error: true
+        with: { name: review, path: in }
       - name: Post the review and read the verdict
         id: verdict
-        if: ${{ !cancelled() && steps.earlier.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          EARLIER: ${{ steps.earlier.outputs.url }}
-          OUTCOME: ${{ steps.agent.outcome }}
-          CAUSE: ${{ steps.agent.outputs.cause }}
+          EARLIER: ${{ needs.prepare.outputs.earlier }}
           MODEL: ${{ vars.FACTORY_PROVIDER || 'anthropic' }} ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           if [ -n "$EARLIER" ]; then
             body=$(gh api "repos/$GH_REPO/issues/comments/${EARLIER##*-}" -q .body)
             url=$EARLIER
-          elif [ -s .factory/review.md ] && grep -qE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' .factory/review.md; then
-            body=$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s</sub>' "$HEAD_SHA" "$(cat .factory/review.md)" "$MODEL")
+          elif [ -s in/review.md ] && grep -qE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' in/review.md; then
+            reviewer=$MODEL; grep -q '^## CI$' in/review.md && reviewer="CI (no model)"
+            body=$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s</sub>' "$HEAD_SHA" "$(head -c 60000 in/review.md)" "$reviewer")
             url=$(gh pr comment "$PR" --body "$body")
           else
-            gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was written for `%s` (agent step: %s).\n\nCause: %s\n\nRun log: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this job once the cause is fixed.' "$HEAD_SHA" "${OUTCOME:-skipped}" "${CAUSE:-not reported; see the run log}" "$RUN_URL")"
+            cause=$(head -c 600 in/cause.txt 2>/dev/null || echo "the review job did not finish")
+            gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was written for `%s` (%s).\n\nRun log: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this workflow once the cause is fixed.' "$HEAD_SHA" "$cause" "$RUN_URL")"
             exit 1
           fi
           verdict=$(printf '%s' "$body" | grep -oE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' | tail -n 1 | cut -d' ' -f2)
@@ -141,23 +180,21 @@ jobs:
           [ "$verdict" = PASS ]
 
   rework:
-    needs: review
-    if: ${{ !cancelled() && needs.review.outputs.verdict == 'FAIL' }}
+    needs: verdict
+    if: ${{ !cancelled() && needs.verdict.outputs.verdict == 'FAIL' }}
+    permissions: { contents: read, pull-requests: write, issues: write }
     uses: ./.github/workflows/agent-rework.yml
     with:
       pr: ${{ github.event.pull_request.number }}
-      review_url: ${{ needs.review.outputs.review_url }}
+      review_url: ${{ needs.verdict.outputs.review_url }}
     secrets: inherit
 
   merge:
-    needs: review
-    if: ${{ !cancelled() && needs.review.outputs.verdict == 'PASS' && !github.event.pull_request.draft }}
+    needs: verdict
+    if: ${{ !cancelled() && needs.verdict.outputs.verdict == 'PASS' && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      GH_REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    permissions: { contents: read, actions: read }
     steps:
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
@@ -165,14 +202,14 @@ jobs:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - name: Merge the reviewed commit
-        env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }
+        env: { GH_TOKEN: "${{ steps.app.outputs.token }}", CI_TOKEN: "${{ github.token }}" }
         run: |
           if gh pr diff "$PR" --name-only | grep -qE '^(\.claude|\.cursor|\.github)/|(^|/)(AGENTS|CLAUDE)\.md$|^docs/(factory|sdlc)\.md$'; then
             gh pr comment "$PR" --body "Review and CI passed. This PR changes the factory, so a person merges it (AGENTS.md rule 10)."
             exit 0
           fi
           # CI must be green on this exact commit, even when the review was reused.
-          ci=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --json conclusion -q '.[0].conclusion')
+          ci=$(GH_TOKEN=$CI_TOKEN gh run list --workflow ci.yml --commit "$HEAD_SHA" --json conclusion -q '.[0].conclusion')
           if [ "$ci" != success ]; then
             gh pr comment "$PR" --body "Review passed, but CI on \`$HEAD_SHA\` is \`${ci:-missing}\`. Not merging."
             exit 1

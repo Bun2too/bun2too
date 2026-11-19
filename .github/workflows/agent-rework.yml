@@ -1,7 +1,10 @@
 name: agent-rework
-# Called by agent-review when a review ends in VERDICT: FAIL. The agent fixes the findings
-# and commits locally; this workflow checks the commits with rework-guard.sh and pushes them,
-# which starts the next review.
+# Called by agent-review when a review ends in VERDICT: FAIL.
+#   plan:   decides whether this round may run and marks it.
+#   rework: the agent fixes the findings and commits locally, on a runner with a read-only
+#           token and no app credentials. Its commits leave the runner as patches.
+#   push:   a fresh runner applies the patches to a clean clone, checks them with the guard
+#           from the branch's own history, and pushes them, which starts the next review.
 on:
   workflow_call:
     inputs:
@@ -14,10 +17,12 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: { contents: read, pull-requests: write, issues: write }
     outputs:
       round: ${{ steps.plan.outputs.round }}
       scopes: ${{ steps.plan.outputs.scopes }}
       branch: ${{ steps.plan.outputs.branch }}
+      head: ${{ steps.plan.outputs.head }}
       handoff: ${{ steps.plan.outputs.handoff }}
     steps:
       - name: Decide whether an agent may rework this PR
@@ -36,7 +41,7 @@ jobs:
           fi
           {
             echo "round=$((n+1))"; echo "scopes=$scopes"; echo "handoff=$handoff"
-            echo "branch=$(gh pr view "$PR" --json headRefName -q .headRefName)"
+            gh pr view "$PR" --json headRefName,headRefOid -q '"branch=\(.headRefName)\nhead=\(.headRefOid)"'
           } >> "$GITHUB_OUTPUT"
       # Labels and comments use the workflow token, so they never start another run.
       - name: Hand to a person
@@ -46,21 +51,26 @@ jobs:
           gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
           gh pr edit "$PR" --add-label ready-for-human
           gh pr comment "$PR" --body "$WHY Handing to a person; the latest review lists the open findings."
+      - name: Mark round
+        if: steps.plan.outputs.handoff == ''
+        env: { GH_TOKEN: "${{ github.token }}", ROUND: "${{ steps.plan.outputs.round }}" }
+        run: |
+          gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND"
+          gh pr edit "$PR" --add-label "rework-$ROUND"
 
   rework:
     needs: plan
     if: needs.plan.outputs.handoff == ''
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Read-only: this job runs the agent. It holds only the model provider's key.
+    permissions: { contents: read, pull-requests: read }
     env:
       ROUND: ${{ needs.plan.outputs.round }}
       SCOPES: ${{ needs.plan.outputs.scopes }}
-      BRANCH: ${{ needs.plan.outputs.branch }}
     steps:
-      # No stored credentials and no push token while the agent runs. The app token is
-      # created only after the agent finishes, and the push happens from a clean clone.
       - uses: actions/checkout@v5
-        with: { ref: "${{ needs.plan.outputs.branch }}", fetch-depth: 0, persist-credentials: false }
+        with: { ref: "${{ needs.plan.outputs.head }}", fetch-depth: 0, persist-credentials: false }
       - name: Prepare the branch and the review
         id: base
         env: { GH_TOKEN: "${{ github.token }}", REVIEW_URL: "${{ inputs.review_url }}" }
@@ -70,8 +80,6 @@ jobs:
           mkdir -p .factory && echo ".factory/" >> .git/info/exclude
           gh api "repos/$GH_REPO/issues/comments/${REVIEW_URL##*-}" -q .body > .factory/review.md
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # The guard as it is before the agent runs; the agent can edit the working tree.
-          mkdir -p "$RUNNER_TEMP/factory" && cp .github/scripts/rework-guard.sh "$RUNNER_TEMP/factory/"
 
       # Toolchains for the products the PR touches, matching ci.yml.
       - uses: pnpm/action-setup@v4
@@ -108,11 +116,6 @@ jobs:
       - if: contains(env.SCOPES, 'bun2too-website')
         run: npm ci --prefix bun2too-website
 
-      - name: Mark round
-        env: { GH_TOKEN: "${{ github.token }}" }
-        run: |
-          gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND"
-          gh pr edit "$PR" --add-label "rework-$ROUND"
       - uses: ./.github/actions/factory-agent
         id: agent
         continue-on-error: true
@@ -121,7 +124,6 @@ jobs:
           model: ${{ vars.FACTORY_MODEL }}
           max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }}
           max-turns: "60"
-          # The workflow token can comment but not push, and its events start no runs.
           github-token: ${{ github.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -135,48 +137,64 @@ jobs:
             Commit locally; you cannot push, and the workflow checks your commits before it pushes them.
             Write your checklist to .factory/rework-report.md and do not commit anything under .factory/.
 
-      # The agent could have planted git hooks or config in this checkout. This step has no
-      # token; it only exports the new commits as patches for the clean clone below.
+      # Everything below runs on this runner, which the agent could have changed, so it only
+      # exports data. The push job treats it as untrusted and checks it.
       - name: Export the rework
-        id: export
         if: ${{ !cancelled() }}
-        env: { BEFORE: "${{ steps.base.outputs.sha }}" }
+        env: { BEFORE: "${{ steps.base.outputs.sha }}", CAUSE: "${{ steps.agent.outputs.cause }}" }
         run: |
-          out="$RUNNER_TEMP/factory"
-          cp .factory/rework-report.md "$out/report.md" 2>/dev/null || true
+          out="$RUNNER_TEMP/out" && mkdir -p "$out"
+          cp .factory/rework-report.md "$out/report.md" 2>/dev/null ||
+            echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}" > "$out/report.md"
           git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
             format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
-          echo "commits=$(grep -c '^From [0-9a-f]\{40\} ' "$out/rework.patch" || true)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with: { name: rework, path: "${{ runner.temp }}/out/", if-no-files-found: error }
 
+  # A fresh runner: the only job here that holds the app token is one no agent touched.
+  push:
+    needs: [plan, rework]
+    if: ${{ !cancelled() && needs.plan.outputs.handoff == '' && needs.rework.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read, pull-requests: write, issues: write }
+    env:
+      ROUND: ${{ needs.plan.outputs.round }}
+      SCOPES: ${{ needs.plan.outputs.scopes }}
+      BRANCH: ${{ needs.plan.outputs.branch }}
+      BEFORE: ${{ needs.plan.outputs.head }}
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: rework, path: in }
+      - name: Count the commits
+        id: count
+        run: echo "commits=$(grep -c '^From [0-9a-f]\{40\} ' in/rework.patch 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
-        if: ${{ !cancelled() && steps.export.outputs.commits != '0' }}
+        if: steps.count.outputs.commits != '0' && steps.count.outputs.commits != ''
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
-
       # The push goes last: it starts the next review, which cancels this run.
       - name: Check the rework and push it
-        if: ${{ !cancelled() && steps.export.outcome == 'success' }}
-        working-directory: ${{ runner.temp }}
         env:
           GH_TOKEN: ${{ github.token }}
           PUSH_TOKEN: ${{ steps.app.outputs.token }}
-          BEFORE: ${{ steps.base.outputs.sha }}
-          COMMITS: ${{ steps.export.outputs.commits }}
-          CAUSE: ${{ steps.agent.outputs.cause }}
+          COMMITS: ${{ steps.count.outputs.commits }}
         run: |
-          report=$(cat factory/report.md 2>/dev/null || echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}")
+          report=$(head -c 30000 in/report.md 2>/dev/null || echo "The Rework job did not finish; see the run log.")
           to_person() {
             gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
             gh pr edit "$PR" --add-label ready-for-human
           }
-          if [ "$COMMITS" = 0 ]; then
+          if [ "${COMMITS:-0}" = 0 ] || [ -z "$BEFORE" ]; then
             to_person
             gh pr comment "$PR" --body "$(printf '## Rework round %s: no commits\n\n%s\n\nNothing was fixed, so the review would fail again. Handing to a person.' "$ROUND" "$report")"
             exit 1
           fi
-          # A clean clone: no hooks or config from the agent's checkout, token only in a header.
+          # A clean clone: token only in a header, no hooks.
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
           echo "::add-mask::${auth#AUTHORIZATION: basic }"
           git -c http.extraheader="$auth" clone -q --single-branch --branch "$BRANCH" "https://github.com/$GH_REPO.git" clean
@@ -188,12 +206,14 @@ jobs:
             gh pr comment "$PR" --body "## Rework round $ROUND: not pushed"$'\n\n'"The branch moved while the rework ran, so its commits were dropped. The next push gets a fresh review."
             exit 1
           fi
-          if ! git am -q --keep-cr < ../factory/rework.patch; then
+          if ! git am -q --keep-cr < ../in/rework.patch; then
             to_person
             gh pr comment "$PR" --body "## Rework round $ROUND: not pushed"$'\n\n'"The rework's commits did not apply cleanly. Handing to a person."
             exit 1
           fi
-          if ! problems=$(bash ../factory/rework-guard.sh "$BEFORE" $SCOPES); then
+          # The guard as committed on the branch before the rework: nothing the agent wrote.
+          git show "$BEFORE:.github/scripts/rework-guard.sh" > ../guard.sh
+          if ! problems=$(bash ../guard.sh "$BEFORE" $SCOPES); then
             to_person
             gh pr comment "$PR" --body "$(printf '## Rework round %s: not pushed\n\nThe rework broke a factory rule, so its commits were discarded:\n\n%s\n\nHanding to a person.' "$ROUND" "$problems")"
             exit 1
