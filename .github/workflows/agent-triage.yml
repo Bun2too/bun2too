@@ -16,7 +16,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: Act as the Explore role in docs/factory.md for issue #${{ github.event.issue.number }}. Also apply the matching area:* label. Never apply ready-for-agent yourself while docs/factory.md says the Implement trigger is manual; recommend it in your comment instead.

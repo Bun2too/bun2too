@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
@@ -39,7 +39,7 @@ jobs:
         if: steps.open.outputs.count == '0'
       - if: steps.open.outputs.count == '0'
         run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
         if: steps.open.outputs.count == '0'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

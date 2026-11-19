@@ -34,13 +34,21 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
       review_url: ${{ steps.verdict.outputs.url }}
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
         with: { fetch-depth: 0, persist-credentials: false }
+      # A person's push answers the hand-off, so the loop gets a fresh set of rounds.
+      - name: Reopen the loop after a person's push
+        if: github.event.action == 'synchronize' && github.actor != format('{0}[bot]', steps.app.outputs.app-slug)
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
+            gh pr edit "$PR" --remove-label "$l"
+          done
       - name: Reuse an earlier review of this commit
         id: earlier
         env: { GH_TOKEN: "${{ steps.app.outputs.token }}", ME: "${{ steps.app.outputs.app-slug }}[bot]" }
@@ -150,7 +158,7 @@ jobs:
       PR: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}

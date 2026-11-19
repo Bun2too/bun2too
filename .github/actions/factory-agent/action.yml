@@ -42,7 +42,7 @@ runs:
     - name: Run Claude Code
       id: claude
       if: inputs.provider == 'anthropic'
-      uses: anthropics/claude-code-action@v1
+      uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
       with:
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
         github_token: ${{ inputs.github-token }}
@@ -57,7 +57,7 @@ runs:
     - name: Run Codex
       id: codex
       if: inputs.provider == 'openai'
-      uses: openai/codex-action@v1
+      uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
       with:
         openai-api-key: ${{ inputs.openai-api-key }}
         model: ${{ inputs.model }}
@@ -65,15 +65,36 @@ runs:
         # Writes inside the workspace, no network: the workflow does every GitHub write.
         permission-profile: ":workspace"
 
+    # Gemini CLI runs with --yolo, so limit it to the same tools Claude gets: the
+    # allowed-tools list, mapped to Gemini's names. Anything else, web access included, is off.
+    - name: Limit Gemini to the allowed tools
+      id: gemini-settings
+      if: inputs.provider == 'gemini'
+      shell: bash
+      env: { ALLOWED: "${{ inputs.allowed-tools }}" }
+      run: |
+        json=$(printf '%s' "$ALLOWED" | tr ',' '\n' | jq -R . | jq -cs '
+          map(
+            if . == "Read" then "read_file", "read_many_files"
+            elif . == "Grep" then "grep_search", "search_file_content"
+            elif . == "Glob" then "glob", "list_directory"
+            elif . == "Write" then "write_file"
+            elif . == "Edit" then "replace"
+            elif test("^Bash\\(.*:\\*\\)$") then "run_shell_command(\(.[5:-3]))"
+            else empty end)
+          | {context: {fileName: ["AGENTS.md"]}, tools: {core: .}}')
+        echo "json=$json" >> "$GITHUB_OUTPUT"
+        echo "Gemini settings: $json"
+
     - name: Run Gemini CLI
       id: gemini
       if: inputs.provider == 'gemini'
-      uses: google-github-actions/run-gemini-cli@v0
+      uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
       with:
         gemini_api_key: ${{ inputs.gemini-api-key }}
         gemini_model: ${{ inputs.model }}
         prompt: ${{ inputs.prompt }}
-        settings: '{"context": {"fileName": ["AGENTS.md"]}}'
+        settings: ${{ steps.gemini-settings.outputs.json }}
 
     - name: Record the outcome
       id: result

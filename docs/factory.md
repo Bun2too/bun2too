@@ -83,6 +83,7 @@ The workflow, not the agent, enforces the rest:
 - A round with no commits labels the PR `ready-for-human`, since the review would fail again.
 - Before pushing, it runs `.github/scripts/rework-guard.sh` over the new commits. It discards them and labels the PR `ready-for-human` if a commit touches more than one product, leaves the PR's products, edits factory files, or adds a suppression, skipped test or focused test.
 - After `FACTORY_MAX_ROUNDS` rounds (default 3), it labels the PR `ready-for-human` and stops.
+- When a person pushes to a PR handed to them, the review run removes `ready-for-human` and the `rework-*` labels, so the loop starts again with fresh rounds. Nobody has to clear labels by hand.
 
 Its push starts a fresh review, so every round is reviewed again.
 
@@ -125,6 +126,7 @@ Explore, Implement, Ratchet and Retro still post to GitHub from inside the agent
 Worst case per PR: one review per commit, plus each rework round and its review. With the defaults that is about $0.50 + 3 × ($1.00 + $0.50) = $5.00. A red CI and a re-triggered review of the same commit cost nothing.
 
 - Every agent workflow sets `timeout-minutes` and a turn cap.
+- Third-party actions that receive a provider key or the app token are pinned to a commit SHA. Gemini CLI, which runs without confirmations, gets only the tools in the run's allowlist.
 - Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
 - Runs that touch the factory (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) are never auto-merged and never chained.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.
