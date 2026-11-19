@@ -1,27 +1,97 @@
 name: agent-review
+# One loop per PR: wait for CI, review, and on FAIL rework the PR in the same run.
+# The rework pushes to the PR, which starts this workflow again, until the review
+# passes, three rework rounds run out, or something needs a person.
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, labeled]
 permissions:
   contents: read
   pull-requests: write
-  issues: read
-  id-token: write
+  issues: write
 concurrency:
   group: agent-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   review:
-    if: github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'agent-review')
+    # Only the agent-review label starts a run; the loop's own labels must not.
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'agent-review') &&
+      (github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'agent-review'))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
+    env:
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
+      review_url: ${{ steps.verdict.outputs.url }}
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
+      - name: Wait for CI on this commit
+        id: ci
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          id=""
+          for _ in $(seq 30); do
+            id=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --json databaseId -q '.[0].databaseId')
+            [ -n "$id" ] && break
+            sleep 10
+          done
+          if [ -z "$id" ]; then echo "result=did not start" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if gh run watch "$id" --interval 30 --exit-status > /dev/null; then
+            echo "result=passed" >> "$GITHUB_OUTPUT"
+          else
+            gh run view "$id" --log-failed | tail -c 30000 > ci-failure.log
+            echo "result=failed (the failing steps' log is in ci-failure.log)" >> "$GITHUB_OUTPUT"
+          fi
       - uses: anthropics/claude-code-action@v1
+        id: claude
+        continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Our own token: the Claude GitHub app refuses to run on a PR that edits this file,
+          # and its pushes and comments would not start the next round.
+          github_token: ${{ secrets.FACTORY_TOKEN }}
+          # The repo is private; without this a failed review leaves no reason in the log.
+          show_full_output: true
           prompt: |
-            Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ github.event.pull_request.number }}.
-            Base branch: origin/${{ github.event.pull_request.base.ref }}. Post exactly one comment with gh pr comment.
-          claude_args: --max-turns 40 --allowedTools "Read,Grep,Glob,Agent,Bash(git diff:*),Bash(git log:*),Bash(git merge-base:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*)"
+            Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ env.PR }}.
+            Base branch: origin/${{ github.event.pull_request.base.ref }}. Head commit: ${{ env.HEAD_SHA }}.
+            CI on this commit: ${{ steps.ci.outputs.result }}. Every failing CI step is a Critical finding in the Code section; quote the error.
+            Post exactly one comment with gh pr comment. Its first line is `Reviewed commit: ${{ env.HEAD_SHA }}` and its last line is
+            `VERDICT: PASS`, `VERDICT: FAIL` or `VERDICT: INCONCLUSIVE`. If the code-reviewer or security-auditor subagent type
+            is not available, use a general-purpose subagent briefed with that role. Post the comment even if a reviewer fails.
+          claude_args: --max-turns 40 --allowedTools "Read,Grep,Glob,Agent,Bash(git diff:*),Bash(git log:*),Bash(git merge-base:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh pr comment:*)"
+      - name: Read the verdict
+        id: verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          OUTCOME: ${{ steps.claude.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          me=$(gh api user -q .login)
+          review=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"$me\" and (.body | contains(\"Reviewed commit: $HEAD_SHA\"))) | {url: .html_url, body}" |
+            jq -s 'last // empty')
+          if [ -z "$review" ]; then
+            gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was posted for `%s` (agent step: %s). See the run log for the cause: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this job once the cause is fixed.' "$HEAD_SHA" "$OUTCOME" "$RUN_URL")"
+            exit 1
+          fi
+          verdict=$(echo "$review" | jq -r .body | grep -oE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' | tail -n 1 | cut -d' ' -f2)
+          { echo "verdict=${verdict:-MISSING}"; echo "url=$(echo "$review" | jq -r .url)"; } >> "$GITHUB_OUTPUT"
+          echo "Verdict: ${verdict:-MISSING}"
+          [ "$verdict" = PASS ]
+
+  rework:
+    needs: review
+    if: ${{ !cancelled() && needs.review.outputs.verdict == 'FAIL' }}
+    uses: ./.github/workflows/agent-rework.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      review_url: ${{ needs.review.outputs.review_url }}
+    secrets: inherit

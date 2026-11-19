@@ -10,8 +10,8 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | ------------- | -------------------------------------------------------- | ---------------- | ------------------------------------------ | --------------------------------------------- |
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
-| **Review**    | PR opened, synchronised, ready, or labelled `agent-review` | Rework on FAIL   | merges on PASS                             | concurrency group per PR, cancel in progress  |
-| **Rework**    | review bot's comment containing `VERDICT: FAIL`          | Review           | `ready-for-human` after 3 rounds, a guard failure, or on a factory PR | labels `rework-1..3` |
+| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Rework on FAIL   | merges on PASS                             | concurrency group per PR, cancel in progress  |
+| **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after 3 rounds, a guard failure, or a round with no fix | labels `rework-1..3` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
 | **Retro**     | every 10th merged PR                                     | Review           | merges, always                             | one open `retro` PR                           |
@@ -47,7 +47,18 @@ If you need product judgment or credentials, stop. Comment the exact question on
 
 ### Review
 
-Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three reviewers run in parallel, each in a fresh context, and post one comment ending in a verdict line.
+Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three reviewers run in parallel, each in a fresh context, and post one comment. Its first line names the reviewed commit and its last line is the verdict: `PASS`, `FAIL` (starts Rework) or `INCONCLUSIVE` (a reviewer could not finish; a person decides).
+
+The loop lives in one workflow, `agent-review.yml`, so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
+
+1. A push to the PR starts the run. It waits for `ci` on that commit and hands any failing step to the reviewers as a Critical finding.
+2. The review posts its comment. The check passes only on `PASS`.
+3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
+4. The loop stops at `PASS` (a person merges), or with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
+
+If the run ends without that comment (an API error, a usage limit, a crash), the workflow posts "Factory review did not complete" with the run link and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
+
+The agents run with `FACTORY_TOKEN`, not the Claude GitHub app. The app refuses to run on a PR that edits its own workflow, and pushes made with the default workflow token do not start new runs, so neither would close the loop.
 
 ### Rework
 
@@ -64,8 +75,9 @@ Answer the latest review: fix what it found at the cause, and nothing else.
 6. Write the checklist to `rework-report.md` at the repository root and do not commit it. Mark each item **fixed** (with the commit and the test that proves it) or **disputed** (with evidence). List anything you could not run as **inconclusive**.
 
 The workflow, not the agent, enforces the rest:
-- Only a `VERDICT: FAIL` comment from the review bot starts a run.
-- PRs that change the factory go to a person.
+- Only the review run's own `FAIL` verdict starts a run; a comment typed by a person does not.
+- Findings in factory files are listed as **needs a person**; the agent never edits them.
+- A round with no commits labels the PR `ready-for-human`, since the review would fail again.
 - Before pushing, it runs `.github/scripts/rework-guard.sh` over the new commits. It discards them and labels the PR `ready-for-human` if a commit touches more than one product, leaves the PR's products, edits factory files, or adds a suppression, skipped test or focused test.
 - After `rework-3`, it labels the PR `ready-for-human` and stops.
 
