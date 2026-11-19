@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   implement:
-    if: github.event.label.name == 'ready-for-agent'
+    if: vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && github.event.label.name == 'ready-for-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -40,4 +40,4 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app.outputs.token }}
           prompt: Act as the Implement role in docs/factory.md for issue #${{ github.event.issue.number }}. Follow the lifecycle in docs/sdlc.md (/build) and the AGENTS.md of the product the issue's area label names.
-          claude_args: --max-turns 120
+          claude_args: --model ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }} --max-budget-usd ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }} --max-turns 120

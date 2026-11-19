@@ -8,7 +8,7 @@ permissions:
   id-token: write
 jobs:
   explore:
-    if: (github.event.action == 'opened') || github.event.label.name == 'needs-triage'
+    if: vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && ((github.event.action == 'opened') || github.event.label.name == 'needs-triage')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -20,4 +20,4 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: Act as the Explore role in docs/factory.md for issue #${{ github.event.issue.number }}. Also apply the matching area:* label. Never apply ready-for-agent yourself while docs/factory.md says the Implement trigger is manual; recommend it in your comment instead.
-          claude_args: --max-turns 40 --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(git log:*)"
+          claude_args: --model ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }} --max-budget-usd ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }} --max-turns 40 --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(git log:*)"

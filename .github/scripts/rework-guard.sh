@@ -27,8 +27,8 @@ while read -r f; do
   [ -n "$f" ] || continue
   if [[ "$f" =~ ^(\.claude|\.cursor|\.github)/ || "$f" =~ (^|/)(AGENTS|CLAUDE)\.md$ || "$f" == docs/factory.md || "$f" == docs/sdlc.md ]]; then
     violations+=("$f is a factory file; only a person changes those")
-  elif [[ "$f" == rework-report.md ]]; then
-    violations+=("rework-report.md was committed; it is the run's report, not code")
+  elif [[ "$f" == rework-report.md || "$f" == .factory/* ]]; then
+    violations+=("$f was committed; it is the run's input or report, not code")
   elif [[ "$allowed" != *" $(scope_of "$f") "* ]]; then
     violations+=("$f is outside the products this PR touches")
   fi

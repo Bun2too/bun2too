@@ -9,6 +9,7 @@ permissions:
 concurrency: { group: ratchet, cancel-in-progress: false }
 jobs:
   ratchet:
+    if: vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -46,4 +47,4 @@ jobs:
           prompt: |
             Act as the Ratchet role in docs/factory.md for the support agent. Remove the first entry from bun2too-support-agent/docs/factory/ratchet.txt, make that path pass the named stricter rule,
             run pnpm -C bun2too-support-agent check, and open a PR labelled ratchet on a branch named agent/ratchet-<today, YYYYMMDD>. Change nothing else.
-          claude_args: --max-turns 60
+          claude_args: --model ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }} --max-budget-usd ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }} --max-turns 60
