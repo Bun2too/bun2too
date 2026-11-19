@@ -50,15 +50,20 @@ jobs:
       ROUND: ${{ needs.plan.outputs.round }}
       SCOPES: ${{ needs.plan.outputs.scopes }}
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
+        with: { fetch-depth: 0, token: "${{ steps.app.outputs.token }}" }
       - name: Check out the PR branch
         id: base
-        env: { GH_TOKEN: "${{ secrets.FACTORY_TOKEN }}" }
+        env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }
         run: |
           gh pr checkout "$PR"
-          git config user.name "bun2too-factory[bot]"
-          git config user.email "bun2too-factory[bot]@users.noreply.github.com"
+          git config user.name "bun2too-software-factory[bot]"
+          git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Toolchains for the products the PR touches, matching ci.yml.
@@ -104,7 +109,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.FACTORY_TOKEN }}
+          github_token: ${{ steps.app.outputs.token }}
           show_full_output: true
           prompt: |
             Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }} of 3.
