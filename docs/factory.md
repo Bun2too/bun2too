@@ -11,7 +11,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
 | **Review**    | PR opened, synchronised, ready, or labelled `agent-review` | Rework on FAIL   | merges on PASS                             | concurrency group per PR, cancel in progress  |
-| **Rework**    | review comment containing `VERDICT: FAIL`                | Review           | after 3 rounds: `ready-for-human`          | labels `rework-1..3`                          |
+| **Rework**    | review bot's comment containing `VERDICT: FAIL`          | Review           | `ready-for-human` after 3 rounds, a guard failure, or on a factory PR | labels `rework-1..3` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
 | **Retro**     | every 10th merged PR                                     | Review           | merges, always                             | one open `retro` PR                           |
@@ -51,14 +51,25 @@ Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three review
 
 ### Rework
 
-Fix only the findings the latest review named.
+Answer the latest review: fix what it found at the cause, and nothing else.
 
-1. List each finding as a checkbox. Fix those and nothing else.
-2. If a finding is wrong, do not fix it. Reply with evidence (`file:line`, test output).
-3. Run the product's check command; it must pass. Commit with `fix(review): ...` and push to the PR branch.
-4. Comment the checklist with each item marked fixed or disputed.
+1. Read the review the workflow names, the PR diff and the `AGENTS.md` of each product the PR touches. List every Critical and Important finding as a checkbox. Suggestions are optional: take one only when it is in code you are already changing, and say so.
+2. For each finding, confirm it first (reproduce it, or read the code at the `file:line` given). If it is wrong, do not change code: mark it **disputed** with evidence (`file:line`, command output).
+3. Fix the cause, not the symptom:
+   - When behaviour changes, add or change a test that fails before the fix and passes after it.
+   - Never silence a finding. Adding a suppression (`noqa`, `type: ignore`, `eslint-disable`, `@ts-ignore`), skipping or focusing a test, deleting an assertion or loosening a threshold is not a fix. The workflow rejects the first three outright.
+   - If a doc, ADR or comment describes the behaviour you changed, update it in the same commit.
+4. Run the product's check command until it passes: `pnpm check` (support agent), `python3 scripts/verify_marketing.py` and `node --test evals/*.test.mjs` (crew team), `npm run docs:check && npm run typecheck && npm test` (website).
+5. Commit one product per commit as `fix(<product>): <what>`, with the review link in the body. Commit only; do not push.
+6. Write the checklist to `rework-report.md` at the repository root and do not commit it. Mark each item **fixed** (with the commit and the test that proves it) or **disputed** (with evidence). List anything you could not run as **inconclusive**.
 
-The workflow enforces the cap: after `rework-3`, it labels the PR `ready-for-human` and stops.
+The workflow, not the agent, enforces the rest:
+- Only a `VERDICT: FAIL` comment from the review bot starts a run.
+- PRs that change the factory go to a person.
+- Before pushing, it runs `.github/scripts/rework-guard.sh` over the new commits. It discards them and labels the PR `ready-for-human` if a commit touches more than one product, leaves the PR's products, edits factory files, or adds a suppression, skipped test or focused test.
+- After `rework-3`, it labels the PR `ready-for-human` and stops.
+
+Its push starts a fresh review, so every round is reviewed again.
 
 ### Hygiene
 
