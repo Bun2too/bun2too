@@ -52,7 +52,7 @@ Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three review
 The loop lives in one workflow, `agent-review.yml` (decision: [ADR 0005](adr/0005-factory-review-loop-merges-product-prs.md)), so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
 
 1. A push to the PR starts the run. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
-2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent writes the review to `.factory/review.md`, and the workflow posts it. The check passes only on `PASS`.
+2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent reviews without write access; its final message is the review, which the workflow posts. The check passes only on `PASS`.
 3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
 4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge.
 5. Otherwise the loop stops with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.

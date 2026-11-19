@@ -12,7 +12,7 @@ description: Run the factory's automated review on a PR or branch in any Bun2too
    - `spec-reviewer` (shared agent): must end with `SPEC: PASS`, `SPEC: FAIL (<n>)` or `SPEC: SKIPPED (no spec)`.
 
    If `code-reviewer` or `security-auditor` is not installed (CI runners do not install plugins), spawn a `general-purpose` subagent in its place. Brief it with the persona's role as described above and the same closing line. Say in that section that the fallback was used.
-3. Do not merge or rerank their findings. Write one review with three sections, `## Code`, `## Security` and `## Spec`, each pasted verbatim. In CI, write it to the file the workflow names; the workflow adds the `Reviewed commit: <head sha>` line and posts it. Locally, post it yourself as a PR comment whose first line is `Reviewed commit: $(git rev-parse HEAD)`.
+3. Do not merge or rerank their findings. Write one review with three sections, `## Code`, `## Security` and `## Spec`, each pasted verbatim. In CI, return it as your final message and change no files; the workflow adds the `Reviewed commit: <head sha>` line and posts it. Locally, post it yourself as a PR comment whose first line is `Reviewed commit: $(git rev-parse HEAD)`.
 4. The review's last line is the verdict, exactly one of:
    - `VERDICT: PASS`: every reviewer finished and none reported FAIL.
    - `VERDICT: FAIL`: any reviewer reported FAIL.

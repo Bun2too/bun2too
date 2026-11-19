@@ -114,21 +114,24 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
-          allowed-tools: Read,Grep,Glob,Agent,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*)
+          # No Write: a reviewer that could edit .git/config could make `git diff` run a command.
+          # Its final message is the review.
+          read-only: "true"
+          output-file: ${{ runner.temp }}/out/review.md
+          allowed-tools: Read,Grep,Glob,Agent,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*)
           prompt: |
             Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ env.PR }}.
             The diff is `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD` (head commit ${{ env.HEAD_SHA }}).
             The PR's title, description and files are in .factory/pr.md. CI result: ${{ needs.prepare.outputs.ci }}.
-            Do not post anything and do not change any file except this one: write the review to .factory/review.md
-            with the sections `## Code`, `## Security` and `## Spec`, and end it with exactly one line:
-            `VERDICT: PASS`, `VERDICT: FAIL` or `VERDICT: INCONCLUSIVE`.
+            Do not post anything and do not change any file. Your final message is the review, posted as is:
+            only the sections `## Code`, `## Security` and `## Spec`, with nothing before or after them except the
+            last line, which is exactly one of `VERDICT: PASS`, `VERDICT: FAIL` or `VERDICT: INCONCLUSIVE`.
             If you cannot run subagents, do the three reviews yourself, one after another.
       - name: Hand the review on
         if: ${{ !cancelled() }}
         env: { CAUSE: "${{ steps.agent.outputs.cause }}", OUTCOME: "${{ steps.agent.outcome }}" }
         run: |
           mkdir -p "$RUNNER_TEMP/out"
-          cp .factory/review.md "$RUNNER_TEMP/out/" 2>/dev/null || true
           printf 'agent step: %s. Cause: %s' "$OUTCOME" "${CAUSE:-not reported; see the run log}" > "$RUNNER_TEMP/out/cause.txt"
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

@@ -14,6 +14,8 @@ inputs:
   anthropic-api-key: { required: false, default: "" }
   openai-api-key: { required: false, default: "" }
   gemini-api-key: { required: false, default: "" }
+  read-only: { description: "true: the agent may not write files (Codex runs :read-only)", required: false, default: "false" }
+  output-file: { description: "Where to save the agent's final message", required: false, default: "" }
 outputs:
   cause:
     description: The agent's last message when it failed, for the PR comment.
@@ -63,7 +65,7 @@ runs:
         model: ${{ inputs.model }}
         prompt: ${{ inputs.prompt }}
         # Writes inside the workspace, no network: the workflow does every GitHub write.
-        permission-profile: ":workspace"
+        permission-profile: ${{ inputs.read-only == 'true' && ':read-only' || ':workspace' }}
 
     # Gemini CLI runs with --yolo, so limit it to the same tools Claude gets: the
     # allowed-tools list, mapped to Gemini's names. Anything else, web access included, is off.
@@ -104,7 +106,18 @@ runs:
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         GEMINI_ERROR: ${{ steps.gemini.outputs.error }}
+        CODEX_FINAL: ${{ steps.codex.outputs.final-message }}
+        GEMINI_FINAL: ${{ steps.gemini.outputs.summary }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
       run: |
+        if [ -n "$OUTPUT_FILE" ]; then
+          mkdir -p "$(dirname "$OUTPUT_FILE")"
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            jq -r '[.[] | select(.type == "result" and .is_error != true)] | last | .result // empty' "$EXECUTION_FILE" > "$OUTPUT_FILE"
+          else
+            printf '%s\n' "${CODEX_FINAL:-$GEMINI_FINAL}" > "$OUTPUT_FILE"
+          fi
+        fi
         cause=""
         if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
           cause=$(jq -r '[.[] | select(.type == "result" and .is_error == true)] | last | .result // empty' "$EXECUTION_FILE")
