@@ -11,7 +11,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
 | **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Merge on PASS, Rework on FAIL | merges factory PRs only          | concurrency group per PR, cancel in progress  |
-| **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after 3 rounds, a guard failure, or a round with no fix | labels `rework-1..3` |
+| **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after `FACTORY_MAX_ROUNDS` rounds, a guard failure, or a round with no fix | labels `rework-<n>` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
 | **Retro**     | every 10th merged PR                                     | Review           | merges, always                             | one open `retro` PR                           |
@@ -59,7 +59,7 @@ The loop lives in one workflow, `agent-review.yml`, so a PR is changed, checked,
 
 If the run ends without a review (an API error, a spent budget, a crash), the workflow posts "Factory review did not complete" with the cause and the run link, and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
 
-In the review and rework runs the agent only reads and writes files in the workspace. It has no GitHub token and no stored git credentials. The workflow posts every comment and does every push, which is what lets any provider run the agent.
+In the review and rework runs the agent only reads and writes files in the workspace. It has no stored git credentials and never holds the app token: Claude Code gets the workflow token, which cannot push, and the other providers get none. The workflow posts every comment and does every push, which is what lets any provider run the agent. Rework commits are exported as patches, applied to a clean clone, checked there by the guard as it was before the agent ran, and only then pushed, so nothing the agent wrote into `.git/` runs with a token.
 
 The agents run as the `bun2too-software-factory` GitHub App, not the Claude GitHub app. The Claude app refuses to run on a PR that edits its own workflow, and pushes made with the default workflow token do not start new runs, so neither would close the loop.
 

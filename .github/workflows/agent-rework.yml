@@ -57,12 +57,8 @@ jobs:
       SCOPES: ${{ needs.plan.outputs.scopes }}
       BRANCH: ${{ needs.plan.outputs.branch }}
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
-        id: app
-        with:
-          app-id: ${{ vars.FACTORY_APP_ID }}
-          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
-      # No stored credentials: the agent cannot push; the last step does.
+      # No stored credentials and no push token while the agent runs. The app token is
+      # created only after the agent finishes, and the push happens from a clean clone.
       - uses: actions/checkout@v5
         with: { ref: "${{ needs.plan.outputs.branch }}", fetch-depth: 0, persist-credentials: false }
       - name: Prepare the branch and the review
@@ -74,6 +70,8 @@ jobs:
           mkdir -p .factory && echo ".factory/" >> .git/info/exclude
           gh api "repos/$GH_REPO/issues/comments/${REVIEW_URL##*-}" -q .body > .factory/review.md
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # The guard as it is before the agent runs; the agent can edit the working tree.
+          mkdir -p "$RUNNER_TEMP/factory" && cp .github/scripts/rework-guard.sh "$RUNNER_TEMP/factory/"
 
       # Toolchains for the products the PR touches, matching ci.yml.
       - uses: pnpm/action-setup@v4
@@ -123,7 +121,8 @@ jobs:
           model: ${{ vars.FACTORY_MODEL }}
           max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }}
           max-turns: "60"
-          github-token: ${{ steps.app.outputs.token }}
+          # The workflow token can comment but not push, and its events start no runs.
+          github-token: ${{ github.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
@@ -136,29 +135,68 @@ jobs:
             Commit locally; you cannot push, and the workflow checks your commits before it pushes them.
             Write your checklist to .factory/rework-report.md and do not commit anything under .factory/.
 
+      # The agent could have planted git hooks or config in this checkout. This step has no
+      # token; it only exports the new commits as patches for the clean clone below.
+      - name: Export the rework
+        id: export
+        if: ${{ !cancelled() }}
+        env: { BEFORE: "${{ steps.base.outputs.sha }}" }
+        run: |
+          out="$RUNNER_TEMP/factory"
+          cp .factory/rework-report.md "$out/report.md" 2>/dev/null || true
+          git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+            format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
+          echo "commits=$(grep -c '^From [0-9a-f]\{40\} ' "$out/rework.patch" || true)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app
+        if: ${{ !cancelled() && steps.export.outputs.commits != '0' }}
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+
       # The push goes last: it starts the next review, which cancels this run.
       - name: Check the rework and push it
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.export.outcome == 'success' }}
+        working-directory: ${{ runner.temp }}
         env:
           GH_TOKEN: ${{ github.token }}
           PUSH_TOKEN: ${{ steps.app.outputs.token }}
           BEFORE: ${{ steps.base.outputs.sha }}
+          COMMITS: ${{ steps.export.outputs.commits }}
           CAUSE: ${{ steps.agent.outputs.cause }}
         run: |
-          report=$(cat .factory/rework-report.md 2>/dev/null || echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}")
+          report=$(cat factory/report.md 2>/dev/null || echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}")
           to_person() {
             gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
             gh pr edit "$PR" --add-label ready-for-human
           }
-          if [ "$(git rev-list --count "$BEFORE..HEAD")" = 0 ]; then
+          if [ "$COMMITS" = 0 ]; then
             to_person
             gh pr comment "$PR" --body "$(printf '## Rework round %s: no commits\n\n%s\n\nNothing was fixed, so the review would fail again. Handing to a person.' "$ROUND" "$report")"
             exit 1
           fi
-          if ! problems=$(bash .github/scripts/rework-guard.sh "$BEFORE" $SCOPES); then
+          # A clean clone: no hooks or config from the agent's checkout, token only in a header.
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          echo "::add-mask::${auth#AUTHORIZATION: basic }"
+          git -c http.extraheader="$auth" clone -q --single-branch --branch "$BRANCH" "https://github.com/$GH_REPO.git" clean
+          cd clean
+          git config core.hooksPath /dev/null
+          git config user.name "bun2too-software-factory[bot]"
+          git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
+          if [ "$(git rev-parse HEAD)" != "$BEFORE" ]; then
+            gh pr comment "$PR" --body "## Rework round $ROUND: not pushed"$'\n\n'"The branch moved while the rework ran, so its commits were dropped. The next push gets a fresh review."
+            exit 1
+          fi
+          if ! git am -q --keep-cr < ../factory/rework.patch; then
+            to_person
+            gh pr comment "$PR" --body "## Rework round $ROUND: not pushed"$'\n\n'"The rework's commits did not apply cleanly. Handing to a person."
+            exit 1
+          fi
+          if ! problems=$(bash ../factory/rework-guard.sh "$BEFORE" $SCOPES); then
             to_person
             gh pr comment "$PR" --body "$(printf '## Rework round %s: not pushed\n\nThe rework broke a factory rule, so its commits were discarded:\n\n%s\n\nHanding to a person.' "$ROUND" "$problems")"
             exit 1
           fi
           gh pr comment "$PR" --body "$(printf '## Rework round %s\n\n%s\n\nPushing %s. The review runs again on this push.' "$ROUND" "$report" "$(git log --format='`%h` %s' "$BEFORE..HEAD" | paste -sd ',' - | sed 's/,/, /g')")"
-          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GH_REPO}.git" "HEAD:refs/heads/$BRANCH"
+          git -c http.extraheader="$auth" push --no-verify origin "HEAD:refs/heads/$BRANCH"
