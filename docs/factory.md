@@ -47,7 +47,9 @@ If you need product judgment or credentials, stop. Comment the exact question on
 
 ### Review
 
-Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three reviewers run in parallel, each in a fresh context, and post one comment ending in a verdict line.
+Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three reviewers run in parallel, each in a fresh context, and post one comment. Its first line names the reviewed commit and its last line is the verdict: `PASS`, `FAIL` (starts Rework) or `INCONCLUSIVE` (a reviewer could not finish; a person decides).
+
+If the run ends without that comment (an API error, a usage limit, a crash), the workflow posts "Factory review did not complete" with the run link and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
 
 ### Rework
 
