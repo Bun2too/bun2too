@@ -3,47 +3,81 @@ on:
   issue_comment:
     types: [created]
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   issues: write
   id-token: write
 concurrency:
   group: agent-rework-${{ github.event.issue.number }}
   cancel-in-progress: false
+env:
+  PR: ${{ github.event.issue.number }}
+  GH_REPO: ${{ github.repository }}
 jobs:
-  rework:
+  plan:
+    # Only the factory review's own verdict starts a run; a person typing the phrase does not.
     if: >
       github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.user.login == 'claude[bot]' &&
       contains(github.event.comment.body, 'VERDICT: FAIL') &&
       !contains(github.event.issue.labels.*.name, 'ready-for-human')
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 5
+    outputs:
+      round: ${{ steps.plan.outputs.round }}
+      scopes: ${{ steps.plan.outputs.scopes }}
+      handoff: ${{ steps.plan.outputs.handoff }}
     steps:
-      - name: Count rounds
-        id: round
+      - name: Decide whether an agent may rework this PR
+        id: plan
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          labels=$(gh pr view ${{ github.event.issue.number }} -R ${{ github.repository }} --json labels -q '.labels[].name')
+          labels=$(gh pr view "$PR" --json labels -q '.labels[].name')
           n=0; for i in 1 2 3; do echo "$labels" | grep -qx "rework-$i" && n=$i; done
-          echo "next=$((n+1))" >> "$GITHUB_OUTPUT"
-      - name: Hand to a human after three rounds
-        if: steps.round.outputs.next > 3
-        env: { GH_TOKEN: "${{ github.token }}" }
+          files=$(gh pr diff "$PR" --name-only)
+          scopes=$(echo "$files" | awk -F/ 'NF { print ($1 ~ /^bun2too-/ && NF > 1) ? $1 : "root" }' | sort -u | tr '\n' ' ')
+          handoff=""
+          if echo "$files" | grep -qE '^(\.claude|\.cursor|\.github)/|(^|/)(AGENTS|CLAUDE)\.md$|^docs/(factory|sdlc)\.md$'; then
+            handoff="This PR changes the factory, which only a person reworks (AGENTS.md rule 10)."
+          elif [ "$n" -ge 3 ]; then
+            handoff="Three rework rounds did not pass review."
+          fi
+          { echo "round=$((n+1))"; echo "scopes=$scopes"; echo "handoff=$handoff"; } >> "$GITHUB_OUTPUT"
+      - name: Hand to a person
+        if: steps.plan.outputs.handoff != ''
+        env: { GH_TOKEN: "${{ github.token }}", WHY: "${{ steps.plan.outputs.handoff }}" }
         run: |
-          gh pr edit ${{ github.event.issue.number }} -R ${{ github.repository }} --add-label ready-for-human
-          gh pr comment ${{ github.event.issue.number }} -R ${{ github.repository }} --body "Three rework rounds did not pass review. Handing to a human; see the latest review for open findings."
+          gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
+          gh pr edit "$PR" --add-label ready-for-human
+          gh pr comment "$PR" --body "$WHY Handing to a person; the latest review lists the open findings."
+
+  rework:
+    needs: plan
+    if: needs.plan.outputs.handoff == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ROUND: ${{ needs.plan.outputs.round }}
+      SCOPES: ${{ needs.plan.outputs.scopes }}
+    steps:
       - uses: actions/checkout@v5
-        if: steps.round.outputs.next <= 3
         with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
       - name: Check out the PR branch
-        if: steps.round.outputs.next <= 3
+        id: base
         env: { GH_TOKEN: "${{ secrets.FACTORY_TOKEN }}" }
-        run: gh pr checkout ${{ github.event.issue.number }}
+        run: |
+          gh pr checkout "$PR"
+          git config user.name "bun2too-factory[bot]"
+          git config user.email "bun2too-factory[bot]@users.noreply.github.com"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Toolchains for the products the PR touches, matching ci.yml.
       - uses: pnpm/action-setup@v4
-        if: steps.round.outputs.next <= 3
+        if: contains(env.SCOPES, 'bun2too-support-agent')
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
-        if: steps.round.outputs.next <= 3
+        if: contains(env.SCOPES, 'bun2too-support-agent')
         with:
           {
             node-version-file: bun2too-support-agent/.nvmrc,
@@ -51,19 +85,61 @@ jobs:
             cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml,
           }
       - uses: astral-sh/setup-uv@v6
-        if: steps.round.outputs.next <= 3
-      - if: steps.round.outputs.next <= 3
+        if: contains(env.SCOPES, 'bun2too-support-agent')
+      - if: contains(env.SCOPES, 'bun2too-support-agent')
         run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
+      - uses: actions/setup-python@v5
+        if: contains(env.SCOPES, 'bun2too-crew-team')
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v5
+        if: contains(env.SCOPES, 'bun2too-crew-team')
+        with: { node-version: "24" }
+      - if: contains(env.SCOPES, 'bun2too-crew-team')
+        run: python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
+      - uses: actions/setup-node@v5
+        if: contains(env.SCOPES, 'bun2too-website')
+        with:
+          {
+            node-version-file: bun2too-website/.nvmrc,
+            cache: npm,
+            cache-dependency-path: bun2too-website/package-lock.json,
+          }
+      - if: contains(env.SCOPES, 'bun2too-website')
+        run: npm ci --prefix bun2too-website
+
       - name: Mark round
-        if: steps.round.outputs.next <= 3
         env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh pr edit ${{ github.event.issue.number }} -R ${{ github.repository }} --add-label rework-${{ steps.round.outputs.next }}
+        run: |
+          gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND of 3"
+          gh pr edit "$PR" --add-label "rework-$ROUND"
       - uses: anthropics/claude-code-action@v1
-        if: steps.round.outputs.next <= 3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.FACTORY_TOKEN }}
           prompt: |
-            Act as the Rework role in docs/factory.md for PR #${{ github.event.issue.number }}.
-            This is rework round ${{ steps.round.outputs.next }} of 3.
-          claude_args: --max-turns 60
+            Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }} of 3.
+            The review to answer is ${{ github.event.comment.html_url }} (read it with `gh pr view ${{ env.PR }} --comments`).
+            Products this PR touches: ${{ env.SCOPES }}. Stay inside them.
+            Commit locally and do not push; the workflow checks your commits and pushes them.
+            Write your checklist to rework-report.md at the repository root and do not commit it.
+          claude_args: >-
+            --max-turns 80
+            --allowedTools "Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*)"
+
+      - name: Check the rework and push it
+        env: { GH_TOKEN: "${{ github.token }}", BEFORE: "${{ steps.base.outputs.sha }}" }
+        run: |
+          report=$(cat rework-report.md 2>/dev/null || echo "The Rework run wrote no report.")
+          rm -f rework-report.md
+          if [ "$(git rev-list --count "$BEFORE..HEAD")" = 0 ]; then
+            gh pr comment "$PR" --body "$(printf '## Rework round %s: no commits\n\n%s' "$ROUND" "$report")"
+            exit 0
+          fi
+          if ! problems=$(bash .github/scripts/rework-guard.sh "$BEFORE" $SCOPES); then
+            gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
+            gh pr edit "$PR" --add-label ready-for-human
+            gh pr comment "$PR" --body "$(printf '## Rework round %s: not pushed\n\nThe rework broke a factory rule, so its commits were discarded:\n\n%s\n\nHanding to a person.' "$ROUND" "$problems")"
+            exit 1
+          fi
+          git push origin HEAD
+          gh pr comment "$PR" --body "$(printf '## Rework round %s\n\n%s\n\nPushed %s. The review runs again on this push.' "$ROUND" "$report" "$(git log --format='`%h` %s' "$BEFORE..HEAD" | paste -sd ',' - | sed 's/,/, /g')")"
