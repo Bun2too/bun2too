@@ -162,19 +162,33 @@ jobs:
           MODEL: ${{ vars.FACTORY_PROVIDER || 'anthropic' }} ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
+          # The verdict is the review's last line and nothing else; text quoted earlier in the
+          # review (from a diff, say) cannot set it. The footer line is skipped.
+          last_verdict() {
+            grep -v '^[[:space:]]*$' | grep -v '^<sub>' | tail -n 1 | tr -d '*`' |
+              sed -nE 's/^[[:space:]]*VERDICT: (PASS|FAIL|INCONCLUSIVE)[[:space:]]*$/\1/p'
+          }
+          verdict=""
           if [ -n "$EARLIER" ]; then
-            body=$(gh api "repos/$GH_REPO/issues/comments/${EARLIER##*-}" -q .body)
+            verdict=$(gh api "repos/$GH_REPO/issues/comments/${EARLIER##*-}" -q .body | last_verdict)
             url=$EARLIER
-          elif [ -s in/review.md ] && grep -qE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' in/review.md; then
+          elif [ -s in/review.md ]; then
+            verdict=$(last_verdict < in/review.md)
+          fi
+          if [ -z "$EARLIER" ] && [ -n "$verdict" ]; then
             reviewer=$MODEL; grep -q '^## CI$' in/review.md && reviewer="CI (no model)"
-            body=$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s</sub>' "$HEAD_SHA" "$(head -c 60000 in/review.md)" "$reviewer")
-            url=$(gh pr comment "$PR" --body "$body")
-          else
+            text=$(cat in/review.md)
+            # GitHub caps a comment at 65,536 characters. Cut the middle, never the verdict.
+            if [ ${#text} -gt 60000 ]; then
+              text=$(printf '%s\n\n(Review cut at 60,000 characters; the full text is in the run'"'"'s review artifact.)\n\nVERDICT: %s' "${text:0:60000}" "$verdict")
+            fi
+            url=$(gh pr comment "$PR" --body "$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s</sub>' "$HEAD_SHA" "$text" "$reviewer")")
+          elif [ -z "$verdict" ]; then
+            [ -s in/review.md ] && echo "agent step finished, but the review does not end with a VERDICT line" > in/cause.txt
             cause=$(head -c 600 in/cause.txt 2>/dev/null || echo "the review job did not finish")
             gh pr comment "$PR" --body "$(printf '## Factory review did not complete\n\nNo review was written for `%s` (%s).\n\nRun log: %s\n\nThere is no verdict, so no rework starts. Push a fix or re-run this workflow once the cause is fixed.' "$HEAD_SHA" "$cause" "$RUN_URL")"
             exit 1
           fi
-          verdict=$(printf '%s' "$body" | grep -oE 'VERDICT: (PASS|FAIL|INCONCLUSIVE)' | tail -n 1 | cut -d' ' -f2)
           { echo "verdict=$verdict"; echo "url=$url"; } >> "$GITHUB_OUTPUT"
           echo "Verdict: $verdict ($url)"
           [ "$verdict" = PASS ]

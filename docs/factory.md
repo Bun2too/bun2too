@@ -49,7 +49,7 @@ If you need product judgment or credentials, stop. Comment the exact question on
 
 Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three reviewers run in parallel, each in a fresh context, and post one comment. Its first line names the reviewed commit and its last line is the verdict: `PASS`, `FAIL` (starts Rework) or `INCONCLUSIVE` (a reviewer could not finish; a person decides).
 
-The loop lives in one workflow, `agent-review.yml`, so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
+The loop lives in one workflow, `agent-review.yml` (decision: [ADR 0005](adr/0005-factory-review-loop-merges-product-prs.md)), so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
 
 1. A push to the PR starts the run. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
 2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent writes the review to `.factory/review.md`, and the workflow posts it. The check passes only on `PASS`.
