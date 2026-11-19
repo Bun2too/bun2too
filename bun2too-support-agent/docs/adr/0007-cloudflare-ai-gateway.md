@@ -20,7 +20,7 @@ All model calls in qa and prod go through Cloudflare AI Gateway, one gateway per
 - Any other combination (one ID, or IDs without a token) stops the agents service at start-up, before it reports healthy. With the gateway on, so does a non-Anthropic model, which has no gateway route; with it off, any provider is built directly. Offline mode (`RELAY_OFFLINE=1`, used by tests and evals) builds no models, so it skips this check.
 - Every call sends `cf-aig-collect-log-payload: false`, so Cloudflare keeps token, cost and latency metadata but never prompts or responses, and `cf-aig-skip-cache: true`, so a cached answer can never reach another customer even if someone turns caching on. Both are enforced in code, not left to dashboard settings.
 - The provider key goes out the way the Anthropic SDK sends it, as `Authorization: Bearer`, and the gateway forwards it. The Anthropic key stays in our secrets.
-- The gateway token lives in a private attribute of the model, not in `default_headers`. Model fields appear in `repr()`, in `dumpd()` and in the payload every LangChain callback (LangSmith included) receives; private attributes do not. A test guards this.
+- The gateway token lives in a private attribute of the model, not in its fields (`default_headers` included); it joins the SDK client's headers only when the client is built. Model fields appear in `repr()`, in `dumpd()` and in the payload every LangChain callback (LangSmith included) receives; private attributes do not. A test guards this.
 
 The settings arrive through `SUPPORT_RUNTIME_SECRETS` like every other runtime secret ([runtime secrets](../runtime-secrets.md)). The gateways are created once in the Cloudflare dashboard; they hold no state we need to manage as code.
 
