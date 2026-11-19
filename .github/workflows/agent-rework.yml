@@ -29,6 +29,11 @@ jobs:
         id: plan
         env: { GH_TOKEN: "${{ github.token }}", MAX_ROUNDS: "${{ vars.FACTORY_MAX_ROUNDS || '3' }}" }
         run: |
+          # A bad value must never lift the cap.
+          if ! [[ "$MAX_ROUNDS" =~ ^[1-9][0-9]?$ ]]; then
+            echo "::warning::FACTORY_MAX_ROUNDS='$MAX_ROUNDS' is not a number from 1 to 99; using 3"
+            MAX_ROUNDS=3
+          fi
           labels=$(gh pr view "$PR" --json labels -q '.labels[].name')
           n=$(echo "$labels" | sed -n 's/^rework-\([0-9]*\)$/\1/p' | sort -n | tail -n 1)
           n=${n:-0}
@@ -218,5 +223,7 @@ jobs:
             gh pr comment "$PR" --body "$(printf '## Rework round %s: not pushed\n\nThe rework broke a factory rule, so its commits were discarded:\n\n%s\n\nHanding to a person.' "$ROUND" "$problems")"
             exit 1
           fi
-          gh pr comment "$PR" --body "$(printf '## Rework round %s\n\n%s\n\nPushing %s. The review runs again on this push.' "$ROUND" "$report" "$(git log --format='`%h` %s' "$BEFORE..HEAD" | paste -sd ',' - | sed 's/,/, /g')")"
+          commits=$(git log --format='`%h` %s' "$BEFORE..HEAD" | paste -sd ',' - | sed 's/,/, /g')
+          # The push starts the next review, which may cancel this job, so the comment is quick.
           git -c http.extraheader="$auth" push --no-verify origin "HEAD:refs/heads/$BRANCH"
+          gh pr comment "$PR" --body "$(printf '## Rework round %s\n\n%s\n\nPushed %s. The review runs again on this push.' "$ROUND" "$report" "$commits")"
