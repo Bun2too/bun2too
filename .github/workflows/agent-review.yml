@@ -100,7 +100,8 @@ jobs:
           model: ${{ vars.FACTORY_MODEL }}
           max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '0.50' }}
           max-turns: "30"
-          github-token: ${{ steps.app.outputs.token }}
+          # The workflow token, not the app's: the agent never holds a token that can push or merge.
+          github-token: ${{ github.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
