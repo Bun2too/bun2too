@@ -1,5 +1,5 @@
 name: agent-review
-# One loop per PR: wait for CI, review, and on FAIL rework the PR in the same run.
+# One loop per PR: wait for CI, review, then merge on PASS or rework the PR in the same run.
 # The rework pushes to the PR, which starts this workflow again, until the review
 # passes, three rework rounds run out, or something needs a person.
 on:
@@ -28,7 +28,13 @@ jobs:
     outputs:
       verdict: ${{ steps.verdict.outputs.verdict }}
       review_url: ${{ steps.verdict.outputs.url }}
+      ci: ${{ steps.ci.outputs.result }}
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - name: Wait for CI on this commit
@@ -53,9 +59,9 @@ jobs:
         continue-on-error: true
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Our own token: the Claude GitHub app refuses to run on a PR that edits this file,
-          # and its pushes and comments would not start the next round.
-          github_token: ${{ secrets.FACTORY_TOKEN }}
+          # The factory app's token: the Claude GitHub app refuses to run on a PR that edits
+          # this file, and pushes made with the workflow token would not start the next round.
+          github_token: ${{ steps.app.outputs.token }}
           # The repo is private; without this a failed review leaves no reason in the log.
           show_full_output: true
           prompt: |
@@ -70,11 +76,11 @@ jobs:
         id: verdict
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           OUTCOME: ${{ steps.claude.outcome }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
-          me=$(gh api user -q .login)
+          me="${{ steps.app.outputs.app-slug }}[bot]"
           review=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
             --jq ".[] | select(.user.login == \"$me\" and (.body | contains(\"Reviewed commit: $HEAD_SHA\"))) | {url: .html_url, body}" |
             jq -s 'last // empty')
@@ -95,3 +101,31 @@ jobs:
       pr: ${{ github.event.pull_request.number }}
       review_url: ${{ needs.review.outputs.review_url }}
     secrets: inherit
+
+  merge:
+    needs: review
+    if: ${{ !cancelled() && needs.review.outputs.verdict == 'PASS' && needs.review.outputs.ci == 'passed' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - name: Merge the reviewed commit
+        env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }
+        run: |
+          if gh pr diff "$PR" --name-only | grep -qE '^(\.claude|\.cursor|\.github)/|(^|/)(AGENTS|CLAUDE)\.md$|^docs/(factory|sdlc)\.md$'; then
+            gh pr comment "$PR" --body "Review and CI passed. This PR changes the factory, so a person merges it (AGENTS.md rule 10)."
+            exit 0
+          fi
+          # --match-head-commit: never merge a commit the review did not see.
+          if ! out=$(gh pr merge "$PR" --rebase --match-head-commit "$HEAD_SHA" 2>&1); then
+            gh pr comment "$PR" --body "$(printf 'Review and CI passed, but the merge failed:\n\n```\n%s\n```' "$out")"
+            exit 1
+          fi

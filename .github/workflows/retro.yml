@@ -12,12 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
+        with: { fetch-depth: 0, token: "${{ steps.app.outputs.token }}" }
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.FACTORY_TOKEN }}
+          github_token: ${{ steps.app.outputs.token }}
           prompt: |
             Act as the Retro role in docs/factory.md for merged PR #${{ github.event.pull_request.number }}.
             Add enforcers to the touched product's docs/factory/enforcement.md (create it if the product has none). If nothing recurred, do nothing.

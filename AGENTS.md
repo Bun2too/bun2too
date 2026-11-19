@@ -40,7 +40,7 @@ In Claude Code, `/review` is a built-in command; use `/agent-skills:review` for 
 6. **Respect existing work.** Run `git status --short` before editing. Never reset, discard, stage or commit someone else's uncommitted changes to make your own change fit.
 7. **Secrets stay out.** Never read, print, commit or paste `.env*`, tokens or provider responses that contain secrets. Runtime secrets live in GitHub environment secrets and HCP Terraform, never in code, docs, skills or agent context.
 8. **Hard-to-reverse decisions get an ADR**: organisation-wide in `docs/adr/`, product-specific in the product's `docs/adr/`.
-9. **Agents never push to `main`, force-push, merge, or change CI permissions.** People merge. Deploys to prod need a human approval in the `support-prod` GitHub environment.
+9. **Agents never push to `main`, force-push, or change CI permissions.** Only the factory's review loop merges, and only a product PR whose CI and review both passed on the exact commit it merges. People merge factory PRs (rule 10). Deploys to prod need a human approval in the `support-prod` GitHub environment.
 10. **The factory changes only with human review.** Changes under `.claude/`, `.cursor/`, `.github/`, any `AGENTS.md` or `CLAUDE.md`, `docs/factory.md` and `docs/sdlc.md` are never auto-merged.
 
 ## Shared agents and skills

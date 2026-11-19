@@ -16,8 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, token: "${{ secrets.FACTORY_TOKEN }}" }
+        with: { fetch-depth: 0, token: "${{ steps.app.outputs.token }}" }
       - uses: pnpm/action-setup@v4
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
@@ -33,6 +38,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.FACTORY_TOKEN }}
+          github_token: ${{ steps.app.outputs.token }}
           prompt: Act as the Implement role in docs/factory.md for issue #${{ github.event.issue.number }}. Follow the lifecycle in docs/sdlc.md (/build) and the AGENTS.md of the product the issue's area label names.
           claude_args: --max-turns 120

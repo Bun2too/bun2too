@@ -10,7 +10,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | ------------- | -------------------------------------------------------- | ---------------- | ------------------------------------------ | --------------------------------------------- |
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
-| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Rework on FAIL   | merges on PASS                             | concurrency group per PR, cancel in progress  |
+| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Merge on PASS, Rework on FAIL | merges factory PRs only          | concurrency group per PR, cancel in progress  |
 | **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after 3 rounds, a guard failure, or a round with no fix | labels `rework-1..3` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
@@ -54,11 +54,12 @@ The loop lives in one workflow, `agent-review.yml`, so a PR is changed, checked,
 1. A push to the PR starts the run. It waits for `ci` on that commit and hands any failing step to the reviewers as a Critical finding.
 2. The review posts its comment. The check passes only on `PASS`.
 3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
-4. The loop stops at `PASS` (a person merges), or with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
+4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge.
+5. Otherwise the loop stops with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
 
 If the run ends without that comment (an API error, a usage limit, a crash), the workflow posts "Factory review did not complete" with the run link and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.
 
-The agents run with `FACTORY_TOKEN`, not the Claude GitHub app. The app refuses to run on a PR that edits its own workflow, and pushes made with the default workflow token do not start new runs, so neither would close the loop.
+The agents run as the `bun2too-software-factory` GitHub App, not the Claude GitHub app. The Claude app refuses to run on a PR that edits its own workflow, and pushes made with the default workflow token do not start new runs, so neither would close the loop.
 
 ### Rework
 
@@ -99,13 +100,13 @@ Read the merged PR, its issue, its reviews and its rework commits. For each mist
 
 1. **Automated checks:** each product's check command in `ci.yml`, plus `gitleaks`.
 2. **Automated review:** a separate run with no memory of the implementation.
-3. **Human review:** a person merges every PR and approves every prod deploy.
+3. **Human review:** a person merges every factory PR and approves every prod deploy. Product PRs merge when CI and the review pass.
 
 Start slow: a person applies `ready-for-agent` until ten agent PRs in a row merge without human rework. After that, Explore may apply it.
 
 ## Spend and safety
 
 - Every agent workflow sets `timeout-minutes` and `--max-turns`.
-- Agent runs use `FACTORY_TOKEN`, which grants contents, pull-requests and issues write. It cannot change workflows, and branch rules protect `main` and `.github/`.
+- Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
 - Runs that touch the factory (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) are never auto-merged and never chained.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.

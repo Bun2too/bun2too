@@ -9,15 +9,20 @@ concurrency:
   cancel-in-progress: true
 jobs:
   fix:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'bun2too-factory[bot]'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'bun2too-software-factory[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
         with:
           {
             ref: "${{ github.head_ref }}",
-            token: "${{ secrets.FACTORY_TOKEN }}",
+            token: "${{ steps.app.outputs.token }}",
           }
       - name: Does the PR touch the support agent?
         id: touched
@@ -42,8 +47,8 @@ jobs:
       - name: Commit fixes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            git config user.name "bun2too-factory[bot]"
-            git config user.email "bun2too-factory[bot]@users.noreply.github.com"
+            git config user.name "bun2too-software-factory[bot]"
+            git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
             git commit -am "style(support-agent): autofix formatting and lint"
             git push
           fi
