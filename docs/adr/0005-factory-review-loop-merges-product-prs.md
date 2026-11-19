@@ -18,7 +18,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 
   A person's push restarts the loop.
 - **The factory acts as the `bun2too-software-factory` GitHub App**, with a token minted per run.
-- **Agents never hold that token.** They run in jobs of their own with a read-only workflow token and only the model provider's key. Their output (a review file, or commits as patches) goes to a separate job on a fresh runner. That job posts the review, or applies the patches to a clean clone. It checks them with `rework-guard.sh` from the branch's own history, then pushes.
+- **Loop agents never hold that token.** Review, Rework and the formatting autofix run the PR's code or a model in jobs of their own with a read-only workflow token and only the model provider's key. Their output (a review file, or commits as patches) goes to a separate job on a fresh runner. That job posts the review, or applies the patches to a clean clone. It checks them with `rework-guard.sh` from the branch's own history, then pushes.
 - **Provider, model and spend are settings:**
   - `FACTORY_PROVIDER`: anthropic, openai or gemini
   - `FACTORY_MODEL`
@@ -30,6 +30,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 ## Consequences
 
 - **A product PR can merge on a model's judgement alone.** Injected text in a diff could talk the reviewer into PASS. CI, the guard, same-repository branches and people merging factory PRs bound this. The audit trail is the review comment on each merged PR.
-- **The rework agent runs repository code** (tests, the product's check command), so it can reach the network while the model key is in its environment. A prompt-injected agent could leak that key. Accepted for now and bounded: the factory's key comes from its own provider workspace with a monthly spend limit, and holds nothing else. Restricting the agent job's network egress is the follow-up that closes this. The review agent cannot write files at all (its final message is the review), so it has no such route.
+- **The rework agent runs repository code** (tests, the product's check command), so it can reach the network while the model key is in its environment. A prompt-injected agent could leak that key. Accepted for now and bounded: the factory's key comes from its own provider workspace with a monthly spend limit, and holds nothing else. Restricting the agent job's network egress is the follow-up that closes this. The review agent has no file-writing tools: its final message is the review, and `git diff/log/show --output` and `--ext-diff` are denied. So it has no such route.
 - **Factory changes cannot be proven by the factory before merge.** Workflows run from the PR, but a person still merges them, and the first real run of a change is on the PR that carries it.
+- **Implement, Ratchet and Retro still hold the app token while their agent runs**, so they are off unless `FACTORY_LEGACY_AGENTS=true`, until they move to the same split-job pattern. Explore (triage) only comments and labels issues.
 - **Codex and Gemini review in one pass**, where Claude Code can run three reviewers in parallel. Their budget caps live in the provider's console, not in the workflow.

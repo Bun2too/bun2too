@@ -117,11 +117,12 @@ The factory is set with repository variables (Settings → Secrets and variables
 | `FACTORY_PROVIDER`       | `anthropic`         | `anthropic`, `openai` (Codex) or `gemini` (Gemini CLI) for Review and Rework                        |
 | `FACTORY_MODEL`          | `claude-sonnet-5-5` | The model for that provider. Required for `openai` and `gemini`                                     |
 | `FACTORY_MAX_BUDGET_USD` | `0.50` review, `1.00` other runs | Hard spend cap per run. Enforced by Claude Code only; for the others, set a limit in the provider's console |
-| `FACTORY_MAX_ROUNDS`     | `3`                 | Rework rounds before a person takes over                                                            |
+| `FACTORY_MAX_ROUNDS`     | `3`                 | Rework rounds before a person takes over (1–99; anything else means 3)                              |
+| `FACTORY_LEGACY_AGENTS`  | off                 | `true` turns on Implement, Ratchet and Retro, whose agents still hold the app token (ADR 0005)      |
 
 The provider's key lives in the `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` secret. Give the factory its own key, from a workspace or project with a monthly spend limit, so its usage shows up separately in the provider's console.
 
-Explore, Implement, Ratchet and Retro still post to GitHub from inside the agent, so they run only when the provider is `anthropic`. They honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`.
+Explore, Implement, Ratchet and Retro still post to GitHub from inside the agent, so they run only when the provider is `anthropic`. Implement, Ratchet and Retro are also off unless `FACTORY_LEGACY_AGENTS=true`. They honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`.
 
 Worst case per PR: one review per commit, plus each rework round and its review. With the defaults that is about $0.50 + 3 × ($1.00 + $0.50) = $5.00. A red CI and a re-triggered review of the same commit cost nothing.
 

@@ -1,29 +1,27 @@
 name: hygiene-autofix
+# Formats a PR's support-agent code. `pnpm fix` runs the PR's own code, so it runs in a
+# read-only job with no app token; a fresh-runner job applies the result and pushes it.
 on:
   pull_request:
     types: [opened, synchronize]
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: autofix-${{ github.head_ref }}
   cancel-in-progress: true
+env:
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 jobs:
   fix:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'bun2too-software-factory[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions: { contents: read, pull-requests: read }
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
-        id: app
-        with:
-          app-id: ${{ vars.FACTORY_APP_ID }}
-          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
-        with:
-          {
-            ref: "${{ github.head_ref }}",
-            token: "${{ steps.app.outputs.token }}",
-          }
+        with: { ref: "${{ env.HEAD_SHA }}", persist-credentials: false }
       - name: Does the PR touch the support agent?
         id: touched
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -44,11 +42,46 @@ jobs:
       - if: steps.touched.outputs.support != '0'
         working-directory: bun2too-support-agent
         run: pnpm install --frozen-lockfile && uv sync --directory services/agents --frozen && pnpm fix
-      - name: Commit fixes
+      - name: Export the fixes
+        id: diff
         run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            git config user.name "bun2too-software-factory[bot]"
-            git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
-            git commit -am "style(support-agent): autofix formatting and lint"
-            git push
+          mkdir -p "$RUNNER_TEMP/out"
+          git -c core.hooksPath=/dev/null -c core.fsmonitor=false diff --binary --no-ext-diff -- bun2too-support-agent > "$RUNNER_TEMP/out/autofix.patch"
+          echo "changed=$([ -s "$RUNNER_TEMP/out/autofix.patch" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.diff.outputs.changed == 'true'
+        with: { name: autofix, path: "${{ runner.temp }}/out/autofix.patch" }
+
+  # A fresh runner: the only job here that holds the app token runs none of the PR's code.
+  push:
+    needs: fix
+    if: needs.fix.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: autofix, path: in }
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+      - name: Commit and push the fixes
+        env: { PUSH_TOKEN: "${{ steps.app.outputs.token }}", BRANCH: "${{ github.head_ref }}", GH_REPO: "${{ github.repository }}" }
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          echo "::add-mask::${auth#AUTHORIZATION: basic }"
+          git -c http.extraheader="$auth" clone -q --single-branch --branch "$BRANCH" "https://github.com/$GH_REPO.git" clean
+          cd clean
+          git config core.hooksPath /dev/null
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then echo "The branch moved; the next push gets its own autofix."; exit 0; fi
+          # Formatting only, and only inside the support agent.
+          if git apply --numstat ../in/autofix.patch | awk '{ print $3 }' | grep -v '^bun2too-support-agent/'; then
+            echo "::error::The autofix patch touches files outside bun2too-support-agent"; exit 1
           fi
+          git apply ../in/autofix.patch
+          git config user.name "bun2too-software-factory[bot]"
+          git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
+          git commit -qam "style(support-agent): autofix formatting and lint"
+          git -c http.extraheader="$auth" push --no-verify origin "HEAD:refs/heads/$BRANCH"

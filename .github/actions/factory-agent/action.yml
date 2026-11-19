@@ -55,6 +55,7 @@ runs:
           --max-turns ${{ inputs.max-turns }}
           --max-budget-usd ${{ inputs.max-budget-usd }}
           --allowedTools "${{ inputs.allowed-tools }}"
+          --disallowedTools "Bash(git diff --output:*),Bash(git log --output:*),Bash(git show --output:*),Bash(git diff --ext-diff:*),Bash(git show --ext-diff:*),Bash(git log --ext-diff:*)"
 
     - name: Run Codex
       id: codex
