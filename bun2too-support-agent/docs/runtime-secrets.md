@@ -77,7 +77,7 @@ The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants
 | `CF_AIG_GATEWAY_ID` | The gateway's name in that account | `relay-qa`, `relay-prod` |
 | `CF_AIG_TOKEN`      | The gateway's authentication token | (secret)                 |
 
-Leave all three out to call Anthropic directly (local development). Setting only one of the two IDs stops the agents service at start-up.
+Leave both IDs out to call Anthropic directly (local development, or the rollback if Cloudflare is down); the service then logs `model calls bypass Cloudflare AI Gateway` at start-up. Setting only one ID, or the IDs without the token, stops the agents service at start-up.
 
 **How to get them:**
 
@@ -86,10 +86,10 @@ Leave all three out to call Anthropic directly (local development). Setting only
 3. In the gateway's **Settings**:
    - turn on **Authenticated Gateway**,
    - select **Create authentication token** and copy it once. This is `CF_AIG_TOKEN`.
-   - Leave **Cache** off; support answers are personal.
+   - Leave **Cache** off; support answers are personal. Relay also sends `cf-aig-skip-cache: true` on every call.
    - Optionally set **Rate limiting** and a spend alert for the environment.
 4. Leave the Anthropic key with Relay (`ANTHROPIC_API_KEY` above). The gateway forwards it; do not also store it in the gateway.
-5. After the next deploy, open the gateway's **Analytics** and **Logs**: requests, tokens and cost should appear, and log entries should show no request or response bodies.
+5. After the next deploy, open the gateway's **Analytics** and **Logs**: requests, tokens and cost should appear, and log entries should show no request or response bodies. Keep **DLP**, **Guardrails** and **Logpush** off for these gateways unless a decision record allows them; they process or export the payloads.
 
 ### `BUN2TOO_JIRA_*` (Jira Cloud)
 
