@@ -11,8 +11,10 @@ concurrency:
   group: agent-implement-${{ github.event.issue.number }}
   cancel-in-progress: false
 jobs:
+  # Off unless FACTORY_LEGACY_AGENTS=true: this agent still holds the app token while it
+  # runs, unlike Review and Rework (ADR 0005). Moving it to the split-job pattern is open.
   implement:
-    if: vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && github.event.label.name == 'ready-for-agent'
+    if: vars.FACTORY_ENABLED != 'false' && vars.FACTORY_LEGACY_AGENTS == 'true' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && github.event.label.name == 'ready-for-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

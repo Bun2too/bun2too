@@ -140,7 +140,8 @@ jobs:
   # A fresh runner: the only job here that holds the app token is one no agent touched.
   verdict:
     needs: [prepare, review]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    # Runs when prepare failed too, so a broken run still says so on the PR.
+    if: ${{ !cancelled() && needs.prepare.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: { contents: read }
@@ -162,6 +163,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           EARLIER: ${{ needs.prepare.outputs.earlier }}
+          PREPARE: ${{ needs.prepare.result }}
           MODEL: ${{ vars.FACTORY_PROVIDER || 'anthropic' }} ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
@@ -172,7 +174,10 @@ jobs:
               sed -nE 's/^[[:space:]]*VERDICT: (PASS|FAIL|INCONCLUSIVE)[[:space:]]*$/\1/p'
           }
           verdict=""
-          if [ -n "$EARLIER" ]; then
+          mkdir -p in
+          if [ "$PREPARE" != success ]; then
+            echo "the prepare job failed before the review, while reading earlier reviews or waiting for CI" > in/cause.txt
+          elif [ -n "$EARLIER" ]; then
             verdict=$(gh api "repos/$GH_REPO/issues/comments/${EARLIER##*-}" -q .body | last_verdict)
             url=$EARLIER
           elif [ -s in/review.md ]; then
