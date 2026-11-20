@@ -64,12 +64,15 @@ runs:
     # - no hooks, and (with --strict-mcp-config) no MCP servers from the checkout: both would
     #   run outside the sandbox, and a PR could add them
     # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on the step strips the key from every command's environment.
+    # - Rework (not read-only) may run any command the sandbox contains, as it can already
+    #   through node or python3; the reviewer stays on its allowlist of read-only git commands
     - name: Configure the Claude Code sandbox
       id: claude-settings
       if: inputs.provider == 'anthropic'
       shell: bash
+      env: { READ_ONLY: "${{ inputs.read-only }}" }
       run: |
-        json=$(jq -cn --arg home "$HOME" '{
+        json=$(jq -cn --arg home "$HOME" --arg readonly "$READ_ONLY" '{
           permissions: {
             blockReadsOutsideWorkingDirectories: true,
             blockWritesOutsideWorkingDirectories: true,
@@ -83,7 +86,7 @@ runs:
             enabled: true,
             failIfUnavailable: true,
             allowUnsandboxedCommands: false,
-            autoAllowBashIfSandboxed: false,
+            autoAllowBashIfSandboxed: ($readonly != "true"),
             network: { allowedDomains: [], strictAllowlist: true }
           }
         }')

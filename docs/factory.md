@@ -54,7 +54,7 @@ The loop lives in one workflow, `agent-review.yml` (decision: [ADR 0005](adr/000
 1. A push to the PR starts the run. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
 2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent reviews without write access; its final message is the review, which the workflow posts. The check passes only on `PASS`.
 3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
-4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge.
+4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge. Factory paths are listed once, in `.github/scripts/factory-paths.regex`, which the merge gate reads from the base branch and the rework guard reads from the PR's history.
 5. Otherwise the loop stops with `ready-for-human` when three rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
 
 If the run ends without a review (an API error, a spent budget, a crash), the workflow posts "Factory review did not complete" with the cause and the run link, and fails the check, so a missing review is never silent. Agent output is shown in full in the run log.

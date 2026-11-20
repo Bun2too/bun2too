@@ -9,6 +9,10 @@ before=$1
 shift
 allowed=" $* "
 violations=()
+# Factory paths, shared with the merge gate in agent-review.yml. Read from the same commit
+# as this guard, never from what the rework wrote.
+factory_re=$(git show "$before:.github/scripts/factory-paths.regex" 2>/dev/null | head -n 1)
+[ -n "$factory_re" ] || { echo "- cannot read .github/scripts/factory-paths.regex at $before"; exit 1; }
 
 scope_of() {
   case "$1" in
@@ -25,9 +29,9 @@ done
 
 while read -r f; do
   [ -n "$f" ] || continue
-  # Agent config at any depth: a product's .claude/ or an .mcp.json could make the next
-  # factory run load hooks or MCP servers outside the sandbox.
-  if [[ "$f" =~ (^|/)(\.claude|\.cursor|\.github)/ || "$f" =~ (^|/)(AGENTS|CLAUDE)\.md$ || "$f" =~ (^|/)\.mcp\.json$ || "$f" == docs/factory.md || "$f" == docs/sdlc.md ]]; then
+  # Agent config counts at any depth: a product's .claude/ or an .mcp.json could make the
+  # next factory run load hooks or MCP servers outside the sandbox.
+  if [[ "$f" =~ $factory_re ]]; then
     violations+=("$f is a factory file; only a person changes those")
   elif [[ "$f" == rework-report.md || "$f" == .factory/* ]]; then
     violations+=("$f was committed; it is the run's input or report, not code")

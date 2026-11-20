@@ -170,10 +170,14 @@ jobs:
           out="$RUNNER_TEMP/out" && mkdir -p "$out"
           cp .factory/rework-report.md "$out/report.md" 2>/dev/null ||
             echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}" > "$out/report.md"
-          # The agent could edit .git/config, so git never runs with it here: a bare clone
-          # copies only the objects and refs, and the patches come from that clone.
-          git -c core.hooksPath=/dev/null clone -q --bare --no-local "file://$PWD" "$RUNNER_TEMP/export.git"
-          git --git-dir="$RUNNER_TEMP/export.git" -c core.hooksPath=/dev/null \
+          # The agent could have edited .git/config, hooks or attributes, so git never runs on
+          # this repository. It runs on a copy with those removed and a minimal config, and
+          # reads no global or system config.
+          exp="$RUNNER_TEMP/export.git"
+          cp -R .git "$exp"
+          rm -rf "$exp/config" "$exp/hooks" "$exp/info/attributes" "$exp/worktrees"
+          printf '[core]\n\trepositoryformatversion = 0\n\tbare = true\n' > "$exp/config"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git --git-dir="$exp" -c core.hooksPath=/dev/null \
             format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
