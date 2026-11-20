@@ -129,7 +129,7 @@ Worst case per PR: one review per commit, plus each rework round and its review.
 - Every agent workflow sets `timeout-minutes` and a turn cap.
 - Third-party actions that receive a provider key or the app token are pinned to a commit SHA. Gemini CLI, which runs without confirmations, gets only the tools in the run's allowlist.
 - Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
-- Runs that touch the factory (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) are never auto-merged and never chained.
+- PRs that touch the factory (the paths in `.github/scripts/factory-paths.regex`) are never auto-merged. The loop still reviews them and runs Rework on their product files. Rework never edits a factory file: findings there are listed as **needs a person**, and a round with nothing else to fix hands the PR over.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.
 
 ### Agents that run code (AGENTS.md rule 11)
