@@ -16,7 +16,8 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
   - after a round that fixed nothing, for example because the findings are in factory files
   - after a guard rejection
 
-  A person's push restarts the loop.
+  A person restarts the loop by adding the `agent-review` label again.
+- **The loop spends only when a person asks** (AGENTS.md rule 12, added 2026-11-20). Running on every push cost 21 reviews, 24 sandbox probes and 15 rework rounds on one PR in one day (2026-11-20, about $3.65 on Haiku), none of them asked for. Now the `agent-review` label starts a loop and the run takes it off. Only the loop's own rework push, made after the round puts the label back, continues it. `FACTORY_MAX_RUNS_PER_DAY` (default 10) caps loop runs a day.
 - **The factory acts as the `bun2too-software-factory` GitHub App**, with a token minted per run.
 - **Loop agents never hold that token.** Review, Rework and the formatting autofix run the PR's code or a model in jobs of their own with a read-only workflow token and only the model provider's key. Their output (a review file, or commits as patches) goes to a separate job on a fresh runner. That job posts the review, or applies the patches to a clean clone. It checks them with `rework-guard.sh` from the branch's own history, then pushes.
 - **Provider, model and spend are settings:**
