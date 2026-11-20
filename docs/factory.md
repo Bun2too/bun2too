@@ -89,7 +89,7 @@ Its push starts a fresh review, so every round is reviewed again.
 
 ### Hygiene
 
-Run the product's autofix (`pnpm fix` for the support agent) and commit formatting-only changes as `bun2too-factory[bot]`.
+Run the product's autofix (`pnpm fix` for the support agent) and commit formatting-only changes as `bun2too-software-factory[bot]`.
 
 ### Ratchet
 
