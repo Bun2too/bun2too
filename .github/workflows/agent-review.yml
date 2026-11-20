@@ -45,12 +45,15 @@ jobs:
           for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
             gh pr edit "$PR" --remove-label "$l"
           done
+      # Only a model's review is reused. A red-CI "review" is not, so re-running a flaky
+      # CI and then this workflow reviews the commit for real.
       - name: Reuse an earlier review of this commit
         id: earlier
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           url=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
-            --jq ".[] | select(.user.login == \"$FACTORY_BOT\" and (.body | startswith(\"Reviewed commit: $HEAD_SHA\"))) | .html_url" | tail -n 1)
+            --jq ".[] | select(.user.login == \"$FACTORY_BOT\" and (.body | startswith(\"Reviewed commit: $HEAD_SHA\"))
+                  and (.body | contains(\"Reviewed by CI (no model)\") | not)) | .html_url" | tail -n 1)
           echo "url=$url" >> "$GITHUB_OUTPUT"
           [ -z "$url" ] || echo "This commit was already reviewed, so no model runs: $url"
       - name: Wait for CI on this commit
@@ -267,9 +270,16 @@ jobs:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - name: Merge the reviewed commit
-        env: { GH_TOKEN: "${{ steps.app.outputs.token }}", CI_TOKEN: "${{ github.token }}" }
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CI_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if gh pr diff "$PR" --name-only | grep -qE '^(\.claude|\.cursor|\.github)/|(^|/)(AGENTS|CLAUDE)\.md$|^docs/(factory|sdlc)\.md$'; then
+          # The factory-path list from the base branch: a PR cannot shrink it for itself.
+          # If it cannot be read, the PR counts as a factory PR, so nothing merges unchecked.
+          factory_re=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$BASE_SHA" 2>/dev/null | head -n 1)
+          if [ -z "$factory_re" ] || gh pr diff "$PR" --name-only | grep -qE "$factory_re"; then
             gh pr comment "$PR" --body "Review and CI passed. This PR changes the factory, so a person merges it (AGENTS.md rule 10)."
             exit 0
           fi

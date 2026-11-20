@@ -1,0 +1,1 @@
+(^|/)(\.claude|\.cursor|\.github)/|(^|/)(AGENTS|CLAUDE)\.md$|(^|/)\.mcp\.json$|^docs/(factory|sdlc)\.md$
