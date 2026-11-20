@@ -14,7 +14,12 @@ inputs:
   anthropic-api-key: { required: false, default: "" }
   openai-api-key: { required: false, default: "" }
   gemini-api-key: { required: false, default: "" }
-  read-only: { description: "true: the agent may not write files (Codex runs :read-only)", required: false, default: "false" }
+  read-only:
+    description: >-
+      true: the agent may not write files (Codex runs :read-only). false: it may also run the
+      PR's code, so AGENTS.md rule 11 applies: run factory-lockdown first, and Gemini is refused.
+    required: false
+    default: "false"
   output-file: { description: "Where to save the agent's final message", required: false, default: "" }
 outputs:
   cause:
@@ -28,6 +33,7 @@ runs:
       env:
         PROVIDER: ${{ inputs.provider }}
         MODEL: ${{ inputs.model }}
+        READ_ONLY: ${{ inputs.read-only }}
         HAS_KEY: ${{ (inputs.provider == 'anthropic' && inputs.anthropic-api-key != '') || (inputs.provider == 'openai' && inputs.openai-api-key != '') || (inputs.provider == 'gemini' && inputs.gemini-api-key != '') }}
       run: |
         case "$PROVIDER" in anthropic | openai | gemini) ;; *)
@@ -39,19 +45,58 @@ runs:
         if [ "$HAS_KEY" != true ]; then
           echo "::error::The secret for $PROVIDER is missing (ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY)"; exit 1
         fi
+        # Rule 11: Gemini CLI runs commands unsandboxed with the key in their environment.
+        if [ "$PROVIDER" = gemini ] && [ "$READ_ONLY" != true ]; then
+          echo "::error::Gemini CLI has no command sandbox here, so it cannot run an agent that runs code (AGENTS.md rule 11). Use anthropic or openai."; exit 1
+        fi
         echo "Factory agent: $PROVIDER ${MODEL:-claude-sonnet-5-5}"
+
+    # Rule 11, layers 1 and 2, written to ~/.claude/settings.json by claude-code-action:
+    # - every Bash command runs in the sandbox, with no network and no unsandboxed retry;
+    #   if the sandbox cannot start, Claude Code exits instead of running commands bare
+    # - nothing prompts, so anything not allowlisted is denied
+    # - the file tools read and write only the workspace and the toolchain caches, so they
+    #   cannot read the key from /proc or the runner's temp files
+    # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on the step strips the key from every command's environment.
+    - name: Configure the Claude Code sandbox
+      id: claude-settings
+      if: inputs.provider == 'anthropic'
+      shell: bash
+      run: |
+        json=$(jq -cn --arg home "$HOME" '{
+          permissions: {
+            blockReadsOutsideWorkingDirectories: true,
+            blockWritesOutsideWorkingDirectories: true,
+            denyInsteadOfPrompting: true,
+            disableBypassPermissionsMode: "disable",
+            additionalDirectories: [($home + "/.cache"), ($home + "/.local/share"), ($home + "/setup-pnpm")],
+            deny: ["WebFetch", "WebSearch", "Read(//proc/**)"]
+          },
+          sandbox: {
+            enabled: true,
+            failIfUnavailable: true,
+            allowUnsandboxedCommands: false,
+            autoAllowBashIfSandboxed: false,
+            network: { allowedDomains: [], strictAllowlist: true }
+          }
+        }')
+        echo "json=$json" >> "$GITHUB_OUTPUT"
 
     - name: Run Claude Code
       id: claude
       if: inputs.provider == 'anthropic'
       uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283
+      env:
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
       with:
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
         github_token: ${{ inputs.github-token }}
         show_full_output: true
+        settings: ${{ steps.claude-settings.outputs.json }}
         prompt: ${{ inputs.prompt }}
         claude_args: >-
           --model ${{ inputs.model || 'claude-sonnet-5-5' }}
+          --permission-mode dontAsk
           --max-turns ${{ inputs.max-turns }}
           --max-budget-usd ${{ inputs.max-budget-usd }}
           --allowedTools "${{ inputs.allowed-tools }}"
@@ -66,6 +111,8 @@ runs:
         model: ${{ inputs.model }}
         prompt: ${{ inputs.prompt }}
         # Writes inside the workspace, no network: the workflow does every GitHub write.
+        # The key stays in the action's API proxy, out of the commands' environment, and
+        # the default safety-strategy (drop-sudo) takes sudo and Docker away first.
         permission-profile: ${{ inputs.read-only == 'true' && ':read-only' || ':workspace' }}
 
     # Gemini CLI runs with --yolo, so limit it to the same tools Claude gets: the

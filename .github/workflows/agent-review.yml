@@ -95,6 +95,19 @@ jobs:
     # Read-only: this job runs the agent. It holds only the model provider's key.
     permissions: { contents: read, pull-requests: read }
     steps:
+      # AGENTS.md rule 11, layer 3: only the hosts this job needs. Keep this list in step
+      # with agent-rework.yml and factory-sandbox-check.yml.
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            api.anthropic.com:443 api.openai.com:443 generativelanguage.googleapis.com:443
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443 *.blob.core.windows.net:443
+            registry.npmjs.org:443 bun.sh:443 downloads.claude.ai:443
+            azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
       - uses: actions/checkout@v5
         with: { fetch-depth: 0, persist-credentials: false }
       - name: Write the PR context for the reviewer
@@ -102,6 +115,8 @@ jobs:
         run: |
           mkdir -p .factory && echo ".factory/" >> .git/info/exclude
           gh pr view "$PR" --json title,body,files -q '"# \(.title)\n\n\(.body)\n\nFiles:\n\(.files | map("- " + .path) | join("\n"))"' > .factory/pr.md
+      - uses: ./.github/actions/factory-lockdown
+        with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
       - uses: ./.github/actions/factory-agent
         id: agent
         continue-on-error: true
@@ -158,12 +173,24 @@ jobs:
         if: needs.prepare.outputs.earlier == ''
         continue-on-error: true
         with: { name: review, path: in }
+      # Rule 11, layer 4: nothing the agent wrote is posted if it holds a secret.
+      - uses: actions/checkout@v5
+        with: { sparse-checkout: .github/actions, persist-credentials: false, path: base }
+      - uses: ./base/.github/actions/secret-scan
+        id: scan
+        continue-on-error: true
+        with:
+          path: in
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
       - name: Post the review and read the verdict
         id: verdict
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           EARLIER: ${{ needs.prepare.outputs.earlier }}
           PREPARE: ${{ needs.prepare.result }}
+          LEAK: ${{ steps.scan.outputs.found || 'unscanned' }}
           MODEL: ${{ vars.FACTORY_PROVIDER || 'anthropic' }} ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
@@ -175,6 +202,14 @@ jobs:
           }
           verdict=""
           mkdir -p in
+          if [ "$LEAK" != false ]; then
+            rm -rf in && mkdir in
+            if [ "$LEAK" = true ]; then
+              echo "the agent's output contained a secret, so none of it was posted (AGENTS.md rule 11). Rotate the provider key" > in/cause.txt
+            else
+              echo "the secret scan of the agent's output did not run, so none of it was posted (AGENTS.md rule 11)" > in/cause.txt
+            fi
+          fi
           if [ "$PREPARE" != success ]; then
             echo "the prepare job failed before the review, while reading earlier reviews or waiting for CI" > in/cause.txt
           elif [ -n "$EARLIER" ]; then

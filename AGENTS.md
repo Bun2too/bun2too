@@ -42,6 +42,7 @@ In Claude Code, `/review` is a built-in command; use `/agent-skills:review` for 
 8. **Hard-to-reverse decisions get an ADR**: organisation-wide in `docs/adr/`, product-specific in the product's `docs/adr/`.
 9. **Agents never push to `main`, force-push, or change CI permissions.** Only the factory's review loop merges, and only a product PR whose CI and review both passed on the exact commit it merges. People merge factory PRs (rule 10). Deploys to prod need a human approval in the `support-prod` GitHub environment.
 10. **The factory changes only with human review.** Changes under `.claude/`, `.cursor/`, `.github/`, any `AGENTS.md` or `CLAUDE.md`, `docs/factory.md` and `docs/sdlc.md` are never auto-merged.
+11. **An agent that runs code cannot send secrets out.** A factory job that gives an agent a shell runs those commands with no network and no credentials in their environment, without `sudo`, behind an outbound allowlist. Its output is secret-scanned before anything is pushed. A role or provider that cannot meet this stays off. See [docs/factory.md](docs/factory.md#spend-and-safety).
 
 ## Shared agents and skills
 
