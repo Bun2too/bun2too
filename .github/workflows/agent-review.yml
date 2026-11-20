@@ -282,9 +282,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           # The factory-path list from the base branch: a PR cannot shrink it for itself.
-          # If it cannot be read, the PR counts as a factory PR, so nothing merges unchecked.
-          factory_re=$(gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$BASE_SHA" 2>/dev/null | head -n 1)
+          # Fail closed: unless the fetch succeeds and the list matches a known factory path,
+          # the PR counts as a factory PR. (On a 404, gh prints the error body to stdout.)
+          if fetched=$(gh api -H "Accept: application/vnd.github.raw" \
+                "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$BASE_SHA" 2>/dev/null) &&
+             factory_re=$(printf '%s\n' "$fetched" | head -n 1) &&
+             printf '%s\n' .github/workflows/ci.yml AGENTS.md | grep -qE "$factory_re"; then
+            echo "Factory paths from the base branch: $factory_re"
+          else
+            factory_re=""
+            echo "Could not read a valid factory-path list from the base branch; treating this as a factory PR."
+          fi
           # Old and new names both count, so renaming a factory file out of .github/ is caught.
           files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')
           if [ -z "$factory_re" ] || [ -z "$files" ] || printf '%s\n' "$files" | grep -qE "$factory_re"; then
