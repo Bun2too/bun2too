@@ -30,7 +30,14 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 ## Consequences
 
 - **A product PR can merge on a model's judgement alone.** Injected text in a diff could talk the reviewer into PASS. CI, the guard, same-repository branches and people merging factory PRs bound this. The audit trail is the review comment on each merged PR.
-- **The rework agent runs repository code** (tests, the product's check command), so it can reach the network while the model key is in its environment. A prompt-injected agent could leak that key. Accepted for now and bounded: the factory's key comes from its own provider workspace with a monthly spend limit, and holds nothing else. Restricting the agent job's network egress is the follow-up that closes this. The review agent has no file-writing tools: its final message is the review, and `git diff/log/show --output` and `--ext-diff` are denied. So it has no such route.
+- **The rework agent runs repository code** (tests, the product's check command) with the model key loaded in its job. That alone would let a prompt-injected agent or a compromised dependency leak the key. The owner chose to close this rather than accept it, so AGENTS.md rule 11 requires five layers for any agent that runs code. They are listed in docs/factory.md under "Spend and safety":
+  1. Dependencies install before the agent starts, and every command the agent runs goes through a sandbox with no network.
+  2. The model key is stripped from those commands' environment.
+  3. The job's outbound traffic is limited to an allowlist, and the runner account loses `sudo` and Docker before the agent starts, so it cannot lift the block.
+  4. The push job secret-scans the agent's patches and pushes nothing if a secret appears.
+  5. The factory's key comes from its own provider workspace with a monthly spend limit, and holds nothing else.
+
+  A provider that cannot sandbox commands (Gemini CLI today) does not run Rework. The review agent has no file-writing tools: its final message is the review, and `git diff/log/show --output` and `--ext-diff` are denied.
 - **Factory changes cannot be proven by the factory before merge.** Workflows run from the PR, but a person still merges them, and the first real run of a change is on the PR that carries it.
 - **Implement, Ratchet and Retro still hold the app token while their agent runs**, so they are off unless `FACTORY_LEGACY_AGENTS=true`, until they move to the same split-job pattern. Explore (triage) only comments and labels issues.
 - **Codex and Gemini review in one pass**, where Claude Code can run three reviewers in parallel. Their budget caps live in the provider's console, not in the workflow.

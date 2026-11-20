@@ -1,0 +1,44 @@
+name: secret-scan
+description: >-
+  AGENTS.md rule 11, layer 4: before a job posts or pushes what an agent wrote, scan it
+  for secrets. gitleaks catches any known key format; the factory's own model keys are
+  also matched as written and base64-encoded. Matches are never printed.
+inputs:
+  path: { description: "File or folder of agent output", required: true }
+  anthropic-api-key: { required: false, default: "" }
+  openai-api-key: { required: false, default: "" }
+  gemini-api-key: { required: false, default: "" }
+outputs:
+  found:
+    description: "true when the output holds a secret"
+    value: ${{ steps.scan.outputs.found }}
+runs:
+  using: composite
+  steps:
+    - name: Scan the agent's output for secrets
+      id: scan
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        KEY_1: ${{ inputs.anthropic-api-key }}
+        KEY_2: ${{ inputs.openai-api-key }}
+        KEY_3: ${{ inputs.gemini-api-key }}
+      run: |
+        found=false
+        if [ -e "$SCAN_PATH" ]; then
+          bin="$RUNNER_TEMP/gitleaks-bin" && mkdir -p "$bin"
+          curl -sSfL -o "$bin/gl.tgz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $bin/gl.tgz" | sha256sum -c --quiet
+          tar -xzf "$bin/gl.tgz" -C "$bin" gitleaks
+          # Known key formats only: the generic rule flags reviews that quote code about tokens.
+          printf '[extend]\nuseDefault = true\ndisabledRules = ["generic-api-key"]\n' > "$bin/gitleaks.toml"
+          "$bin/gitleaks" dir "$SCAN_PATH" --config "$bin/gitleaks.toml" --no-banner --redact --log-level error --exit-code 2 || rc=$?
+          case "${rc:-0}" in 0) ;; 2) found=true ;; *) echo "::error::gitleaks failed to run"; exit 1 ;; esac
+          for key in "$KEY_1" "$KEY_2" "$KEY_3"; do
+            [ -n "$key" ] || continue
+            b64=$(printf '%s' "$key" | base64 -w0)
+            if grep -rqF -e "$key" -e "$b64" -e "${b64%%=*}" -- "$SCAN_PATH"; then found=true; fi
+          done
+        fi
+        [ "$found" = true ] && echo "::error::The agent's output contains a secret. Nothing from it is posted or pushed."
+        echo "found=$found" >> "$GITHUB_OUTPUT"

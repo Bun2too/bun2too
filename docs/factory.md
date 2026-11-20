@@ -131,3 +131,19 @@ Worst case per PR: one review per commit, plus each rework round and its review.
 - Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
 - Runs that touch the factory (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) are never auto-merged and never chained.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.
+
+### Agents that run code (AGENTS.md rule 11)
+
+Rework runs the PR's code, its tests and its dependencies while the model key is loaded. Five layers keep that key from leaving the job:
+
+1. **Sandboxed commands.** Dependencies install first. Every command the agent runs then goes through an OS sandbox with no network, and there is no unsandboxed fallback. The agent program itself still reaches the model provider's API.
+2. **No key in commands.** The model key is stripped from the environment of every command the agent runs. Codex keeps it in a separate proxy process.
+3. **Outbound allowlist, no `sudo`.** `step-security/harden-runner` blocks every host the job does not need. It still allows the model APIs, GitHub and the package registries the install step uses, so it narrows a leak rather than stopping it; layer 1 is the boundary. Before the agent starts, the `factory-lockdown` action takes `sudo` and Docker away from the runner account, so nothing the agent runs can lift either block.
+4. **Secret scan before anything leaves.** The jobs that post or push (`verdict` and the rework `push`) run the `secret-scan` action over everything the agent wrote: the review, the patches and the report. It runs gitleaks for known key formats and also matches the factory's own keys, as written and base64-encoded. If anything matches, or the scan cannot run, nothing is posted or pushed and the PR comment says why.
+5. **A key worth little.** `ANTHROPIC_API_KEY` (or the OpenAI or Gemini secret) is the factory's own key, from a provider workspace with a monthly spend limit, used for nothing else.
+
+Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages.
+
+Gemini CLI has no command sandbox in this setup, so Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review, which runs no commands besides `git diff/log/show`, still works with Gemini. A new role that gives an agent a shell must meet the same five layers before it is turned on.
+
+`factory-sandbox-check.yml` proves the layers whenever their files change. An agent set up exactly like Rework runs `.github/scripts/sandbox-probe.sh`. The probe tries to read the key from its environment and from `/proc`, reach three hosts, use `sudo` and Docker, and run the toolchains and `git commit`. The workflow, not the agent, judges the results, and it also checks that the key appears nowhere in the agent's output.

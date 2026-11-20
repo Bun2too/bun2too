@@ -74,6 +74,20 @@ jobs:
       ROUND: ${{ needs.plan.outputs.round }}
       SCOPES: ${{ needs.plan.outputs.scopes }}
     steps:
+      # AGENTS.md rule 11, layer 3: only the hosts this job needs, the package registries
+      # included. Keep this list in step with agent-review.yml and factory-sandbox-check.yml.
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >
+            api.anthropic.com:443 api.openai.com:443 generativelanguage.googleapis.com:443
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443 *.blob.core.windows.net:443
+            registry.npmjs.org:443 bun.sh:443 downloads.claude.ai:443
+            azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
+            nodejs.org:443 pypi.org:443 files.pythonhosted.org:443
       - uses: actions/checkout@v5
         with: { ref: "${{ needs.plan.outputs.head }}", fetch-depth: 0, persist-credentials: false }
       - name: Prepare the branch and the review
@@ -120,6 +134,11 @@ jobs:
           }
       - if: contains(env.SCOPES, 'bun2too-website')
         run: npm ci --prefix bun2too-website
+
+      # Rule 11, layers 1 and 3: dependencies are in; from here the agent's commands run
+      # sandboxed with no network, and nothing can lift that.
+      - uses: ./.github/actions/factory-lockdown
+        with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
 
       - uses: ./.github/actions/factory-agent
         id: agent
@@ -173,6 +192,27 @@ jobs:
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with: { name: rework, path: in }
+      # Rule 11, layer 4: nothing the agent wrote is pushed or posted if it holds a secret.
+      - uses: actions/checkout@v5
+        with: { sparse-checkout: .github/actions, persist-credentials: false, path: base }
+      - uses: ./base/.github/actions/secret-scan
+        id: scan
+        continue-on-error: true
+        with:
+          path: in
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+      - name: Drop output that holds a secret
+        env: { LEAK: "${{ steps.scan.outputs.found || 'unscanned' }}" }
+        run: |
+          [ "$LEAK" = false ] && exit 0
+          rm -rf in && mkdir in
+          if [ "$LEAK" = true ]; then
+            echo "The rework's output contained a secret, so none of it was pushed or posted (AGENTS.md rule 11). Rotate the provider key." > in/report.md
+          else
+            echo "The secret scan of the rework's output did not run, so none of it was pushed or posted (AGENTS.md rule 11)." > in/report.md
+          fi
       - name: Count the commits
         id: count
         run: echo "commits=$(grep -c '^From [0-9a-f]\{40\} ' in/rework.patch 2>/dev/null || true)" >> "$GITHUB_OUTPUT"

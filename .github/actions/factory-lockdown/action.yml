@@ -1,0 +1,45 @@
+name: factory-lockdown
+description: >-
+  AGENTS.md rule 11, layers 1 and 3: install the command sandbox, then take sudo and
+  Docker away from the runner account so nothing the agent runs can undo the sandbox or
+  the job's outbound allowlist (step-security/harden-runner, the job's first step).
+  Run it after the dependency installs and right before the agent.
+inputs:
+  provider:
+    description: "FACTORY_PROVIDER. openai: codex-action drops sudo itself (safety-strategy drop-sudo)"
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install the command sandbox
+      shell: bash
+      run: |
+        # Other apt sources may be outside the allowlist; the Ubuntu archive is enough here.
+        sudo apt-get update -qq || true
+        sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
+        # Ubuntu 24.04 blocks unprivileged user namespaces, which bubblewrap needs.
+        if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+          sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0
+        fi
+        bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net -- true ||
+          { echo "::error::The command sandbox (bubblewrap) does not start on this runner"; exit 1; }
+
+    - name: Take sudo and Docker away
+      if: inputs.provider != 'openai'
+      shell: bash
+      run: |
+        sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+        sudo rm -f /var/run/docker.sock /run/containerd/containerd.sock
+        # sudoers uses the last matching rule, and this file sorts last.
+        echo "$USER ALL=(ALL:ALL) !ALL" | sudo tee /etc/sudoers.d/zzz-factory-no-sudo >/dev/null
+        sudo chmod 0440 /etc/sudoers.d/zzz-factory-no-sudo
+
+    # Fail closed: the agent must not start on a runner where these still work.
+    - name: Check the lockdown
+      shell: bash
+      env: { PROVIDER: "${{ inputs.provider }}" }
+      run: |
+        [ "$PROVIDER" = openai ] && { echo "Codex drops sudo before it starts."; exit 0; }
+        if sudo -n true 2>/dev/null; then echo "::error::sudo still works"; exit 1; fi
+        if docker info >/dev/null 2>&1; then echo "::error::Docker still works"; exit 1; fi
+        echo "sudo and Docker are off; the sandbox starts."
