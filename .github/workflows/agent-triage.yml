@@ -8,7 +8,12 @@ permissions:
   id-token: write
 jobs:
   explore:
-    if: vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && ((github.event.action == 'opened') || github.event.label.name == 'needs-triage')
+    # Off unless FACTORY_LEGACY_AGENTS=true (AGENTS.md rule 11): this agent reads text from
+    # anyone who opens an issue, holds the model key unsandboxed, and can post a comment, so
+    # injected issue text could make it post the key. It comes back once it runs on the
+    # split-job pattern: a sandboxed agent that writes the triage to a file, posted by a
+    # job that secret-scans it.
+    if: vars.FACTORY_ENABLED != 'false' && vars.FACTORY_LEGACY_AGENTS == 'true' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' && ((github.event.action == 'opened') || github.event.label.name == 'needs-triage')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:

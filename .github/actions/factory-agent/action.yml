@@ -61,8 +61,10 @@ runs:
     # - nothing prompts, so anything not allowlisted is denied
     # - the file tools read and write only the workspace and the toolchain caches, so they
     #   cannot read the key from /proc or the runner's temp files
-    # - no hooks, and (with --strict-mcp-config) no MCP servers from the checkout: both would
-    #   run outside the sandbox, and a PR could add them
+    # - with --setting-sources user, nothing from the checkout configures the agent: project
+    #   settings outrank user settings, so a PR's .claude/settings.json could otherwise turn
+    #   the sandbox off or allow a host. No hooks, and (--strict-mcp-config) no MCP servers
+    #   from the checkout either: both would run outside the sandbox
     # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on the step strips the key from every command's environment.
     # - Rework (not read-only) may run any command the sandbox contains, as it can already
     #   through node or python3; the reviewer stays on its allowlist of read-only git commands
@@ -103,11 +105,15 @@ runs:
         github_token: ${{ inputs.github-token }}
         show_full_output: true
         settings: ${{ steps.claude-settings.outputs.json }}
-        prompt: ${{ inputs.prompt }}
+        # Project files are not loaded as settings or memory, so the agent reads AGENTS.md itself.
+        prompt: |
+          Read AGENTS.md first: it is the repository's rules for every agent.
+          ${{ inputs.prompt }}
         claude_args: >-
           --model ${{ inputs.model || 'claude-sonnet-5-5' }}
           --permission-mode dontAsk
           --strict-mcp-config
+          --setting-sources user
           --max-turns ${{ inputs.max-turns }}
           --max-budget-usd ${{ inputs.max-budget-usd }}
           --allowedTools "${{ inputs.allowed-tools }}"
