@@ -149,3 +149,32 @@ Accepted residual: the lockdown lets `/usr/bin/bwrap` create user namespaces thr
 Gemini CLI has no command sandbox in this setup, so it never gets a shell. Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review still works with Gemini: the workflow writes the diff to `.factory/diff.patch` before any agent runs, and Gemini reads it with file tools only. A new role that gives an agent a shell must meet the same five layers before it is turned on.
 
 `factory-sandbox-check.yml` proves the layers whenever their files change. An agent set up exactly like Rework runs `.github/scripts/sandbox-probe.sh`. The install step tries to write `GITHUB_ENV`, the factory's own action and the downloaded actions, and plants a process that tries to outlive it. The probe tries to read the key from its environment and from `/proc`, reach three hosts, use `sudo` and Docker, and run the toolchains and `git commit`. The workflow, not the agent, judges the results, and it also checks that the key appears nowhere in the agent's output.
+
+## Tracing
+
+Each `agent-review` run, its rework included, becomes one OpenTelemetry trace you can click through as a waterfall:
+
+```text
+agent-review PR #N                     the run
+├── job prepare / review / verdict / rework / push / merge
+│   └── step Run ./.github/actions/factory-agent
+│       └── invoke_agent review        prompt, settings, allowlist, cost, refused tool calls
+│           ├── chat <model>           one per model turn: input, reply, tokens, stop reason
+│           ├── execute_tool Read      arguments, result, error
+│           └── execute_tool Agent
+│               └── invoke_agent <subagent>   its own turns and tool calls
+```
+
+Where to look:
+
+- **The run's summary page** (Actions → the run, or the `run summary` link under each review comment). The `trace` job writes a job summary with a waterfall of the jobs and one per agent, then each turn's reply and tool calls, folded.
+- **A trace backend**, for search, filters and side-by-side runs. Set the `FACTORY_OTLP_ENDPOINT` variable to any OTLP/HTTP endpoint and put its auth headers in the `FACTORY_OTLP_HEADERS` secret, as `key=value,key=value`. Set `FACTORY_TRACE_URL` to the backend's trace page with `{trace_id}` in it, and each review comment links straight to its trace. All GenAI spans follow the OpenTelemetry GenAI conventions, as Relay's do (bun2too-support-agent ADR 0004), so LLM-aware backends (Langfuse, LangSmith, Arize Phoenix) show turns as model calls with their input and output. Any OTLP backend (Grafana Tempo, Honeycomb, Jaeger) shows the waterfall.
+- **The `trace` artifact** of every run (kept 30 days) holds the same trace as OTLP JSON. To view it with no account: `docker run -p 16686:16686 -p 4318:4318 jaegertracing/jaeger`, then `curl -H 'Content-Type: application/json' --data @trace.otlp.json localhost:4318/v1/traces`, and open `localhost:16686`.
+
+The trace ID is the first 32 hex characters of the SHA-256 of `owner/repo/run_id/run_attempt`. Every round of a PR shares `session.id` = `owner/repo#N`, so a backend can group a PR's rounds.
+
+To change what you see in a trace, edit the role's prompt and settings where the `factory.prompt.source` attribute points: `agent-review.yml` and the `factory-review` skill for Review, `agent-rework.yml` for Rework, and `.github/actions/factory-agent` for the settings every agent shares.
+
+How it stays inside rule 11: the agent jobs only save Claude Code's session transcripts, settings and run record (`trace-dir` on the `factory-agent` action) and upload them for one day. The `trace` job, on a runner no agent touched, secret-scans them, builds the trace with `.github/scripts/factory-trace.py`, sends it, and deletes the raw uploads. If the scan finds anything, prompts, replies and tool input and output are left out; timings, token counts and tool names still go out. The agent jobs hold no backend credentials, and the backend is not on their allowlist.
+
+Limits: Claude Code's transcripts usually keep only a marker for thinking, not its text, so each turn shows whether the model thought, and the text only when it was recorded. Codex and Gemini leave no transcript, so their agent is a single span. A run cancelled by a newer push leaves no trace.

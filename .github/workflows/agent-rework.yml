@@ -175,6 +175,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          trace-dir: ${{ runner.temp }}/trace
           allowed-tools: Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*),Bash(bun2too-crew-team/.venv/bin/python:*)
           prompt: |
             Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }}.
@@ -211,6 +212,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with: { name: rework, path: "${{ runner.temp }}/out/", if-no-files-found: error }
+      # For agent-review's trace job only, which scans it and then deletes it.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with: { name: trace-rework, path: "${{ runner.temp }}/trace/", if-no-files-found: ignore, retention-days: 1 }
 
   # A fresh runner: the only job here that holds the app token is one no agent touched.
   push:

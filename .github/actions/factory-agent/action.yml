@@ -21,6 +21,13 @@ inputs:
     required: false
     default: "false"
   output-file: { description: "Where to save the agent's final message", required: false, default: "" }
+  trace-dir:
+    description: >-
+      Where to save what the trace job needs (docs/factory.md#tracing): the agent's settings,
+      Claude Code's run record and its session transcripts. Agent output, so it is
+      secret-scanned before it leaves the run.
+    required: false
+    default: ""
 outputs:
   cause:
     description: The agent's last message when it failed, for the PR comment.
@@ -174,6 +181,15 @@ runs:
         CODEX_FINAL: ${{ steps.codex.outputs.final-message }}
         GEMINI_FINAL: ${{ steps.gemini.outputs.summary }}
         OUTPUT_FILE: ${{ inputs.output-file }}
+        TRACE_DIR: ${{ inputs.trace-dir }}
+        PROVIDER: ${{ inputs.provider }}
+        MODEL: ${{ inputs.model }}
+        MAX_TURNS: ${{ inputs.max-turns }}
+        MAX_BUDGET: ${{ inputs.max-budget-usd }}
+        ALLOWED: ${{ inputs.allowed-tools }}
+        READ_ONLY: ${{ inputs.read-only }}
+        PROMPT: ${{ inputs.prompt }}
+        SETTINGS: ${{ steps.claude-settings.outputs.json }}
       run: |
         if [ -n "$OUTPUT_FILE" ]; then
           mkdir -p "$(dirname "$OUTPUT_FILE")"
@@ -189,3 +205,22 @@ runs:
         fi
         cause=${cause:-$GEMINI_ERROR}
         { echo "cause<<CAUSE_EOF"; printf '%s\n' "${cause:0:500}"; echo "CAUSE_EOF"; } >> "$GITHUB_OUTPUT"
+        if [ -n "$TRACE_DIR" ]; then
+          mkdir -p "$TRACE_DIR"
+          jq -n '{provider: env.PROVIDER, model: env.MODEL, max_turns: env.MAX_TURNS, max_budget_usd: env.MAX_BUDGET,
+                  allowed_tools: env.ALLOWED, read_only: env.READ_ONLY, prompt: env.PROMPT, settings: env.SETTINGS}' > "$TRACE_DIR/config.json"
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            jq '(map(select(.type == "system" and .subtype == "init")) | first // {}) as $i
+                | (map(select(.type == "result")) | last // {}) as $r
+                | {session_id: ($i.session_id // $r.session_id), model: $i.model, claude_code_version: $i.claude_code_version,
+                   total_cost_usd: $r.total_cost_usd, num_turns: $r.num_turns, duration_ms: $r.duration_ms,
+                   subtype: $r.subtype, is_error: $r.is_error, result: $r.result, permission_denials: $r.permission_denials}' \
+              "$EXECUTION_FILE" > "$TRACE_DIR/run.json" || true
+          fi
+          # Claude Code's transcripts time-stamp every model turn, tool call and subagent.
+          if [ -d "$HOME/.claude/projects" ]; then
+            mkdir -p "$TRACE_DIR/transcripts"
+            (cd "$HOME/.claude/projects" && find . -type f \( -name '*.jsonl' -o -name '*.meta.json' \) -not -path '*/tool-results/*' -print0 |
+              xargs -0 -r cp --parents -t "$TRACE_DIR/transcripts")
+          fi
+        fi
