@@ -179,11 +179,6 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
       review_url: ${{ steps.verdict.outputs.url }}
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
-        id: app
-        with:
-          app-id: ${{ vars.FACTORY_APP_ID }}
-          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/download-artifact@v4
         if: needs.prepare.outputs.earlier == ''
         continue-on-error: true
@@ -202,6 +197,12 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+      # The app token is minted only after the scan, so no earlier step can see it.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - name: Post the review and read the verdict
         id: verdict
         env:
@@ -262,6 +263,7 @@ jobs:
     with:
       pr: ${{ github.event.pull_request.number }}
       review_url: ${{ needs.verdict.outputs.review_url }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
     secrets: inherit
 
   merge:
