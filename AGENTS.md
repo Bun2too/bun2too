@@ -44,6 +44,7 @@ In Claude Code, `/review` is a built-in command; use `/agent-skills:review` for 
 10. **The factory changes only with human review.** Changes under `.claude/`, `.cursor/`, `.github/`, any `AGENTS.md` or `CLAUDE.md`, `docs/factory.md` and `docs/sdlc.md` are never auto-merged.
 11. **An agent that runs code cannot send secrets out.** A factory job that gives an agent a shell runs those commands with no network and no credentials in their environment, without `sudo`, behind an outbound allowlist. Its output is secret-scanned before anything is pushed. A role or provider that cannot meet this stays off. See [docs/factory.md](docs/factory.md#spend-and-safety).
 12. **Agents spend only when a person asks.** A paid agent run starts from a person's request (the `agent-review` label, a manual dispatch) or as a capped continuation of one (the loop's rework rounds). Nothing paid runs on a plain push, a new PR or a schedule, and `FACTORY_MAX_RUNS_PER_DAY` caps the loop's runs each day. See [docs/factory.md](docs/factory.md#spend-and-safety).
+13. **Lead agents check each other.** Claude and Codex each own part of the monorepo, work only in their own checkout and branches, and review each other's PRs at the exact head commit before a person merges or asks the factory to review. If they disagree, the owner decides. See [docs/agents/collaboration.md](docs/agents/collaboration.md).
 
 ## Shared agents and skills
 
@@ -67,6 +68,7 @@ Product skills live with the product and are listed in its `AGENTS.md`. Examples
 - [Trunk-based development](docs/sop/trunk-based-development.md)
 - [Environments and release](docs/sop/environments-and-release.md): dev, qa and prod, promotion and rollback
 - [Subtrees](docs/sop/subtrees.md): mirrors, pull and push, and conflict handling
+- [Lead agents](docs/agents/collaboration.md): Claude and Codex, ownership, cross-review and signalling
 - [Issue tracker](docs/agents/issue-tracker.md), [triage labels](docs/agents/triage-labels.md), [domain docs](docs/agents/domain.md)
 
 ## Agent skills (Matt Pocock skill configuration)
