@@ -236,7 +236,7 @@ jobs:
           }
           if [ "${COMMITS:-0}" = 0 ] || [ -z "$BEFORE" ]; then
             to_person
-            gh pr comment "$PR" --body "$(printf '## Rework round %s: no commits\n\n%s\n\nNothing was fixed, so the review would fail again. Handing to a person.' "$ROUND" "$report")"
+            gh pr comment "$PR" --body "$(printf '## Rework round %s: no commits\n\n%s\n\nThere are no commits to push, so the review would fail again. Handing to a person.' "$ROUND" "$report")"
             exit 1
           fi
           # A clean clone: token only in a header, no hooks.

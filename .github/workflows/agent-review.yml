@@ -108,12 +108,17 @@ jobs:
             results-receiver.actions.githubusercontent.com:443 *.blob.core.windows.net:443
             registry.npmjs.org:443 bun.sh:443 claude.ai:443 downloads.claude.ai:443
             azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
+      # The exact head commit, not GitHub's merge commit, so the review is of HEAD_SHA.
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, persist-credentials: false }
+        with: { ref: "${{ env.HEAD_SHA }}", fetch-depth: 0, persist-credentials: false }
       - name: Write the PR context for the reviewer
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env: { GH_TOKEN: "${{ github.token }}", BASE_REF: "${{ github.event.pull_request.base.ref }}" }
         run: |
           mkdir -p .factory && echo ".factory/" >> .git/info/exclude
+          # The diff as a file, written before any agent runs: a reviewer without a shell
+          # (Gemini) reads this instead of running git.
+          git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+            diff --no-ext-diff "origin/$BASE_REF...HEAD" > .factory/diff.patch
           gh pr view "$PR" --json title,body,files -q '"# \(.title)\n\n\(.body)\n\nFiles:\n\(.files | map("- " + .path) | join("\n"))"' > .factory/pr.md
       - uses: ./.github/actions/factory-lockdown
         with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
@@ -136,7 +141,8 @@ jobs:
           allowed-tools: Read,Grep,Glob,Agent,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*)
           prompt: |
             Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ env.PR }}.
-            The diff is `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD` (head commit ${{ env.HEAD_SHA }}).
+            The diff is in .factory/diff.patch: `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD` at head commit
+            ${{ env.HEAD_SHA }}, which is checked out. Use git for history and context if you have it.
             The PR's title, description and files are in .factory/pr.md. CI result: ${{ needs.prepare.outputs.ci }}.
             Do not post anything and do not change any file. Your final message is the review, posted as is:
             only the sections `## Code`, `## Security` and `## Spec`, with nothing before or after them except the

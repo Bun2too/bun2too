@@ -48,7 +48,8 @@ runs:
         if [ "$HAS_KEY" != true ]; then
           echo "::error::The secret for $PROVIDER is missing (ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY)"; exit 1
         fi
-        # Rule 11: Gemini CLI runs commands unsandboxed with the key in their environment.
+        # Rule 11: Gemini CLI runs commands unsandboxed with the key in their environment,
+        # so it gets no shell, and a role that must run code cannot use it.
         if [ "$PROVIDER" = gemini ] && [ "$READ_ONLY" != true ]; then
           echo "::error::Gemini CLI has no command sandbox here, so it cannot run an agent that runs code (AGENTS.md rule 11). Use anthropic or openai."; exit 1
         fi
@@ -118,8 +119,10 @@ runs:
         # the default safety-strategy (drop-sudo) takes sudo and Docker away first.
         permission-profile: ${{ inputs.read-only == 'true' && ':read-only' || ':workspace' }}
 
-    # Gemini CLI runs with --yolo, so limit it to the same tools Claude gets: the
-    # allowed-tools list, mapped to Gemini's names. Anything else, web access included, is off.
+    # Gemini CLI runs with --yolo and cannot sandbox commands, so it gets no shell at all
+    # (AGENTS.md rule 11): only the file tools from the allowed-tools list, mapped to
+    # Gemini's names. Anything else, the shell and web access included, is off. The calling
+    # workflow puts what the agent would run git for (the diff) in a file first.
     - name: Limit Gemini to the allowed tools
       id: gemini-settings
       if: inputs.provider == 'gemini'
@@ -133,10 +136,8 @@ runs:
             elif . == "Glob" then "glob", "list_directory"
             elif . == "Write" then "write_file"
             elif . == "Edit" then "replace"
-            elif test("^Bash\\(.*:\\*\\)$") then "run_shell_command(\(.[5:-3]))"
             else empty end)
-          | {context: {fileName: ["AGENTS.md"]}, tools: {core: .,
-              exclude: ["run_shell_command(git diff --output)", "run_shell_command(git log --output)", "run_shell_command(git show --output)"]}}')
+          | {context: {fileName: ["AGENTS.md"]}, tools: {core: ., exclude: ["run_shell_command"]}}')
         echo "json=$json" >> "$GITHUB_OUTPUT"
         echo "Gemini settings: $json"
 
