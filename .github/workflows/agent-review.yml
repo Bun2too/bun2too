@@ -14,8 +14,13 @@ on:
     types: [opened, synchronize, ready_for_review, labeled]
 permissions:
   contents: read
+# One loop per PR: a new push cancels the run in progress. A label other than agent-review
+# (the loop's own rework-N and ready-for-human included) gets a group of its own, so it
+# never cancels a running review; prepare then skips it.
 concurrency:
-  group: agent-review-${{ github.event.pull_request.number }}
+  group: >-
+    ${{ (github.event.action != 'labeled' || github.event.label.name == 'agent-review')
+        && format('agent-review-{0}', github.event.pull_request.number) || format('agent-review-label-{0}', github.run_id) }}
   cancel-in-progress: true
 env:
   GH_REPO: ${{ github.repository }}

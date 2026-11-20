@@ -31,7 +31,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 
 - **A product PR can merge on a model's judgement alone.** Injected text in a diff could talk the reviewer into PASS. CI, the guard, same-repository branches and people merging factory PRs bound this. The audit trail is the review comment on each merged PR.
 - **The rework agent runs repository code** (tests, the product's check command) with the model key loaded in its job. That alone would let a prompt-injected agent or a compromised dependency leak the key. The owner chose to close this rather than accept it, so AGENTS.md rule 11 requires five layers for any agent that runs code. They are listed in docs/factory.md under "Spend and safety":
-  1. Dependencies install before the agent starts, and every command the agent runs goes through a sandbox with no network.
+  1. Dependencies install before the agent starts, after the lockdown and each in its own PID namespace, so no install script can leave a process behind. Every command the agent runs goes through a sandbox with no network.
   2. The model key is stripped from those commands' environment.
   3. The job's outbound traffic is limited to an allowlist, and the runner account loses `sudo` and Docker before the agent starts, so it cannot lift the block.
   4. The push job secret-scans the agent's patches and pushes nothing if a secret appears.
