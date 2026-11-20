@@ -147,6 +147,7 @@ jobs:
           # Its final message is the review.
           read-only: "true"
           output-file: ${{ runner.temp }}/out/review.md
+          trace-dir: ${{ runner.temp }}/trace
           allowed-tools: Read,Grep,Glob,Agent,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git merge-base:*)
           prompt: |
             Act as the Review role in docs/factory.md: follow .claude/skills/factory-review/SKILL.md for PR #${{ env.PR }}.
@@ -166,6 +167,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with: { name: review, path: "${{ runner.temp }}/out/" }
+      # For the trace job only, which scans it and then deletes it.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with: { name: trace-review, path: "${{ runner.temp }}/trace/", if-no-files-found: ignore, retention-days: 1 }
 
   # A fresh runner: the only job here that holds the app token is one no agent touched.
   verdict:
@@ -212,7 +217,12 @@ jobs:
           LEAK: ${{ steps.scan.outputs.found || 'unscanned' }}
           MODEL: ${{ vars.FACTORY_PROVIDER || 'anthropic' }} ${{ vars.FACTORY_MODEL || 'claude-sonnet-5-5' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+          TRACE_URL: ${{ vars.FACTORY_TRACE_URL }}
         run: |
+          # The trace job names the trace after the run (docs/factory.md#tracing).
+          trace_id=$(printf '%s' "$GH_REPO/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" | sha256sum | cut -c1-32)
+          links="[run summary]($RUN_URL)"
+          [ -z "$TRACE_URL" ] || links="$links · [trace](${TRACE_URL//\{trace_id\}/$trace_id})"
           # The verdict is the review's last line and nothing else; text quoted earlier in the
           # review (from a diff, say) cannot set it. The footer line is skipped.
           last_verdict() {
@@ -244,7 +254,7 @@ jobs:
             if [ ${#text} -gt 60000 ]; then
               text=$(printf '%s\n\n(Review cut at 60,000 characters; the full text is in the run'"'"'s review artifact.)\n\nVERDICT: %s' "${text:0:60000}" "$verdict")
             fi
-            url=$(gh pr comment "$PR" --body "$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s</sub>' "$HEAD_SHA" "$text" "$reviewer")")
+            url=$(gh pr comment "$PR" --body "$(printf 'Reviewed commit: %s\n\n%s\n\n<sub>Reviewed by %s · %s</sub>' "$HEAD_SHA" "$text" "$reviewer" "$links")")
           elif [ -z "$verdict" ]; then
             [ -s in/review.md ] && echo "agent step finished, but the review does not end with a VERDICT line" > in/cause.txt
             cause=$(head -c 600 in/cause.txt 2>/dev/null || echo "the review job did not finish")
@@ -313,3 +323,56 @@ jobs:
             gh pr comment "$PR" --body "$(printf 'Review and CI passed, but the merge failed:\n\n```\n%s\n```' "$out")"
             exit 1
           fi
+
+  # One OpenTelemetry trace of the whole run: jobs and steps, and inside the agents every
+  # model turn, tool call and subagent, plus a job summary of it. See docs/factory.md#tracing.
+  # No agent touched this runner. It reads agent transcripts as data and scans them first.
+  trace:
+    needs: [prepare, review, verdict, rework, merge]
+    if: ${{ always() && needs.prepare.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # actions: write only to delete the unscanned transcripts once the trace is built.
+    permissions: { contents: read, actions: write }
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: "${{ env.HEAD_SHA }}", sparse-checkout: .github, persist-credentials: false, path: scan }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { pattern: trace-*, path: traces }
+      # Rule 11, layer 4: a flagged transcript loses its content (prompts, replies, tool
+      # input and output); the timings, token counts and tool names still go out.
+      - uses: ./scan/.github/actions/secret-scan
+        id: scan
+        continue-on-error: true
+        with:
+          path: traces
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+      - name: Build the trace, send it, and write the job summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEAK: ${{ steps.scan.outputs.found || 'unscanned' }}
+          VERDICT: ${{ needs.verdict.outputs.verdict }}
+          OTLP_ENDPOINT: ${{ vars.FACTORY_OTLP_ENDPOINT }}
+          OTLP_HEADERS: ${{ secrets.FACTORY_OTLP_HEADERS }}
+          TRACE_URL: ${{ vars.FACTORY_TRACE_URL }}
+        run: |
+          mkdir -p traces out
+          gh api --paginate "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --jq '.jobs[]' > out/jobs.jsonl
+          content=()
+          [ "$LEAK" = false ] || content=(--no-content)
+          python3 scan/.github/scripts/factory-trace.py "${content[@]}" --jobs out/jobs.jsonl --traces traces \
+            --repo "$GH_REPO" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --pr "$PR" --head-sha "$HEAD_SHA" \
+            --verdict "$VERDICT" --trace-url "$TRACE_URL" --out out/trace.otlp.json --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with: { name: trace, path: out/trace.otlp.json, if-no-files-found: ignore, retention-days: 30 }
+      - name: Delete the unscanned transcripts
+        if: always()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          for id in $(gh api --paginate "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                        --jq '.artifacts[] | select(.name | startswith("trace-")) | .id'); do
+            gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id"
+          done
