@@ -50,15 +50,16 @@ jobs:
           for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
             gh pr edit "$PR" --remove-label "$l"
           done
-      # Only a model's review is reused. A red-CI "review" is not, so re-running a flaky
-      # CI and then this workflow reviews the commit for real.
+      # Only a model's PASS or FAIL is reused. A red-CI "review" or an INCONCLUSIVE one is
+      # not, so re-running this workflow (after a flaky CI, say) reviews the commit again.
       - name: Reuse an earlier review of this commit
         id: earlier
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           url=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
             --jq ".[] | select(.user.login == \"$FACTORY_BOT\" and (.body | startswith(\"Reviewed commit: $HEAD_SHA\"))
-                  and (.body | contains(\"Reviewed by CI (no model)\") | not)) | .html_url" | tail -n 1)
+                  and (.body | contains(\"Reviewed by CI (no model)\") | not)
+                  and (.body | contains(\"VERDICT: INCONCLUSIVE\") | not)) | .html_url" | tail -n 1)
           echo "url=$url" >> "$GITHUB_OUTPUT"
           [ -z "$url" ] || echo "This commit was already reviewed, so no model runs: $url"
       - name: Wait for CI on this commit
