@@ -195,10 +195,12 @@ jobs:
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with: { name: rework, path: in }
-      # Rule 11, layer 4: nothing the agent wrote is pushed or posted if it holds a secret.
+      # Rule 11, layer 4: nothing the agent wrote is pushed or posted if it holds a secret. The scan
+      # comes from the PR's own .github/actions, which this workflow trusts like itself:
+      # the guard keeps agents out of .github/, and a person merges any change to it.
       - uses: actions/checkout@v5
-        with: { sparse-checkout: .github/actions, persist-credentials: false, path: base }
-      - uses: ./base/.github/actions/secret-scan
+        with: { sparse-checkout: .github/actions, persist-credentials: false, path: scan }
+      - uses: ./scan/.github/actions/secret-scan
         id: scan
         continue-on-error: true
         with:
