@@ -188,8 +188,9 @@ jobs:
         continue-on-error: true
         with: { name: review, path: in }
       # Rule 11, layer 4: nothing the agent wrote is posted if it holds a secret. The scan
-      # comes from the PR's own .github/actions, which this workflow trusts like itself:
-      # the guard keeps agents out of .github/, and a person merges any change to it.
+      # comes from the PR's own .github/actions, as trusted as this workflow, which on a
+      # pull_request run also comes from the PR. Agents cannot change it (the guard keeps
+      # them out of .github/), so it is a control on the agent, not on the PR's author.
       - uses: actions/checkout@v5
         with: { ref: "${{ github.event.pull_request.head.sha }}", sparse-checkout: .github/actions, persist-credentials: false, path: scan }
       - uses: ./scan/.github/actions/secret-scan

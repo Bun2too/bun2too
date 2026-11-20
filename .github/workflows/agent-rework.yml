@@ -101,8 +101,8 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Rule 11, layers 1 and 3, before any PR or dependency code runs: no sudo or Docker
-      # from here on, and the installs below run in contained.sh, so nothing they start
-      # outlives them. The agent's own commands then run in Claude Code's sandbox.
+      # from here on. The installs below run in contained.sh: they can write only their
+      # product folder and the package caches, and nothing they start outlives them. The agent's own commands then run in Claude Code's sandbox.
       - uses: ./.github/actions/factory-lockdown
         with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
 
@@ -121,7 +121,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         if: contains(env.SCOPES, 'bun2too-support-agent')
       - if: contains(env.SCOPES, 'bun2too-support-agent')
-        run: .github/scripts/contained.sh sh -c 'pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen'
+        run: |
+          .github/scripts/contained.sh bun2too-support-agent "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
+            sh -c 'pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen'
       - uses: actions/setup-python@v5
         if: contains(env.SCOPES, 'bun2too-crew-team')
         with: { python-version: "3.12" }
@@ -129,7 +131,9 @@ jobs:
         if: contains(env.SCOPES, 'bun2too-crew-team')
         with: { node-version: "24" }
       - if: contains(env.SCOPES, 'bun2too-crew-team')
-        run: .github/scripts/contained.sh python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
+        run: |
+          .github/scripts/contained.sh bun2too-crew-team "$(python3 -c 'import sys; print(sys.prefix)')" "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
+            python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
       - uses: actions/setup-node@v5
         if: contains(env.SCOPES, 'bun2too-website')
         with:
@@ -139,7 +143,7 @@ jobs:
             cache-dependency-path: bun2too-website/package-lock.json,
           }
       - if: contains(env.SCOPES, 'bun2too-website')
-        run: .github/scripts/contained.sh npm ci --prefix bun2too-website
+        run: .github/scripts/contained.sh bun2too-website "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- npm ci --prefix bun2too-website
 
       - uses: ./.github/actions/factory-agent
         id: agent
@@ -176,7 +180,8 @@ jobs:
           # reads no global or system config.
           exp="$RUNNER_TEMP/export.git"
           cp -R .git "$exp"
-          rm -rf "$exp/config" "$exp/hooks" "$exp/info/attributes" "$exp/worktrees"
+          rm -rf "$exp/config" "$exp/hooks" "$exp/info/attributes" "$exp/worktrees" \
+            "$exp/objects/info/alternates" "$exp/objects/info/http-alternates"
           printf '[core]\n\trepositoryformatversion = 0\n\tbare = true\n' > "$exp/config"
           GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git --git-dir="$exp" -c core.hooksPath=/dev/null \
             format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
@@ -201,8 +206,9 @@ jobs:
         continue-on-error: true
         with: { name: rework, path: in }
       # Rule 11, layer 4: nothing the agent wrote is pushed or posted if it holds a secret. The scan
-      # comes from the PR's own .github/actions, which this workflow trusts like itself:
-      # the guard keeps agents out of .github/, and a person merges any change to it.
+      # comes from the PR's own .github/actions, as trusted as this workflow, which on a
+      # pull_request run also comes from the PR. Agents cannot change it (the guard keeps
+      # them out of .github/), so it is a control on the agent, not on the PR's author.
       - uses: actions/checkout@v5
         with: { ref: "${{ github.event.pull_request.head.sha }}", sparse-checkout: .github/actions, persist-credentials: false, path: scan }
       - uses: ./scan/.github/actions/secret-scan

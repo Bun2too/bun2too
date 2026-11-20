@@ -62,20 +62,30 @@ jobs:
         run: |
           # The planted process stands in for an install script that stays behind to read
           # the agent's environment later.
-          .github/scripts/contained.sh sh -c '
+          # It also tries to change what later steps run: the runner's GITHUB_ENV file, the
+          # factory's own action and the downloaded actions. Each write must fail.
+          ENV_FILE=$GITHUB_ENV ACTIONS_DIR="$RUNNER_WORKSPACE/../_actions" \
+          .github/scripts/contained.sh bun2too-support-agent "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- sh -c '
             pnpm -C bun2too-support-agent install --frozen-lockfile &&
-            uv sync --directory bun2too-support-agent/services/agents --frozen &&
-            (setsid nohup bash -c "exec -a factory-probe-leftover sleep 900" >/dev/null 2>&1 &) &&
+            uv sync --directory bun2too-support-agent/services/agents --frozen || exit 1
+            (echo FACTORY_PROBE_ENV=planted >> "$ENV_FILE") 2>/dev/null && exit 3
+            (echo "# planted" >> .github/actions/factory-agent/action.yml) 2>/dev/null && exit 4
+            (touch "$ACTIONS_DIR/factory-probe-planted") 2>/dev/null && exit 5
+            (setsid nohup bash -c "exec -a factory-probe-leftover sleep 900" >/dev/null 2>&1 &)
             sleep 1 && pgrep -f factory-probe-leftover >/dev/null'
           git config user.name "bun2too-software-factory[bot]"
           git config user.email "358801738+bun2too-software-factory[bot]@users.noreply.github.com"
-      - name: The allowlist blocks other hosts, and no install process is left
+      - name: The allowlist blocks other hosts, and the install left nothing behind
         run: |
           if curl -sS -m 10 -o /dev/null https://example.com; then
             echo "::error::The job's outbound allowlist let example.com through"; exit 1
           fi
           if pgrep -f factory-probe-leftover; then
             echo "::error::A process started during the install outlived it"; exit 1
+          fi
+          if [ -n "${FACTORY_PROBE_ENV:-}" ] || ! git diff --quiet -- .github ||
+             [ -e "$RUNNER_WORKSPACE/../_actions/factory-probe-planted" ]; then
+            echo "::error::The install changed what later steps run"; exit 1
           fi
       - uses: ./.github/actions/factory-agent
         id: agent
