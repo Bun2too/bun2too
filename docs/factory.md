@@ -10,7 +10,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | ------------- | -------------------------------------------------------- | ---------------- | ------------------------------------------ | --------------------------------------------- |
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
-| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Merge on PASS, Rework on FAIL | a person merges factory PRs; the loop merges product PRs | concurrency group per PR, cancel in progress  |
+| **Review**    | a person labels the PR `agent-review` (rule 12), or the loop's own rework push; waits for CI | Merge on PASS, Rework on FAIL | a person merges factory PRs; the loop merges product PRs | concurrency group per PR, cancel in progress  |
 | **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after `FACTORY_MAX_ROUNDS` rounds, a guard failure, or a round with no fix | labels `rework-<n>` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
@@ -51,9 +51,9 @@ Follow [factory-review](../.claude/skills/factory-review/SKILL.md). Three review
 
 The loop lives in one workflow, `agent-review.yml` (decision: [ADR 0005](adr/0005-factory-review-loop-merges-product-prs.md)), so a PR is changed, checked, reviewed and fixed in place, never by opening another PR:
 
-1. A push to the PR starts the run. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
+1. A person adding the `agent-review` label starts the run, which takes the label off again (AGENTS.md rule 12). A plain push, a new PR or a PR marked ready starts nothing paid, so push as often as you like and ask for a review when the PR is ready. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
 2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent reviews without write access; its final message is the review, which the workflow posts. The check passes only on `PASS`.
-3. On `FAIL`, the run calls `agent-rework.yml`, which commits fixes and pushes them to the PR. The push starts step 1 again.
+3. On `FAIL`, the run calls `agent-rework.yml`, which puts the `agent-review` label back, commits fixes and pushes them to the PR. That push, made by the factory app with the label on, starts step 1 again. Nothing else continues the loop.
 4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge. Factory paths are listed once, in `.github/scripts/factory-paths.regex`, which the merge gate reads from the base branch and the rework guard reads from the PR's history.
 5. Otherwise the loop stops with `ready-for-human` when `FACTORY_MAX_ROUNDS` rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
 
@@ -118,13 +118,14 @@ The factory is set with repository variables (Settings → Secrets and variables
 | `FACTORY_MODEL`          | `claude-sonnet-5-5` | The model for that provider. Required for `openai` and `gemini`                                     |
 | `FACTORY_MAX_BUDGET_USD` | `0.50` review, `1.00` other runs | Hard spend cap per run. Enforced by Claude Code only; for the others, set a limit in the provider's console |
 | `FACTORY_MAX_ROUNDS`     | `3`                 | Rework rounds before a person takes over (1–99; anything else means 3)                              |
+| `FACTORY_MAX_RUNS_PER_DAY` | `10`              | Loop runs a day (UTC) across the repository, each at most one review and one rework round. Past it, a request gets a comment and no review |
 | `FACTORY_LEGACY_AGENTS`  | off                 | `true` turns on Explore, Implement, Ratchet and Retro, which do not meet rule 11 yet (ADR 0005)     |
 
 The provider's key lives in the `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` secret. Give the factory its own key, from a workspace or project with a monthly spend limit, so its usage shows up separately in the provider's console.
 
 Explore, Implement, Ratchet and Retro still post to GitHub from inside an unsandboxed agent, so they do not meet rule 11. They are off unless `FACTORY_LEGACY_AGENTS=true`, run only when the provider is `anthropic`, and honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`. Until they move to the split-job pattern, a person triages issues.
 
-Worst case per PR: one review per commit, plus each rework round and its review. With the defaults that is about $0.50 + 3 × ($1.00 + $0.50) = $5.00. A red CI and a re-triggered review of the same commit cost nothing.
+Agents spend only when a person asks (AGENTS.md rule 12). One `agent-review` label is one request: a review, and on FAIL up to `FACTORY_MAX_ROUNDS` rework rounds, each followed by a review. With the defaults a request costs at most $0.50 + 3 × ($1.00 + $0.50) = $5.00, and `FACTORY_MAX_RUNS_PER_DAY` caps a day at 10 loop runs, about $15. A red CI and a review of an already-reviewed commit cost nothing. `factory-sandbox-check` (about $0.05) also runs only on the label or from the Actions tab. No paid workflow runs on a schedule; the legacy roles are off (`FACTORY_LEGACY_AGENTS`).
 
 - Every agent workflow sets `timeout-minutes` and a turn cap.
 - Third-party actions that receive a provider key or the app token are pinned to a commit SHA. Gemini CLI, which runs without confirmations, gets only the tools in the run's allowlist.

@@ -70,12 +70,14 @@ jobs:
           gh label create ready-for-human --force --color D93F0B --description "Needs a person: judgment, credentials, or a capped loop ran out"
           gh pr edit "$PR" --add-label ready-for-human
           gh pr comment "$PR" --body "$WHY Handing to a person; the latest review lists the open findings."
+      # The agent-review label lets this round's push start the next review (AGENTS.md
+      # rule 12); that review takes the label off again.
       - name: Mark round
         if: steps.plan.outputs.handoff == '' && steps.plan.outputs.moved != 'true'
         env: { GH_TOKEN: "${{ github.token }}", ROUND: "${{ steps.plan.outputs.round }}" }
         run: |
           gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND"
-          gh pr edit "$PR" --add-label "rework-$ROUND"
+          gh pr edit "$PR" --add-label "rework-$ROUND" --add-label agent-review
 
   rework:
     needs: plan

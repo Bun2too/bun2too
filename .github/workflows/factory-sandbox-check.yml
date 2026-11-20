@@ -3,8 +3,12 @@ name: factory-sandbox-check
 # like Rework tries to read the model key and reach the network, and must fail at both,
 # while the toolchains still work. The agent only runs the probe; this workflow judges
 # the results. About $0.05 a run on Haiku.
+# AGENTS.md rule 12: it spends only when a person asks, by adding the agent-review label to
+# a PR that changes these files, or by running it from the Actions tab. Run it on the final
+# commit before merging such a PR.
 on:
   pull_request:
+    types: [labeled]
     paths:
       - .github/actions/factory-agent/**
       - .github/actions/factory-lockdown/**
@@ -25,7 +29,8 @@ jobs:
     # The probe drives Claude Code's sandbox; Codex brings its own (drop-sudo, no network).
     if: >-
       vars.FACTORY_ENABLED != 'false' && (vars.FACTORY_PROVIDER || 'anthropic') == 'anthropic' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.label.name == 'agent-review' && github.actor != 'bun2too-software-factory[bot]'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions: { contents: read }

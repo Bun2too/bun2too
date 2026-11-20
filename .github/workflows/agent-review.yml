@@ -3,6 +3,11 @@ name: agent-review
 # The rework pushes to the PR, which starts this workflow again, until the review
 # passes, the rework rounds run out, or something needs a person.
 #
+# AGENTS.md rule 12: the loop spends only when a person asks. A person adding the
+# agent-review label starts it, and the run takes the label off again. Only the loop's own
+# rework push, which puts the label back first, continues it. A plain push, a new PR or a
+# PR marked ready starts nothing paid, and FACTORY_MAX_RUNS_PER_DAY caps loop runs a day.
+#
 # The agent runs in its own job with a read-only token and no app credentials, because
 # it can write anywhere on its runner. Jobs on fresh runners post, push and merge.
 #
@@ -11,16 +16,18 @@ name: agent-review
 #   FACTORY_MODEL and FACTORY_MAX_BUDGET_USD choose the model and cap each run.
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, labeled]
+    types: [synchronize, labeled]
 permissions:
   contents: read
-# One loop per PR: a new push cancels the run in progress. A label other than agent-review
-# (the loop's own rework-N and ready-for-human included) gets a group of its own, so it
-# never cancels a running review; prepare then skips it.
+# One loop per PR: a new request or rework push cancels the run in progress. Any other
+# event (a person's push, another label) gets a group of its own, so it never cancels a
+# running review; prepare then skips it.
 concurrency:
   group: >-
-    ${{ (github.event.action != 'labeled' || github.event.label.name == 'agent-review')
-        && format('agent-review-{0}', github.event.pull_request.number) || format('agent-review-label-{0}', github.run_id) }}
+    ${{ ((github.event.action == 'labeled' && github.event.label.name == 'agent-review' && github.actor != 'bun2too-software-factory[bot]') ||
+         (github.event.action == 'synchronize' && github.actor == 'bun2too-software-factory[bot]' &&
+          contains(github.event.pull_request.labels.*.name, 'agent-review')))
+        && format('agent-review-{0}', github.event.pull_request.number) || format('agent-review-other-{0}', github.run_id) }}
   cancel-in-progress: true
 env:
   GH_REPO: ${{ github.repository }}
@@ -29,31 +36,58 @@ env:
   FACTORY_BOT: bun2too-software-factory[bot]
 jobs:
   prepare:
-    # Only the agent-review label starts a run; the loop's own labels must not.
+    # Rule 12: a person's agent-review label, or the loop's own rework push (the factory
+    # app's push, made while the rework round has put the label back).
     if: >
       vars.FACTORY_ENABLED != 'false' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      (github.event.action != 'labeled' || github.event.label.name == 'agent-review') &&
-      (github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'agent-review'))
+      ((github.event.action == 'labeled' && github.event.label.name == 'agent-review' && github.actor != 'bun2too-software-factory[bot]') ||
+       (github.event.action == 'synchronize' && github.actor == 'bun2too-software-factory[bot]' &&
+        contains(github.event.pull_request.labels.*.name, 'agent-review')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions: { contents: read, actions: read, pull-requests: write, issues: write }
     outputs:
       earlier: ${{ steps.earlier.outputs.url }}
       ci: ${{ steps.ci.outputs.result }}
+      limited: ${{ steps.limit.outputs.limited }}
     steps:
-      # A person's push answers the hand-off, so the loop gets a fresh set of rounds.
-      - name: Reopen the loop after a person's push
-        if: github.event.action == 'synchronize' && github.actor != env.FACTORY_BOT
-        env: { GH_TOKEN: "${{ github.token }}" }
+      # The label is a request for one loop: this run takes it, so nothing that comes later
+      # (a push, an autofix commit) runs on it. A rework round puts it back for its own push.
+      # A person's request answers any hand-off, so the loop gets a fresh set of rounds.
+      # Label changes use the workflow token, so they never start a run.
+      - name: Take the request
+        env: { GH_TOKEN: "${{ github.token }}", ACTION: "${{ github.event.action }}" }
         run: |
-          for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
-            gh pr edit "$PR" --remove-label "$l"
-          done
+          gh pr edit "$PR" --remove-label agent-review || true
+          if [ "$ACTION" = labeled ]; then
+            for l in $(gh pr view "$PR" --json labels -q '.labels[].name' | grep -xE 'ready-for-human|rework-[0-9]+' || true); do
+              gh pr edit "$PR" --remove-label "$l"
+            done
+          fi
+      # Rule 12's backstop: at most FACTORY_MAX_RUNS_PER_DAY loop runs a day (UTC) across
+      # the repository, each at most one review and one rework round.
+      - name: Check the daily limit
+        id: limit
+        env: { GH_TOKEN: "${{ github.token }}", MAX: "${{ vars.FACTORY_MAX_RUNS_PER_DAY || '10' }}" }
+        run: |
+          if ! [[ "$MAX" =~ ^[0-9]{1,3}$ ]]; then
+            echo "::warning::FACTORY_MAX_RUNS_PER_DAY='$MAX' is not a number from 0 to 999; using 10"
+            MAX=10
+          fi
+          # Runs whose prepare job ran (a skipped run concludes "skipped"), this one excluded.
+          used=$(gh api --paginate "repos/$GH_REPO/actions/workflows/agent-review.yml/runs?created=>=$(date -u +%F)&per_page=100" \
+            --jq ".workflow_runs[] | select(.conclusion != \"skipped\" and .id != $GITHUB_RUN_ID) | .id" | wc -l)
+          echo "Loop runs today: $used of $MAX"
+          if [ "$used" -ge "$MAX" ]; then
+            echo "limited=true" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR" --body "The factory has used its $MAX loop runs for today (UTC, \`FACTORY_MAX_RUNS_PER_DAY\`), so this PR was not reviewed. Add the \`agent-review\` label again tomorrow, or raise the limit."
+          fi
       # Only a model's PASS or FAIL is reused. A red-CI "review" or an INCONCLUSIVE one is
       # not, so re-running this workflow (after a flaky CI, say) reviews the commit again.
       - name: Reuse an earlier review of this commit
         id: earlier
+        if: steps.limit.outputs.limited != 'true'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           url=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
@@ -64,7 +98,7 @@ jobs:
           [ -z "$url" ] || echo "This commit was already reviewed, so no model runs: $url"
       - name: Wait for CI on this commit
         id: ci
-        if: steps.earlier.outputs.url == ''
+        if: steps.limit.outputs.limited != 'true' && steps.earlier.outputs.url == ''
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           mkdir -p factory
@@ -98,7 +132,7 @@ jobs:
 
   review:
     needs: prepare
-    if: needs.prepare.outputs.earlier == '' && needs.prepare.outputs.ci != 'failed'
+    if: needs.prepare.outputs.limited != 'true' && needs.prepare.outputs.earlier == '' && needs.prepare.outputs.ci != 'failed'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Read-only: this job runs the agent. It holds only the model provider's key.
@@ -176,7 +210,7 @@ jobs:
   verdict:
     needs: [prepare, review]
     # Runs when prepare failed too, so a broken run still says so on the PR.
-    if: ${{ !cancelled() && needs.prepare.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.prepare.result != 'skipped' && needs.prepare.outputs.limited != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: { contents: read }
@@ -329,7 +363,7 @@ jobs:
   # No agent touched this runner. It reads agent transcripts as data and scans them first.
   trace:
     needs: [prepare, review, verdict, rework, merge]
-    if: ${{ always() && needs.prepare.result != 'skipped' }}
+    if: ${{ always() && needs.prepare.result != 'skipped' && needs.prepare.outputs.limited != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # actions: write only to delete the unscanned transcripts once the trace is built.
