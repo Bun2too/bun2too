@@ -118,11 +118,11 @@ The factory is set with repository variables (Settings → Secrets and variables
 | `FACTORY_MODEL`          | `claude-sonnet-5-5` | The model for that provider. Required for `openai` and `gemini`                                     |
 | `FACTORY_MAX_BUDGET_USD` | `0.50` review, `1.00` other runs | Hard spend cap per run. Enforced by Claude Code only; for the others, set a limit in the provider's console |
 | `FACTORY_MAX_ROUNDS`     | `3`                 | Rework rounds before a person takes over (1–99; anything else means 3)                              |
-| `FACTORY_LEGACY_AGENTS`  | off                 | `true` turns on Implement, Ratchet and Retro, whose agents still hold the app token (ADR 0005)      |
+| `FACTORY_LEGACY_AGENTS`  | off                 | `true` turns on Explore, Implement, Ratchet and Retro, which do not meet rule 11 yet (ADR 0005)     |
 
 The provider's key lives in the `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY` secret. Give the factory its own key, from a workspace or project with a monthly spend limit, so its usage shows up separately in the provider's console.
 
-Explore, Implement, Ratchet and Retro still post to GitHub from inside the agent, so they run only when the provider is `anthropic`. Implement, Ratchet and Retro are also off unless `FACTORY_LEGACY_AGENTS=true`. They honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`.
+Explore, Implement, Ratchet and Retro still post to GitHub from inside an unsandboxed agent, so they do not meet rule 11. They are off unless `FACTORY_LEGACY_AGENTS=true`, run only when the provider is `anthropic`, and honour `FACTORY_ENABLED`, `FACTORY_MODEL` and `FACTORY_MAX_BUDGET_USD`. Until they move to the split-job pattern, a person triages issues.
 
 Worst case per PR: one review per commit, plus each rework round and its review. With the defaults that is about $0.50 + 3 × ($1.00 + $0.50) = $5.00. A red CI and a re-triggered review of the same commit cost nothing.
 
@@ -142,7 +142,7 @@ Rework runs the PR's code, its tests and its dependencies while the model key is
 4. **Secret scan before anything leaves.** The jobs that post or push (`verdict` and the rework `push`) run the `secret-scan` action over everything the agent wrote: the review, the patches and the report. It runs gitleaks for known key formats and also matches the factory's own keys, as written and base64-encoded. If anything matches, or the scan cannot run, nothing is posted or pushed and the PR comment says why.
 5. **A key worth little.** `ANTHROPIC_API_KEY` (or the OpenAI or Gemini secret) is the factory's own key, from a provider workspace with a monthly spend limit, used for nothing else.
 
-Factory runs load no hooks and no MCP servers from the checkout, since both would run outside the sandbox. Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages. Gemini CLI's file tools stay inside the workspace too, and layer 4 backs that up. The hygiene autofix also runs PR code, but no agent and no secret: it holds neither the model key nor the app token.
+Factory runs take no settings, hooks or MCP servers from the checkout (`--setting-sources user`, `--strict-mcp-config`): project settings outrank the factory's, so a PR could otherwise switch the sandbox off, and hooks and MCP servers would run outside it. The probe plants such settings and checks that nothing opens. Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages. Gemini CLI's file tools stay inside the workspace too, and layer 4 backs that up. The hygiene autofix also runs PR code, but no agent and no secret: it holds neither the model key nor the app token.
 
 Gemini CLI has no command sandbox in this setup, so it never gets a shell. Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review still works with Gemini: the workflow writes the diff to `.factory/diff.patch` before any agent runs, and Gemini reads it with file tools only. A new role that gives an agent a shell must meet the same five layers before it is turned on.
 
