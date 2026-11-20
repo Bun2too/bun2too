@@ -70,7 +70,7 @@ jobs:
           mkdir -p factory
           id=""
           for _ in $(seq 30); do
-            id=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --json databaseId -q '.[0].databaseId')
+            id=$(gh run list --workflow ci.yml --commit "$HEAD_SHA" --json databaseId -q '.[0].databaseId // empty')
             [ -n "$id" ] && break
             sleep 10
           done
@@ -301,7 +301,7 @@ jobs:
             exit 0
           fi
           # CI must be green on this exact commit, even when the review was reused.
-          ci=$(GH_TOKEN=$CI_TOKEN gh run list --workflow ci.yml --commit "$HEAD_SHA" --json conclusion -q '.[0].conclusion')
+          ci=$(GH_TOKEN=$CI_TOKEN gh run list --workflow ci.yml --commit "$HEAD_SHA" --json conclusion -q '.[0].conclusion // empty')
           if [ "$ci" != success ]; then
             gh pr comment "$PR" --body "Review passed, but CI on \`$HEAD_SHA\` is \`${ci:-missing}\`. Not merging."
             exit 1
