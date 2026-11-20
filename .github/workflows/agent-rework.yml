@@ -100,6 +100,12 @@ jobs:
           gh api "repos/$GH_REPO/issues/comments/${REVIEW_URL##*-}" -q .body > .factory/review.md
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # Rule 11, layers 1 and 3, before any PR or dependency code runs: no sudo or Docker
+      # from here on, and the installs below run in contained.sh, so nothing they start
+      # outlives them. The agent's own commands then run in Claude Code's sandbox.
+      - uses: ./.github/actions/factory-lockdown
+        with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
+
       # Toolchains for the products the PR touches, matching ci.yml.
       - uses: pnpm/action-setup@v4
         if: contains(env.SCOPES, 'bun2too-support-agent')
@@ -115,7 +121,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         if: contains(env.SCOPES, 'bun2too-support-agent')
       - if: contains(env.SCOPES, 'bun2too-support-agent')
-        run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
+        run: .github/scripts/contained.sh sh -c 'pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen'
       - uses: actions/setup-python@v5
         if: contains(env.SCOPES, 'bun2too-crew-team')
         with: { python-version: "3.12" }
@@ -123,7 +129,7 @@ jobs:
         if: contains(env.SCOPES, 'bun2too-crew-team')
         with: { node-version: "24" }
       - if: contains(env.SCOPES, 'bun2too-crew-team')
-        run: python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
+        run: .github/scripts/contained.sh python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
       - uses: actions/setup-node@v5
         if: contains(env.SCOPES, 'bun2too-website')
         with:
@@ -133,12 +139,7 @@ jobs:
             cache-dependency-path: bun2too-website/package-lock.json,
           }
       - if: contains(env.SCOPES, 'bun2too-website')
-        run: npm ci --prefix bun2too-website
-
-      # Rule 11, layers 1 and 3: dependencies are in; from here the agent's commands run
-      # sandboxed with no network, and nothing can lift that.
-      - uses: ./.github/actions/factory-lockdown
-        with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
+        run: .github/scripts/contained.sh npm ci --prefix bun2too-website
 
       - uses: ./.github/actions/factory-agent
         id: agent
