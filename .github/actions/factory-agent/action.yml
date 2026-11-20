@@ -25,6 +25,9 @@ outputs:
   cause:
     description: The agent's last message when it failed, for the PR comment.
     value: ${{ steps.result.outputs.cause }}
+  execution-file:
+    description: Claude Code's run record (anthropic only), for checks such as factory-sandbox-check.
+    value: ${{ steps.claude.outputs.execution_file }}
 runs:
   using: composite
   steps:
