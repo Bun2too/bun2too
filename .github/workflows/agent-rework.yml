@@ -10,6 +10,7 @@ on:
     inputs:
       pr: { type: number, required: true }
       review_url: { type: string, required: true }
+      head_sha: { type: string, required: true, description: "The commit the review judged" }
 env:
   PR: ${{ inputs.pr }}
   GH_REPO: ${{ github.repository }}
@@ -24,11 +25,23 @@ jobs:
       branch: ${{ steps.plan.outputs.branch }}
       head: ${{ steps.plan.outputs.head }}
       handoff: ${{ steps.plan.outputs.handoff }}
+      moved: ${{ steps.plan.outputs.moved }}
     steps:
       - name: Decide whether an agent may rework this PR
         id: plan
-        env: { GH_TOKEN: "${{ github.token }}", MAX_ROUNDS: "${{ vars.FACTORY_MAX_ROUNDS || '3' }}" }
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_ROUNDS: ${{ vars.FACTORY_MAX_ROUNDS || '3' }}
+          REVIEWED: ${{ inputs.head_sha }}
         run: |
+          # Rework only the commit the review judged. If the branch moved since, the newer
+          # commit gets its own review, so this round does nothing.
+          current=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+          if [ "$current" != "$REVIEWED" ]; then
+            echo "The branch moved from $REVIEWED to $current after the review; no rework."
+            echo "moved=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # A bad value must never lift the cap.
           if ! [[ "$MAX_ROUNDS" =~ ^[1-9][0-9]?$ ]]; then
             echo "::warning::FACTORY_MAX_ROUNDS='$MAX_ROUNDS' is not a number from 1 to 99; using 3"
@@ -46,7 +59,8 @@ jobs:
           fi
           {
             echo "round=$((n+1))"; echo "scopes=$scopes"; echo "handoff=$handoff"
-            gh pr view "$PR" --json headRefName,headRefOid -q '"branch=\(.headRefName)\nhead=\(.headRefOid)"'
+            gh pr view "$PR" --json headRefName -q '"branch=\(.headRefName)"'
+            echo "head=$REVIEWED"
           } >> "$GITHUB_OUTPUT"
       # Labels and comments use the workflow token, so they never start another run.
       - name: Hand to a person
@@ -57,7 +71,7 @@ jobs:
           gh pr edit "$PR" --add-label ready-for-human
           gh pr comment "$PR" --body "$WHY Handing to a person; the latest review lists the open findings."
       - name: Mark round
-        if: steps.plan.outputs.handoff == ''
+        if: steps.plan.outputs.handoff == '' && steps.plan.outputs.moved != 'true'
         env: { GH_TOKEN: "${{ github.token }}", ROUND: "${{ steps.plan.outputs.round }}" }
         run: |
           gh label create "rework-$ROUND" --force --color FBCA04 --description "Factory rework round $ROUND"
@@ -65,7 +79,7 @@ jobs:
 
   rework:
     needs: plan
-    if: needs.plan.outputs.handoff == ''
+    if: needs.plan.outputs.handoff == '' && needs.plan.outputs.moved != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Read-only: this job runs the agent. It holds only the model provider's key.
@@ -190,6 +204,10 @@ jobs:
           printf '[core]\n\trepositoryformatversion = 0\n\tbare = true\n' > "$exp/config"
           GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git --git-dir="$exp" -c core.hooksPath=/dev/null \
             format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
+          # Later steps (the actions' post steps) may run git here: give them a clean config
+          # and no hooks, whatever the agent wrote.
+          rm -rf .git/hooks .git/info/attributes && mkdir .git/hooks
+          printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n' > .git/config
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with: { name: rework, path: "${{ runner.temp }}/out/", if-no-files-found: error }
@@ -197,7 +215,7 @@ jobs:
   # A fresh runner: the only job here that holds the app token is one no agent touched.
   push:
     needs: [plan, rework]
-    if: ${{ !cancelled() && needs.plan.outputs.handoff == '' && needs.rework.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.plan.outputs.handoff == '' && needs.plan.outputs.moved != 'true' && needs.rework.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: { contents: read, pull-requests: write, issues: write }
