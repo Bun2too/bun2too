@@ -61,6 +61,8 @@ runs:
     # - nothing prompts, so anything not allowlisted is denied
     # - the file tools read and write only the workspace and the toolchain caches, so they
     #   cannot read the key from /proc or the runner's temp files
+    # - no hooks, and (with --strict-mcp-config) no MCP servers from the checkout: both would
+    #   run outside the sandbox, and a PR could add them
     # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on the step strips the key from every command's environment.
     - name: Configure the Claude Code sandbox
       id: claude-settings
@@ -76,6 +78,7 @@ runs:
             additionalDirectories: [($home + "/.cache"), ($home + "/.local/share"), ($home + "/setup-pnpm")],
             deny: ["WebFetch", "WebSearch", "Read(//proc/**)"]
           },
+          disableAllHooks: true,
           sandbox: {
             enabled: true,
             failIfUnavailable: true,
@@ -101,6 +104,7 @@ runs:
         claude_args: >-
           --model ${{ inputs.model || 'claude-sonnet-5-5' }}
           --permission-mode dontAsk
+          --strict-mcp-config
           --max-turns ${{ inputs.max-turns }}
           --max-budget-usd ${{ inputs.max-budget-usd }}
           --allowedTools "${{ inputs.allowed-tools }}"

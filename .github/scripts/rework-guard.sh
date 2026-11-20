@@ -25,7 +25,9 @@ done
 
 while read -r f; do
   [ -n "$f" ] || continue
-  if [[ "$f" =~ ^(\.claude|\.cursor|\.github)/ || "$f" =~ (^|/)(AGENTS|CLAUDE)\.md$ || "$f" == docs/factory.md || "$f" == docs/sdlc.md ]]; then
+  # Agent config at any depth: a product's .claude/ or an .mcp.json could make the next
+  # factory run load hooks or MCP servers outside the sandbox.
+  if [[ "$f" =~ (^|/)(\.claude|\.cursor|\.github)/ || "$f" =~ (^|/)(AGENTS|CLAUDE)\.md$ || "$f" =~ (^|/)\.mcp\.json$ || "$f" == docs/factory.md || "$f" == docs/sdlc.md ]]; then
     violations+=("$f is a factory file; only a person changes those")
   elif [[ "$f" == rework-report.md || "$f" == .factory/* ]]; then
     violations+=("$f was committed; it is the run's input or report, not code")
