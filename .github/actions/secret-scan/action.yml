@@ -36,8 +36,14 @@ runs:
           case "${rc:-0}" in 0) ;; 2) found=true ;; *) echo "::error::gitleaks failed to run"; exit 1 ;; esac
           for key in "$KEY_1" "$KEY_2" "$KEY_3"; do
             [ -n "$key" ] || continue
-            b64=$(printf '%s' "$key" | base64 -w0)
-            if grep -rqF -e "$key" -e "$b64" -e "${b64%%=*}" -- "$SCAN_PATH"; then found=true; fi
+            # base64 of the key at each of the three byte alignments it can have inside a
+            # longer text; the 4 characters at each end depend on the neighbouring bytes.
+            pats=(-e "$key")
+            for pre in "" "a" "aa"; do
+              b64=$(printf '%s%s' "$pre" "$key" | base64 -w0)
+              pats+=(-e "${b64:4:${#b64}-8}")
+            done
+            if grep -rqF "${pats[@]}" -- "$SCAN_PATH"; then found=true; fi
           done
         fi
         [ "$found" = true ] && echo "::error::The agent's output contains a secret. Nothing from it is posted or pushed."
