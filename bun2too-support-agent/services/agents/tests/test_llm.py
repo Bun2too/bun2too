@@ -40,6 +40,18 @@ def test_without_gateway_settings_calls_the_provider_directly() -> None:
     assert not any(name.startswith("cf-aig-") for name in request.headers)
 
 
+def test_a_token_without_gateway_ids_is_the_rollback_and_calls_the_provider_directly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Rolling back (ADR 0007) clears both IDs and may leave the token set.
+    token_only = {"CF_AIG_TOKEN": GATEWAY["CF_AIG_TOKEN"]}
+    request = _sent(chat_model(SPEC, env=token_only))
+    assert str(request.url) == "https://api.anthropic.com/v1/messages"
+    assert not any(name.startswith("cf-aig-") for name in request.headers)
+    check_models([SPEC], env=token_only)
+    assert "bypass Cloudflare AI Gateway" in caplog.text
+
+
 def test_with_gateway_settings_routes_through_cloudflare_ai_gateway() -> None:
     request = _sent(chat_model(SPEC, env=GATEWAY))
     assert (
