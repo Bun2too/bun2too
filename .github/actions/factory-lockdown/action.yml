@@ -17,11 +17,25 @@ runs:
         # Other apt sources may be outside the allowlist; the Ubuntu archive is enough here.
         sudo apt-get update -qq || true
         sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
-        # Ubuntu 24.04 blocks unprivileged user namespaces, which bubblewrap needs.
+        # Ubuntu restricts user namespaces with AppArmor. Its bwrap-userns-restrict profile
+        # lets bwrap in but strips capabilities from what runs inside, which stops Claude
+        # Code's seccomp helper. Use the profile Claude Code's docs give for /usr/bin/bwrap.
+        echo "AppArmor profiles for bwrap: $(ls /etc/apparmor.d | grep -i bwrap | tr '\n' ' ')"
+        if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+          sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict 2>/dev/null || true
+          sudo mv /etc/apparmor.d/bwrap-userns-restrict /etc/apparmor.d/disable/ 2>/dev/null || sudo rm -f /etc/apparmor.d/bwrap-userns-restrict
+        fi
+        printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' '' \
+          'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '  include if exists <local/bwrap>' '}' |
+          sudo install -m 0644 /dev/stdin /etc/apparmor.d/bwrap
+        sudo apparmor_parser -r /etc/apparmor.d/bwrap
         if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
           sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0
         fi
-        bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net -- true ||
+        # The same shape Claude Code uses: a sandbox with no network that sets up a nested
+        # user namespace inside.
+        bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --unshare-net -- \
+          unshare --user --map-root-user true ||
           { echo "::error::The command sandbox (bubblewrap) does not start on this runner"; exit 1; }
 
     - name: Take sudo and Docker away
