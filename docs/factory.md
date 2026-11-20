@@ -10,7 +10,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | ------------- | -------------------------------------------------------- | ---------------- | ------------------------------------------ | --------------------------------------------- |
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
-| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Merge on PASS, Rework on FAIL | merges factory PRs; the loop merges product PRs | concurrency group per PR, cancel in progress  |
+| **Review**    | PR opened, synchronised, ready, or labelled `agent-review`; waits for CI | Merge on PASS, Rework on FAIL | a person merges factory PRs; the loop merges product PRs | concurrency group per PR, cancel in progress  |
 | **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after `FACTORY_MAX_ROUNDS` rounds, a guard failure, or a round with no fix | labels `rework-<n>` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
