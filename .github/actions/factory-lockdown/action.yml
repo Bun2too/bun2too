@@ -29,9 +29,8 @@ runs:
           'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '  include if exists <local/bwrap>' '}' |
           sudo install -m 0644 /dev/stdin /etc/apparmor.d/bwrap
         sudo apparmor_parser -r /etc/apparmor.d/bwrap
-        if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-          sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0
-        fi
+        # Only bwrap is let through; Ubuntu's restriction on user namespaces stays on for
+        # everything else.
         # The same shape Claude Code uses: a sandbox with no network that sets up a nested
         # user namespace inside.
         bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --unshare-net -- \
