@@ -11,7 +11,8 @@ set -euo pipefail
 args=(--ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --unshare-pid --die-with-parent --new-session)
 while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
   mkdir -p "$1"
-  args+=(--bind "$1" "$1")
+  dir=$(realpath "$1") # bwrap resolves mount paths from /, not from here
+  args+=(--bind "$dir" "$dir")
   shift
 done
 [ "${1:-}" = -- ] || { echo "usage: contained.sh <writable-dir>... -- <command>" >&2; exit 2; }
