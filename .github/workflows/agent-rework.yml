@@ -133,8 +133,9 @@ jobs:
       - if: contains(env.SCOPES, 'bun2too-crew-team')
         run: |
           # Into a virtualenv inside the product folder, so the install writes nowhere else.
+          # Not put on PATH: the install can write that folder, so later steps never run
+          # from it. The agent calls its python by path, inside the sandbox.
           python3 -m venv bun2too-crew-team/.venv
-          echo "$PWD/bun2too-crew-team/.venv/bin" >> "$GITHUB_PATH"
           .github/scripts/contained.sh bun2too-crew-team "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
             bun2too-crew-team/.venv/bin/python -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
       - uses: actions/setup-node@v5
@@ -167,6 +168,7 @@ jobs:
             Factory files (.claude/, .cursor/, .github/, AGENTS.md, CLAUDE.md, docs/factory.md, docs/sdlc.md) are a
             person's to change: list findings in them as **needs a person** and do not edit them.
             Commit locally; you cannot push, and the workflow checks your commits before it pushes them.
+            For the crew team, run Python as bun2too-crew-team/.venv/bin/python (its packages are installed there).
             Write your checklist to .factory/rework-report.md and do not commit anything under .factory/.
 
       # Everything below runs on this runner, which the agent could have changed, so it only
