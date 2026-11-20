@@ -144,6 +144,6 @@ Rework runs the PR's code, its tests and its dependencies while the model key is
 
 Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages.
 
-Gemini CLI has no command sandbox in this setup, so Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review, which runs no commands besides `git diff/log/show`, still works with Gemini. A new role that gives an agent a shell must meet the same five layers before it is turned on.
+Gemini CLI has no command sandbox in this setup, so it never gets a shell. Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review still works with Gemini: the workflow writes the diff to `.factory/diff.patch` before any agent runs, and Gemini reads it with file tools only. A new role that gives an agent a shell must meet the same five layers before it is turned on.
 
 `factory-sandbox-check.yml` proves the layers whenever their files change. An agent set up exactly like Rework runs `.github/scripts/sandbox-probe.sh`. The probe tries to read the key from its environment and from `/proc`, reach three hosts, use `sudo` and Docker, and run the toolchains and `git commit`. The workflow, not the agent, judges the results, and it also checks that the key appears nowhere in the agent's output.
