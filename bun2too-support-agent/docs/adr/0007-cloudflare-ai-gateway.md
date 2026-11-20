@@ -27,6 +27,7 @@ The settings arrive through `SUPPORT_RUNTIME_SECRETS` like every other runtime s
 ## Consequences
 
 - Spend, rate limits and per-call analytics are configured in Cloudflare per environment, without code or deploys. Provider fallback becomes a gateway setting.
+- Cloudflare sees the provider key: it travels in the `Authorization` header through the gateway on every call, and the gateway forwards it. Trusting Cloudflare with it, as with our other traffic, is part of this decision; payloads are not logged (`cf-aig-collect-log-payload: false`).
 - Model calls add one network hop through the nearest Cloudflare location. The agents service itself still runs on Railway, so this is a proxy at the edge, not edge compute for our code.
 - Adding another provider means routing it in `llm.py`; until then it fails at start-up instead of silently bypassing the gateway.
 - Response caching stays off: support conversations are personal, and a cached answer could reach the wrong customer.
