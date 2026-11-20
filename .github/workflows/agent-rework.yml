@@ -132,8 +132,11 @@ jobs:
         with: { node-version: "24" }
       - if: contains(env.SCOPES, 'bun2too-crew-team')
         run: |
-          .github/scripts/contained.sh bun2too-crew-team "$(python3 -c 'import sys; print(sys.prefix)')" "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
-            python3 -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
+          # Into a virtualenv inside the product folder, so the install writes nowhere else.
+          python3 -m venv bun2too-crew-team/.venv
+          echo "$PWD/bun2too-crew-team/.venv/bin" >> "$GITHUB_PATH"
+          .github/scripts/contained.sh bun2too-crew-team "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
+            bun2too-crew-team/.venv/bin/python -m pip install -r bun2too-crew-team/crewai_agents/requirements.txt
       - uses: actions/setup-node@v5
         if: contains(env.SCOPES, 'bun2too-website')
         with:
