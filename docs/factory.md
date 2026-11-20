@@ -142,7 +142,7 @@ Rework runs the PR's code, its tests and its dependencies while the model key is
 4. **Secret scan before anything leaves.** The jobs that post or push (`verdict` and the rework `push`) run the `secret-scan` action over everything the agent wrote: the review, the patches and the report. It runs gitleaks for known key formats and also matches the factory's own keys, as written and base64-encoded. If anything matches, or the scan cannot run, nothing is posted or pushed and the PR comment says why.
 5. **A key worth little.** `ANTHROPIC_API_KEY` (or the OpenAI or Gemini secret) is the factory's own key, from a provider workspace with a monthly spend limit, used for nothing else.
 
-Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages.
+Claude Code's file tools are also limited to the workspace and the toolchain caches, so they cannot read the key from `/proc` or the runner's temp files, and the agent cannot fetch web pages. Gemini CLI's file tools stay inside the workspace too, and layer 4 backs that up. The hygiene autofix also runs PR code, but no agent and no secret: it holds neither the model key nor the app token.
 
 Gemini CLI has no command sandbox in this setup, so it never gets a shell. Rework refuses `FACTORY_PROVIDER=gemini` and hands the PR to a person. Review still works with Gemini: the workflow writes the diff to `.factory/diff.patch` before any agent runs, and Gemini reads it with file tools only. A new role that gives an agent a shell must meet the same five layers before it is turned on.
 

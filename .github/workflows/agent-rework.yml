@@ -170,7 +170,10 @@ jobs:
           out="$RUNNER_TEMP/out" && mkdir -p "$out"
           cp .factory/rework-report.md "$out/report.md" 2>/dev/null ||
             echo "The Rework run wrote no report. ${CAUSE:+Cause: $CAUSE}" > "$out/report.md"
-          git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+          # The agent could edit .git/config, so git never runs with it here: a bare clone
+          # copies only the objects and refs, and the patches come from that clone.
+          git -c core.hooksPath=/dev/null clone -q --bare --no-local "file://$PWD" "$RUNNER_TEMP/export.git"
+          git --git-dir="$RUNNER_TEMP/export.git" -c core.hooksPath=/dev/null \
             format-patch --binary --no-ext-diff --stdout "$BEFORE..HEAD" > "$out/rework.patch"
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

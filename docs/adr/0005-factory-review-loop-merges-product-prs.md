@@ -37,7 +37,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
   4. The push job secret-scans the agent's patches and pushes nothing if a secret appears.
   5. The factory's key comes from its own provider workspace with a monthly spend limit, and holds nothing else.
 
-  A provider that cannot sandbox commands (Gemini CLI today) gets no shell: it reviews from a diff file the workflow writes and does not run Rework. The review agent has no file-writing tools: its final message is the review, and `git diff/log/show --output` and `--ext-diff` are denied.
+  A provider that cannot sandbox commands (Gemini CLI today) gets no shell: it reviews from a diff file the workflow writes and does not run Rework. The review agent has no file-writing tools: its final message is the review. `--output` and `--ext-diff` are denied on `git diff/log/show` in any position, and the sandbox keeps `.git/config` and hooks read-only. The rework's patches are exported from a bare clone, so git never reads a config file the agent could have edited.
 - **Factory changes cannot be proven by the factory before merge.** Workflows run from the PR, but a person still merges them, and the first real run of a change is on the PR that carries it.
 - **Implement, Ratchet and Retro still hold the app token while their agent runs**, so they are off unless `FACTORY_LEGACY_AGENTS=true`, until they move to the same split-job pattern. Explore (triage) only comments and labels issues.
 - **Codex and Gemini review in one pass**, where Claude Code can run three reviewers in parallel. Their budget caps live in the provider's console, not in the workflow.
