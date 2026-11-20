@@ -161,7 +161,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
-          allowed-tools: Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*)
+          allowed-tools: Read,Edit,Write,Glob,Grep,Agent,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git restore:*),Bash(pnpm:*),Bash(uv:*),Bash(npm:*),Bash(node:*),Bash(python3:*),Bash(bun2too-crew-team/.venv/bin/python:*)
           prompt: |
             Act as the Rework role in docs/factory.md for PR #${{ env.PR }}, round ${{ env.ROUND }}.
             The review to answer is in .factory/review.md. Products this PR touches: ${{ env.SCOPES }}. Stay inside them.
