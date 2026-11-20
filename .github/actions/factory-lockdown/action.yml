@@ -30,9 +30,9 @@ runs:
       run: |
         sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
         sudo rm -f /var/run/docker.sock /run/containerd/containerd.sock
-        # sudoers uses the last matching rule, and this file sorts last.
-        echo "$USER ALL=(ALL:ALL) !ALL" | sudo tee /etc/sudoers.d/zzz-factory-no-sudo >/dev/null
-        sudo chmod 0440 /etc/sudoers.d/zzz-factory-no-sudo
+        # sudoers uses the last matching rule, and this file sorts last. It takes effect the
+        # moment it exists, so it is written with its final mode in one command, the last sudo.
+        echo "$USER ALL=(ALL:ALL) !ALL" | sudo install -m 0440 /dev/stdin /etc/sudoers.d/zzz-factory-no-sudo
 
     # Fail closed: the agent must not start on a runner where these still work.
     - name: Check the lockdown
