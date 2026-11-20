@@ -22,7 +22,7 @@ scope_of() {
 }
 
 for commit in $(git rev-list --reverse "$before..HEAD"); do
-  scopes=$(git diff-tree --no-commit-id --name-only -r "$commit" | while read -r f; do scope_of "$f"; done | sort -u)
+  scopes=$(git diff-tree --no-commit-id --name-only --no-renames -r "$commit" | while read -r f; do scope_of "$f"; done | sort -u)
   [ "$(echo "$scopes" | grep -c .)" -le 1 ] ||
     violations+=("$(git log -1 --format=%h "$commit") touches more than one product: $(echo $scopes)")
 done
@@ -38,7 +38,7 @@ while read -r f; do
   elif [[ "$allowed" != *" $(scope_of "$f") "* ]]; then
     violations+=("$f is outside the products this PR touches")
   fi
-done < <(git diff --name-only "$before..HEAD")
+done < <(git diff --name-only --no-renames "$before..HEAD")
 
 # A finding is fixed, not silenced: no new suppressions, skipped tests or focused tests.
 silencers='noqa|type: *ignore|pyright: *ignore|eslint-disable|biome-ignore|@ts-(ignore|expect-error|nocheck)|pragma: *no ?cover|pytest\.mark\.(skip|xfail)|\b(it|test|describe)\.(skip|only|todo)\(|\bx(it|describe)\('

@@ -191,7 +191,7 @@ jobs:
       # comes from the PR's own .github/actions, which this workflow trusts like itself:
       # the guard keeps agents out of .github/, and a person merges any change to it.
       - uses: actions/checkout@v5
-        with: { sparse-checkout: .github/actions, persist-credentials: false, path: scan }
+        with: { ref: "${{ github.event.pull_request.head.sha }}", sparse-checkout: .github/actions, persist-credentials: false, path: scan }
       - uses: ./scan/.github/actions/secret-scan
         id: scan
         continue-on-error: true
@@ -284,7 +284,9 @@ jobs:
           # If it cannot be read, the PR counts as a factory PR, so nothing merges unchecked.
           factory_re=$(gh api -H "Accept: application/vnd.github.raw" \
             "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$BASE_SHA" 2>/dev/null | head -n 1)
-          if [ -z "$factory_re" ] || gh pr diff "$PR" --name-only | grep -qE "$factory_re"; then
+          # Old and new names both count, so renaming a factory file out of .github/ is caught.
+          files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')
+          if [ -z "$factory_re" ] || [ -z "$files" ] || printf '%s\n' "$files" | grep -qE "$factory_re"; then
             gh pr comment "$PR" --body "Review and CI passed. This PR changes the factory, so a person merges it (AGENTS.md rule 10)."
             exit 0
           fi
