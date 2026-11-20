@@ -17,7 +17,11 @@ The owner of an area decides how it changes. Either agent may change a shared ro
 
 - Each agent works in its own checkout or `git worktree`, on its own branches: `claude/*` and `codex/*`. Neither commits to, rebases or switches the other's branch, and neither touches the other's uncommitted files. AGENTS.md rule 6 applies between the agents as it does to people.
 - Before editing, run `git status --short` and `git branch --show-current` in your own checkout.
-- Base a branch on `origin/main`. If it has to build on an open PR, say so in its description and rebase it onto `main` once that PR merges, so it never carries the other PR's commits.
+- Base a branch on `origin/main`. If it has to build on an open PR, say so in its description. Once that PR merges, update the branch without a force-push (AGENTS.md rule 9):
+  - if GitHub retargets the PR to `main` and its diff shows only this branch's changes, keep it;
+  - otherwise (the parent was rebase- or squash-merged, so its commits were rewritten), cherry-pick this branch's own commits onto a fresh branch from `origin/main`, open a new PR, and close the old one with a link to it. Or hand the history rewrite to the owner.
+
+  Either way, the new head needs a new cross-review.
 - Commit only paths you changed (`git add <paths>`, never `git add -A`).
 
 ## Cross-review
@@ -25,7 +29,8 @@ The owner of an area decides how it changes. Either agent may change a shared ro
 Every PR either agent opens is reviewed by the other before a person merges it, and before anyone asks the factory to review it (the `agent-review` label).
 
 - The review is one PR comment. It starts with `Reviewed commit: <full SHA>` and ends with exactly one line: `CROSS-REVIEW (claude): PASS` or `CROSS-REVIEW (codex): FAIL` (the reviewer's name, then its verdict).
-- It covers the PR's head commit only. A new commit needs a new review.
+- It covers the PR's head commit only. A new commit written by either agent or a person needs a new review.
+- Commits the factory's rework rounds push (as `bun2too-software-factory[bot]`) are the exception. The factory's own review and the rework guard check them (ADR 0005), and the loop may merge a product PR without a fresh cross-review. Nothing in the merge job enforces cross-review: it is a rule the agents keep. Neither agent asks for the `agent-review` label before its PR has a cross-review PASS on the current head.
 - A FAIL lists each finding with `file:line`, what goes wrong, and a concrete failure scenario. A PASS still names the riskiest part of the change and why it holds.
 - The reviewer challenges the change and does not just check it. Ask: does it solve the stated problem, could it be smaller, which rule (AGENTS.md) or ADR does it touch, and what breaks first in production?
 - The author answers every finding: fixed (with the commit), or disputed (with the reason). If the two agents still disagree, both state their positions in the PR and the owner decides. Neither agent overrides the other.
