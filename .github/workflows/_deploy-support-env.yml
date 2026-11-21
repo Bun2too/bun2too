@@ -29,6 +29,11 @@ jobs:
             cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}",
             terraform_wrapper: false,
           }
+      # Read-only: this environment's workspace runs locally, and the project workspace whose
+      # state the environment layer reads is visible to the same token.
+      - name: Check the workspaces
+        env: { TF_TOKEN: "${{ secrets.TF_API_TOKEN }}" }
+        run: ../.github/scripts/tf-workspace-check.sh "$TF_WORKSPACE" bun2too-support-app
       - name: Apply environment config (variables, secrets, domain)
         id: tf
         working-directory: bun2too-support-agent/infra/terraform/railway/environment
