@@ -7,7 +7,8 @@ name: agent-review
 # agent-review label starts it, and the run takes the label off again. Only the loop's own
 # rework push, which puts the label back first, continues it. A plain push, a new PR or a
 # PR marked ready starts nothing paid. FACTORY_MAX_RUNS_PER_DAY and FACTORY_MAX_USD_PER_DAY
-# cap the loop a day, and a factory PR gets reviews but never a paid rework round.
+# cap the loop a day. A factory PR gets reviews and merges on PASS, but never a paid rework
+# round, because the rework agent may not edit factory files.
 #
 # The agent runs in its own job with a read-only token and no app credentials, because
 # it can write anywhere on its runner. Jobs on fresh runners post, push and merge.
@@ -354,26 +355,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           CI_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # The factory-path list from the base branch: a PR cannot shrink it for itself.
-          # Fail closed: unless the fetch succeeds and the list matches a known factory path,
-          # the PR counts as a factory PR. (On a 404, gh prints the error body to stdout.)
-          if fetched=$(gh api -H "Accept: application/vnd.github.raw" \
-                "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$BASE_SHA" 2>/dev/null) &&
-             factory_re=$(printf '%s\n' "$fetched" | head -n 1) &&
-             printf '%s\n' .github/workflows/ci.yml AGENTS.md | grep -qE "$factory_re"; then
-            echo "Factory paths from the base branch: $factory_re"
-          else
-            factory_re=""
-            echo "Could not read a valid factory-path list from the base branch; treating this as a factory PR."
-          fi
-          # Old and new names both count, so renaming a factory file out of .github/ is caught.
-          files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')
-          if [ -z "$factory_re" ] || [ -z "$files" ] || printf '%s\n' "$files" | grep -qE "$factory_re"; then
-            gh pr comment "$PR" --body "Review and CI passed. This PR changes the factory, so a person merges it (AGENTS.md rule 10)."
-            exit 0
-          fi
+          # Factory PRs merge like product PRs (AGENTS.md rules 9 and 10, 2026-11-21).
           # CI must be green on this exact commit, even when the review was reused.
           ci=$(GH_TOKEN=$CI_TOKEN gh run list --workflow ci.yml --commit "$HEAD_SHA" --json conclusion -q '.[0].conclusion // empty')
           if [ "$ci" != success ]; then

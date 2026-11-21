@@ -51,8 +51,8 @@ jobs:
           n=$(echo "$labels" | sed -n 's/^rework-\([0-9]*\)$/\1/p' | sort -n | tail -n 1)
           n=${n:-0}
           scopes=$(gh pr diff "$PR" --name-only | awk -F/ 'NF { print ($1 ~ /^bun2too-/ && NF > 1) ? $1 : "root" }' | sort -u | tr '\n' ' ')
-          # Rework may not edit factory files and the loop never merges a factory PR, so a
-          # paid round on one fixes nothing (22 of 22 rounds on PR #6, 2026-11-19/20). The
+          # Rework may not edit factory files (rule 11 guard), so a paid round on a factory PR
+          # fixes nothing (22 of 22 rounds on PR #6, 2026-11-19/20). The
           # path list comes from the base branch; if it cannot be read, assume a factory PR.
           base=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
           factory_re=$(gh api -H "Accept: application/vnd.github.raw" \
@@ -63,7 +63,7 @@ jobs:
           if echo "$labels" | grep -qx ready-for-human; then
             handoff="This PR is already waiting for a person."
           elif [ -z "$factory_re" ] || printf '%s\n' "$files" | grep -qE "$factory_re"; then
-            handoff="This PR changes the factory, which the rework agent may not edit and a person merges (AGENTS.md rules 10 and 12), so no paid rework round runs."
+            handoff="This PR changes the factory, which the rework agent may not edit (AGENTS.md rules 10 and 11), so no paid rework round runs. Its author fixes the findings."
           elif [ "$n" -ge "$MAX_ROUNDS" ]; then
             handoff="$MAX_ROUNDS rework rounds did not pass review."
           fi
