@@ -66,7 +66,7 @@ When a rule changes a decision, name it in the PR with the decision it changed. 
 - Never commit secrets. `.env*` is ignored except `.env.example`.
 - Never call live Jira, ServiceNow, CIAM or LLM endpoints from tests. Run with `RELAY_OFFLINE=1` wiring: the keyword classifier, `KnowledgeLookupSpecialist` and the fakes in `relay_agents.connectors.fakes`.
 - Never push to `main`, force-push, or change CI permissions from an agent run.
-- Changes to this file, `.claude/`, `.cursor/`, `infra/` and `docs/factory/` change the factory or production and always need human review (root rule 10).
+- Changes to this file, `.claude/`, `.cursor/`, `infra/` and `docs/factory/` change the factory or production. They merge on the same gates as any PR (root rules 9 and 10); a new write permission waits for the owner.
 - Deploys happen only through `deploy-support.yml`. Never run `terraform apply` or `railway up` from a workstation.
 
 ## Product skills
