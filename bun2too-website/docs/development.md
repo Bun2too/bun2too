@@ -52,7 +52,7 @@ The test runner owns port 3100 and tears its server down. Do not stop an unrelat
 
 ## Making changes
 
-- Service copy: use `src/lib/site.ts`; keep public slugs, FAQs, SEO descriptions, and `/llms.txt` aligned. The service schema is derived from capabilities. See [product context](product.md).
+- Service copy/composition: edit published Contentful entries and maintain `src/content/website-seed.json` as the reviewed fallback; `site.ts` retains application facts and compatibility data. Keep stable slugs, FAQs, metadata and `/llms.txt` aligned through the CMS graph. The support adapter also has a code-owned FAQ baseline. See [product context](product.md) and [CMS design](contentful-design.md).
 - Views and UI: public pages stay server-rendered; client components own interactive forms and chat. Use official assets in `public/bun2too/`. Preserve mobile layout, keyboard access, reduced-motion behavior, and the chat's visible message composer.
 - Identity: use official Auth0 SDK methods; keep Management API credentials server-only. Preserve passwordless pending signup, verified activation, separate marketing consent, and authenticated withdrawal.
 - Support: keep inquiries private, consent explicit, visitor ownership/idempotency checked, and rate limits/retention intact. Never use real customers as test fixtures.

@@ -35,4 +35,4 @@ Public copy should remain concrete about what the service helps with. Do not inv
 
 ## Relationship to customer support
 
-Current website support consists of FAQs and private customer inquiries. Open WebUI is the planned future AI platform, but no AI chat or model connection is currently implemented. Updating service content should keep public FAQs and discovery copy aligned; it does not configure an AI service. Follow [support setup](support.md) for current inquiry behavior and future integration boundaries.
+Website support includes FAQs, private inquiries with SES SMTP notification/acknowledgment, and an implemented optional Open WebUI adapter. AI requires explicit enablement and approved public-only model/knowledge access. Updating CMS FAQs does not ingest that collection or change the adapter's code-owned FAQ baseline. Keep the snapshot, public discovery, `support-content.ts` and approved knowledge aligned through review. Follow [support setup](support.md); source implementation does not establish current provider connectivity.

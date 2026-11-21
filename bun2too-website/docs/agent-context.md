@@ -4,6 +4,10 @@ This repository includes project-specific context so future assistants can work 
 
 CMS presentation/content work starts with [Contentful design and publishing](contentful-design.md): it explains the seven models, safe server reader, ordered block registry, fallback snapshot, migration commands and environment split. Never put real space identifiers or API credentials into guides, fixtures or skills.
 
+Read the [website glossary](../GLOSSARY.md) for domain terms. In the monorepo, root `AGENTS.md` and the shared organization context also apply; this product guide remains portable to its mirror. Work from an approved issue/spec, preserve another assistant's uncommitted work, and hand off paths, revision, checks and unresolved external state.
+
+The nested release workflow runs in the mirror; monorepo CI runs only its listed offline checks. Legacy branch mappings are implementation facts, not permission to maintain environment branches in the monorepo.
+
 ## Scoped agent guidance
 
 | File                                                          | Scope                                                                              |

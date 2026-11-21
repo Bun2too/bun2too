@@ -1,6 +1,8 @@
 # Implementation and live integration readiness
 
-Last audited: November 9, 2026. This records source implementation and locally visible configuration, not a claim about uninspected GitHub secrets, Netlify dashboards, DNS, or deployed production state.
+Historical snapshot: November 9, 2026. Setting-presence statements and test totals below describe that audit, not current local or hosted configuration. For current implemented contracts use [architecture](architecture.md), [support](support.md) and [identity setup](setup.md). No environment files or live providers were inspected during the November 20 context reconciliation.
+
+Original audit scope: This records source implementation and locally visible configuration, not a claim about uninspected GitHub secrets, Netlify dashboards, DNS, or deployed production state.
 
 | Area | Implemented / checked locally | Still requires external configuration or live verification |
 | --- | --- | --- |
