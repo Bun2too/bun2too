@@ -8,6 +8,11 @@ from scripts import recover_marketing as recovery
 
 
 class RecoveryTests(unittest.TestCase):
+    def setUp(self):
+        capture = redirect_stdout(io.StringIO())
+        capture.__enter__()
+        self.addCleanup(capture.__exit__, None, None, None)
+
     def env(self):
         return dict(CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='private-marketing',
                     N8N_BASE_URL='https://n8n.example', N8N_API_KEY='private-n8n', GITHUB_ACTOR='operator')
