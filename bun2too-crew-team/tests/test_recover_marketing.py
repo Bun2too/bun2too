@@ -18,11 +18,12 @@ class RecoveryTests(unittest.TestCase):
         return dict(CREWAI_BASE_URL='https://crew.example', MARKETING_API_KEY='private-marketing',
                     N8N_BASE_URL='https://n8n.example', N8N_API_KEY='private-n8n', GITHUB_ACTOR='operator')
 
-    def test_resume_branch_guard_runs_before_the_protected_job(self):
+    def test_production_recovery_branch_guard_runs_before_the_protected_job(self):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/deploy.yml').read_text()
         validation, recovery_job = workflow.split('  publishing_recovery:', 1)
         self.assertIn('validate_publishing_recovery:', validation)
-        self.assertIn("inputs.operation == 'resume-publishing' && github.ref_name != 'main'", validation)
+        self.assertIn("inputs.operation == 'resume-publishing' || inputs.recovery_environment == 'production'", validation)
+        self.assertIn("&& github.ref_name != 'main'", validation)
         self.assertNotIn('\n    environment:', validation)
         self.assertIn('needs: validate_publishing_recovery', recovery_job)
 
