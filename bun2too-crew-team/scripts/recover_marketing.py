@@ -85,6 +85,8 @@ def recover(env, action, request=http_json):
         try:
             return request(base + path, headers, method, payload)
         except HTTPError as exc:
+            if method == 'POST' and path == '/automation/recovery/resume' and exc.code == 409:
+                raise RecoveryError('Generation circuit changed or resume conflicted; inspect again; no automatic retry') from None
             raise RecoveryError(f'{method} {path.split("?")[0]} failed HTTP {exc.code}; '
                                 'response body withheld; no automatic mutation retry') from None
         except RecoveryError:
@@ -97,10 +99,12 @@ def recover(env, action, request=http_json):
     operations = call(crew, crew_headers, '/automation/operations/status')
     campaigns = call(crew, crew_headers, '/automation/status')
     circuit = operations.get('generation_circuit')
+    watchdog = operations.get('watchdog')
     report = {'action': action, 'ready': fields(ready, ('model_configured', 'worker_ready',
               'publishing_enabled', 'automation_enabled', 'missing_configuration', 'queued_runs')),
               'before': {'generation_circuit': fields(circuit, ('status', 'category', 'run_id', 'opened_at'))
-                         if circuit else None, 'watchdog': operations.get('watchdog')},
+                         if circuit else None,
+                         'watchdog': fields(watchdog, ('at', 'status')) if isinstance(watchdog, dict) else None},
               'runs': [run_summary(run) for run in campaigns.get('runs', [])[:12]],
               'publications': [fields(post, ('id', 'run_id', 'status', 'created_at', 'remote_id', 'post_id'))
                                for post in campaigns.get('publications', [])[:8]]}
@@ -152,16 +156,33 @@ def recover(env, action, request=http_json):
     # Print inspection before a mutation, so failures retain the relevant safe evidence.
     report = clean(report, env)
     print(json.dumps(report, sort_keys=True), flush=True)
-    if action == 'resume' and circuit:
-        if circuit.get('category') != 'provider_billing':
-            raise RecoveryError('Resume requires a diagnosed provider billing pause after billing repair')
-        reviewer = 'GitHub operator ' + env.get('GITHUB_ACTOR', 'local-operator') + ': billing restored'
-        call(crew, crew_headers, '/automation/recovery/resume', 'POST', {'reviewer': reviewer[:200]})
-        after = call(crew, crew_headers, '/automation/operations/status')
-        if after.get('generation_circuit'):
-            raise RecoveryError('Generation circuit remains open after resume; inspect provider access')
-        report['after'] = {'generation_circuit': None, 'status': 'ready_for_future_scheduled_generation'}
-        print(json.dumps({'after': report['after']}, sort_keys=True), flush=True)
+    if action == 'resume':
+        if not circuit:
+            print(json.dumps({'after': {'generation_circuit': None, 'status': 'already_closed_no_change'}},
+                             sort_keys=True), flush=True)
+        else:
+            if circuit.get('category') != 'provider_billing':
+                raise RecoveryError('Resume requires a diagnosed provider billing pause after billing repair')
+            expected = fields(circuit, ('run_id', 'opened_at', 'category'))
+            if len(expected) != 3 or not all(expected.values()):
+                raise RecoveryError('Resume requires a billing pause with run ID, open time, and category')
+            latest_status = call(crew, crew_headers, '/automation/operations/status')
+            if latest_status.get('resume_contract') != 'compare-and-resume/v1':
+                raise RecoveryError('Server lacks compare-and-resume/v1; no resume was sent')
+            latest = latest_status.get('generation_circuit')
+            current = fields(latest, ('run_id', 'opened_at', 'category')) if isinstance(latest, dict) else None
+            if not latest or latest.get('status') != 'open' or current != expected:
+                raise RecoveryError('Generation circuit changed after inspection; no resume was sent')
+            reviewer = 'GitHub operator ' + env.get('GITHUB_ACTOR', 'local-operator') + ': billing restored'
+            mutation = call(crew, crew_headers, '/automation/recovery/resume', 'POST', {
+                'reviewer': reviewer[:200], 'expected_circuit': expected, 'run_id': None})
+            after = call(crew, crew_headers, '/automation/operations/status')
+            if after.get('generation_circuit'):
+                raise RecoveryError('Generation circuit remains open after resume; inspect provider access')
+            if fields(mutation.get('resumed_circuit') or {}, ('run_id', 'opened_at', 'category')) != expected:
+                raise RecoveryError('Resume response did not confirm the inspected billing circuit; inspect state')
+            report['after'] = {'generation_circuit': None, 'status': 'ready_for_future_scheduled_generation'}
+            print(json.dumps({'after': report['after']}, sort_keys=True), flush=True)
     return report
 
 

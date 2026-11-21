@@ -28,8 +28,19 @@ permissions:
   contents: read
 
 jobs:
+  validate_publishing_recovery:
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["inspect-publishing","resume-publishing"]'), inputs.operation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Limit billing resume to main
+        if: inputs.operation == 'resume-publishing' && github.ref_name != 'main'
+        run: |
+          echo "::error::Billing recovery must run from main."
+          exit 1
+
   publishing_recovery:
     if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["inspect-publishing","resume-publishing"]'), inputs.operation)
+    needs: validate_publishing_recovery
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: ${{ inputs.recovery_environment }}
