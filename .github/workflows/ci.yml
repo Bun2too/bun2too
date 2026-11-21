@@ -47,6 +47,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: uv sync --directory services/agents --frozen
       - run: pnpm check
+      # Line coverage for the main ruleset's minimum (65%), as Cobertura: issue #10.
+      - name: Coverage
+        run: |
+          out="$RUNNER_TEMP/coverage"
+          for pkg in apps/gateway packages/contracts packages/telemetry; do
+            (cd "$pkg" && pnpm exec vitest run --coverage --coverage.reporter=cobertura \
+              --coverage.include='src/**' --coverage.reportsDirectory="$out/${pkg##*/}")
+          done
+          uv run --directory services/agents pytest -q --cov=relay_agents --cov-report="xml:$out/agents.xml"
+          mkdir -p "$GITHUB_WORKSPACE/coverage"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/coverage-paths.py" --out "$GITHUB_WORKSPACE/coverage/support-agent.xml" \
+            "$out"/{gateway,contracts,telemetry}/cobertura-coverage.xml "$out/agents.xml"
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-support-agent, path: coverage/support-agent.xml, retention-days: 1 }
 
   support-infra:
     needs: changes
@@ -79,9 +93,20 @@ jobs:
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v5
         with: { node-version: "24" }
-      - run: python3 -m pip install -r crewai_agents/requirements.txt
+      - run: python3 -m pip install -r crewai_agents/requirements.txt coverage==7.17.4
       - run: python3 scripts/verify_marketing.py
       - run: node --test evals/*.test.mjs
+      - name: Coverage
+        run: |
+          for suite in tests crewai_agents/tests; do
+            python3 -m coverage run -p --source=. -m unittest discover -s "$suite"
+          done
+          python3 -m coverage combine
+          python3 -m coverage xml -o "$RUNNER_TEMP/crew.xml" --omit='*/tests/*,tests/*'
+          mkdir -p "$GITHUB_WORKSPACE/coverage"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/coverage-paths.py" --out "$GITHUB_WORKSPACE/coverage/crew-team.xml" "$RUNNER_TEMP/crew.xml"
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-crew-team, path: coverage/crew-team.xml, retention-days: 1 }
 
   website:
     needs: changes
@@ -100,7 +125,15 @@ jobs:
       - run: npm ci
       - run: npm run docs:check
       - run: npm run typecheck
-      - run: npm test
+      # npm test under c8; --all counts source files no test loads.
+      - run: >-
+          npx -y c8@10.1.3 --all --include='src/**' --exclude='src/**/*.d.ts'
+          --reporter=cobertura --reporter=text-summary --reports-dir="$RUNNER_TEMP/c8" npm test
+      - run: |
+          mkdir -p "$GITHUB_WORKSPACE/coverage"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/coverage-paths.py" --out "$GITHUB_WORKSPACE/coverage/website.xml" "$RUNNER_TEMP/c8/cobertura-coverage.xml"
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-website, path: coverage/website.xml, retention-days: 1 }
 
   secrets:
     runs-on: ubuntu-latest
@@ -115,6 +148,31 @@ jobs:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           GITLEAKS_ENABLE_COMMENTS: "true"
+
+  # Uploads the products' coverage for the main ruleset's coverage rule. It runs none of
+  # the PR's code, so it alone holds code-quality: write.
+  coverage:
+    needs: [support-agent, crew-team, website]
+    if: >-
+      always() && (github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      code-quality: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: coverage-*, path: coverage, merge-multiple: true }
+      - if: hashFiles('coverage/support-agent.xml') != ''
+        uses: actions/upload-code-coverage@v1
+        with: { file: coverage/support-agent.xml, language: TypeScript, label: code-coverage/support-agent }
+      - if: hashFiles('coverage/crew-team.xml') != ''
+        uses: actions/upload-code-coverage@v1
+        with: { file: coverage/crew-team.xml, language: Python, label: code-coverage/crew-team }
+      - if: hashFiles('coverage/website.xml') != ''
+        uses: actions/upload-code-coverage@v1
+        with: { file: coverage/website.xml, language: TypeScript, label: code-coverage/website }
 
   ci:
     # The single required status check for branch protection.
