@@ -15,9 +15,9 @@ The owner of an area decides how it changes. Either agent may change a shared ro
 
 ## One checkout each
 
-- Each agent works in its own checkout or `git worktree`, on its own branches: `claude/*` and `codex/*`. Neither commits to, rebases or switches the other's branch, and neither touches the other's uncommitted files. AGENTS.md rule 6 applies between the agents as it does to people.
+- Each agent works in its own checkout or `git worktree`, on its own local branches: `claude/*` and `codex/*`. Neither rebases or switches the other's branch or touches the other's uncommitted files. Both may push to an open PR's branch, taking turns as described under [One PR per feature](#one-pr-per-feature). AGENTS.md rule 6 applies between the agents as it does to people.
 - Before editing, run `git status --short` and `git branch --show-current` in your own checkout.
-- Base every branch on `origin/main`, never on another open PR.
+- Where a branch starts: work that continues an open PR starts from that PR's head commit; work for a new PR starts from `origin/main`. Never start a new PR from another open PR's branch.
 - Commit only paths you changed (`git add <paths>`, never `git add -A`).
 
 ## One PR per feature
