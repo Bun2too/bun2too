@@ -17,10 +17,11 @@ jobs:
     environment: infra-support
     env:
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
-      # The project layer's own workspace. The environment layer reads its state under the
+      # The project layer's own workspace, in the HCP project bun2too-support-app next to
+      # bun2too-support-dev, -qa and -prod. The environment layer reads its state under the
       # same name (environment/variables.tf, project_workspace). It must not be one of the
       # environment workspaces: two configurations in one state destroy each other's resources.
-      TF_WORKSPACE: bun2too-support-app
+      TF_WORKSPACE: bun2too-support-project
       TF_IN_AUTOMATION: "true"
       TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
       TF_VAR_workspace_id: ${{ vars.RAILWAY_WORKSPACE_ID }}
