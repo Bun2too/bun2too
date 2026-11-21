@@ -19,7 +19,7 @@ variable "tfc_organization" {
 
 variable "project_workspace" {
   type    = string
-  default = "bun2too-support-app"
+  default = "bun2too-support-project"
 }
 
 variable "subdomain_prefix" {
