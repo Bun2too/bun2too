@@ -141,4 +141,4 @@ Useful references: [Auth0 React quickstart](https://auth0.com/docs/quickstart/sp
 
 ## Search and support configuration
 
-Also follow [search setup](search.md) for environment-specific canonical URLs, indexing controls, and ownership verification, and [support setup](support.md) for the private Netlify inquiry records, runtime secrets, and the future AI integration boundary.
+Also follow [search setup](search.md) for environment-specific canonical URLs, indexing controls, and ownership verification, and [support setup](support.md) for private Netlify inquiries, SES SMTP delivery, runtime configuration and the optional implemented AI adapter.

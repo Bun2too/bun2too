@@ -24,6 +24,8 @@ See [public-repository security and exact GitHub/Netlify configuration](docs/sec
 | [Integration readiness](docs/readiness.md) | Implemented work versus remaining live credentials, provider setup, and deployment verification |
 | [Public repository security](docs/security.md) | Exact GitHub Secrets/Variables inventory, automatic Netlify runtime sync, public/private boundaries, and pre-push checks |
 
+Domain terms and assistant handoffs: [website glossary](GLOSSARY.md) and [context index](docs/agent-context.md). In the monorepo, follow the shared root rules; the branch release mapping below describes the legacy mirror workflow.
+
 ## Service capabilities
 
 | Capability                                | Business enablement                                                                                                                                        |
@@ -35,7 +37,7 @@ See [public-repository security and exact GitHub/Netlify configuration](docs/sec
 | Analytics & AI                            | Understand journeys and connect insights with workflows and automation.                                                                                    |
 | Consent & preferences                     | Carry customer choices through subscriptions, communication preferences, and the data lifecycle.                                                           |
 
-The homepage and Services view feature the two AI capabilities before the four customer-technology cards. Use cases are illustrative, not invented customer case studies. Capability copy and explicit anchor slugs live in [`src/lib/site.ts`](src/lib/site.ts); FAQs, metadata, and service schema share or reference that public content. Official brand assets are in [`public/bun2too/`](public/bun2too/).
+The homepage and Services view feature the two AI capabilities before the four customer-technology cards. Use cases are illustrative, not invented customer case studies. Published capability copy and stable anchor slugs come from the Contentful graph, with [`src/content/website-seed.json`](src/content/website-seed.json) as fallback; metadata and service schema consume that graph. [`src/lib/site.ts`](src/lib/site.ts) retains application facts and compatibility data. Official brand assets are in [`public/bun2too/`](public/bun2too/).
 
 ## Run locally
 
