@@ -16,7 +16,8 @@ jobs:
       url: ${{ steps.tf.outputs.gateway_url }}
     env:
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
-      TF_WORKSPACE: bun2too-support-${{ inputs.environment }}
+      # The environment's TF_WORKSPACE variable when set, else bun2too-support-<environment>.
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE || format('bun2too-support-{0}', inputs.environment) }}
       TF_IN_AUTOMATION: "true"
       RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
     defaults: { run: { working-directory: bun2too-support-agent } }
@@ -33,7 +34,7 @@ jobs:
       # state the environment layer reads is visible to the same token.
       - name: Check the workspaces
         env: { TF_TOKEN: "${{ secrets.TF_API_TOKEN }}" }
-        run: ../.github/scripts/tf-workspace-check.sh "$TF_WORKSPACE" bun2too-support-app
+        run: ../.github/scripts/tf-workspace-check.sh "$TF_WORKSPACE" bun2too-support-project
       - name: Apply environment config (variables, secrets, domain)
         id: tf
         working-directory: bun2too-support-agent/infra/terraform/railway/environment
