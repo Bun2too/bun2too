@@ -155,7 +155,7 @@ Configure public build values and server-only Functions values using `.env.examp
 
 The source includes these views/integrations and local mocked checks. A live deployment, working Auth0 tenant, private inquiry persistence, email/Web Push delivery, DNS mapping, and search ownership/indexing each need authorized provider configuration and live verification. Do not infer those states from a successful local build. No production credentials or customer records are part of this repository.
 
-`src/app_temp` and `src/components/tsconfig.json` are retained legacy material. Use the active root TypeScript configuration and `src/app`. Generated build/test artifacts are ignored. The repository-local [agent and skill context](docs/agent-context.md) explains how future assistants should navigate and extend the actual application without replacing its established integrations.
+`src/app` contains the active routes and the root TypeScript configuration is authoritative; the unused duplicate `src/app_temp` tree was removed because no active imports referenced it. `src/components/tsconfig.json` remains legacy material. Generated build/test artifacts are ignored. The repository-local [agent and skill context](docs/agent-context.md) explains how future assistants should navigate and extend the actual application without replacing its established integrations.
 
 Support includes FAQs, private inquiries, and an optional Open WebUI adapter. AI remains disabled until a restricted service account, approved public knowledge collection and model are configured and explicitly enabled. See [support](docs/support.md).
 
