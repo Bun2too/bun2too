@@ -14,7 +14,7 @@ jobs:
   plan-or-apply:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: ${{ github.event_name == 'pull_request' && 'support-infra-plan' || 'support-infra' }}
+    environment: ${{ github.event_name == 'pull_request' && 'support-infra-plan' || 'infra-support' }}
     env:
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
       TF_WORKSPACE: bun2too-support-project
@@ -45,6 +45,6 @@ jobs:
         run: |
           { echo '### Railway project plan'; echo '```'; tail -c 60000 plan.txt; echo '```'; } > body.md
           gh pr comment ${{ github.event.pull_request.number }} -R ${{ github.repository }} --body-file body.md
-      - name: Apply (support-infra approval required)
+      - name: Apply
         if: github.event_name != 'pull_request'
         run: terraform apply -input=false -auto-approve
