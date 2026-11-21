@@ -2,10 +2,10 @@
 
 Two Terraform root modules, with state in HCP Terraform:
 
-| Layer          | Workspace                             | Owns                                                      | Applied by                                                   |
-| -------------- | ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| Layer          | Workspace                             | Owns                                                      | Applied by                                                       |
+| -------------- | ------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
 | `project/`     | `bun2too-support-project`             | Railway project, environments `dev` `qa` `prod`, services | `infra-support.yml` on merge, in the `infra-support` environment |
-| `environment/` | `bun2too-support-dev`, `-qa`, `-prod` | Variables and secrets per service, the gateway's domain   | `deploy-support.yml`, inside each environment's deploy job   |
+| `environment/` | `bun2too-support-dev`, `-qa`, `-prod` | Variables and secrets per service, the gateway's domain   | `deploy-support.yml`, inside each environment's deploy job       |
 
 Volumes are created per environment by `scripts/deploy/ensure-volume.sh`, not by Terraform (see ADR 0004 in the root `docs/adr/`).
 
