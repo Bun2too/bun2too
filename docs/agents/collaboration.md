@@ -17,12 +17,20 @@ The owner of an area decides how it changes. Either agent may change a shared ro
 
 - Each agent works in its own checkout or `git worktree`, on its own branches: `claude/*` and `codex/*`. Neither commits to, rebases or switches the other's branch, and neither touches the other's uncommitted files. AGENTS.md rule 6 applies between the agents as it does to people.
 - Before editing, run `git status --short` and `git branch --show-current` in your own checkout.
-- Base a branch on `origin/main`. If it has to build on an open PR, say so in its description. Once that PR merges, update the branch without a force-push (AGENTS.md rule 9):
-  - if GitHub retargets the PR to `main` and its diff shows only this branch's changes, keep it;
-  - otherwise (the parent was rebase- or squash-merged, so its commits were rewritten), cherry-pick this branch's own commits onto a fresh branch from `origin/main`, open a new PR, and close the old one with a link to it. Or hand the history rewrite to the owner.
-
-  Either way, the new head needs a new cross-review.
+- Base every branch on `origin/main`, never on another open PR.
 - Commit only paths you changed (`git add <paths>`, never `git add -A`).
+
+## One PR at a time
+
+AGENTS.md rule 14. Every open PR can start CI, a paid factory review and a cross-review, and every pair of PRs on the same files ends in a merge conflict someone has to untangle. Two agents opening PRs in parallel produced exactly that on 2026-11-20: four open PRs, two of them conflicting, and no clear merge order. So:
+
+- **Check first.** Run `gh pr list` before opening a PR, and `gh pr view <n> --json files` on any open one that might overlap.
+- **Add, don't open.** If an open PR serves the same goal, or touches a file yours would touch, add your commits to that PR: push to its branch after its author agrees, or hand the author a patch. Otherwise wait until it merges. A PR that needs another PR's changes to pass (for example a gate the other PR adds) goes into that PR.
+- **One each.** Each agent keeps at most one open PR. A second one needs the owner's OK in the conversation or on the issue.
+- **Never stack.** No PR is based on another open PR's branch.
+- **Conflicts first.** A PR that conflicts with `main` is fixed by its author before any other work. Agents don't force-push (rule 9) and `main` keeps a linear history, so the author asks the owner to rebase the branch, or moves its commits to a fresh branch from `origin/main` and closes the old PR in the same step.
+- **Close what is dead.** A superseded or abandoned PR is closed the same day, with a link to the PR that carries its work. Stale agent PRs (no activity for 48 hours) are closed too.
+- **Finish locally, push once.** Work stays in your own checkout until it is complete and its checks pass locally. Then push one batch, not a commit at a time.
 
 ## Cross-review
 
