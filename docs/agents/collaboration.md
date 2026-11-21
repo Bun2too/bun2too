@@ -20,17 +20,18 @@ The owner of an area decides how it changes. Either agent may change a shared ro
 - Base every branch on `origin/main`, never on another open PR.
 - Commit only paths you changed (`git add <paths>`, never `git add -A`).
 
-## One PR at a time
+## One PR per feature
 
-AGENTS.md rule 14. Every open PR can start CI, a paid factory review and a cross-review, and every pair of PRs on the same files ends in a merge conflict someone has to untangle. Two agents opening PRs in parallel produced exactly that on 2026-11-20: four open PRs, two of them conflicting, and no clear merge order. So:
+AGENTS.md rule 14. Every open PR can start CI, a paid factory review and a cross-review, and two PRs on the same files end in a merge conflict someone has to untangle. On 2026-11-20 the two agents had four PRs open, two of them conflicting, while more finished work sat unpushed on local branches. So:
 
-- **Check first.** Run `gh pr list` before opening a PR, and `gh pr view <n> --json files` on any open one that might overlap.
-- **Add, don't open.** If an open PR serves the same goal, or touches a file yours would touch, add your commits to that PR: push to its branch after its author agrees, or hand the author a patch. Otherwise wait until it merges. A PR that needs another PR's changes to pass (for example a gate the other PR adds) goes into that PR.
-- **One each.** Each agent keeps at most one open PR. A second one needs the owner's OK in the conversation or on the issue.
-- **Never stack.** No PR is based on another open PR's branch.
-- **Conflicts first.** A PR that conflicts with `main` is fixed by its author before any other work. Agents don't force-push (rule 9) and `main` keeps a linear history, so the author asks the owner to rebase the branch, or moves its commits to a fresh branch from `origin/main` and closes the old PR in the same step.
+- **Check first.** Run `gh pr list`, and `gh pr view <n> --json files,headRefName` on any open PR that might overlap.
+- **The PR exists: build on it.** Fetch it and base your work on its head commit (`git switch -c <you>/<topic> origin/<its branch>`, or cherry-pick your commits onto it). Commit one product per commit (rule 2), then push to the PR's branch (`git push origin HEAD:<its branch>`). Do not open another PR.
+- **No PR yet: open one.** Branch from `origin/main`, then commit, push and open the PR for the feature as soon as it is complete and passes its checks locally.
+- **Don't park work.** Finished work does not stay on a local branch. It goes to the open PR for its feature, or into a new one.
+- **Take turns on a shared PR.** Pull right before you commit, so you never need a force-push (rule 9). Push one batch, then comment on the PR with the new head commit, so the other agent pulls before its next commit and cross-reviews it.
+- **Never stack, never overlap.** No PR is based on another open PR's branch. No two open PRs touch the same file. A PR that needs another PR's changes to pass (for example a gate that the other PR adds) goes into that PR.
+- **Conflicts first.** A PR that conflicts with `main` is fixed by its author before any other work. Agents don't force-push and `main` keeps a linear history, so the author asks the owner to rebase the branch, or moves its commits to a fresh branch from `origin/main` and closes the old PR in the same step.
 - **Close what is dead.** A superseded or abandoned PR is closed the same day, with a link to the PR that carries its work. Stale agent PRs (no activity for 48 hours) are closed too.
-- **Finish locally, push once.** Work stays in your own checkout until it is complete and its checks pass locally. Then push one batch, not a commit at a time.
 
 ## Cross-review
 
