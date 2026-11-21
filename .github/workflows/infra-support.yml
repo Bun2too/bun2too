@@ -17,7 +17,7 @@ jobs:
     environment: infra-support
     env:
       TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
-      TF_WORKSPACE: bun2too-support-app
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE }}
       TF_IN_AUTOMATION: "true"
       TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
       TF_VAR_workspace_id: ${{ vars.RAILWAY_WORKSPACE_ID }}
