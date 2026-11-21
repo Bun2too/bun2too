@@ -42,9 +42,12 @@ jobs:
         env: { TF_TOKEN: "${{ secrets.TF_API_TOKEN }}" }
         run: |
           out="$RUNNER_TEMP/workspace.json"
-          code=$(curl -s -o "$out" -w '%{http_code}' --max-time 30 \
-            -H "Authorization: Bearer $TF_TOKEN" -H "Content-Type: application/vnd.api+json" \
-            "https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE")
+          # The header goes in on stdin (printf is a shell builtin), so the token is never in
+          # any process's argv, where another process on the runner could read it.
+          code=$(printf 'Authorization: Bearer %s\n' "$TF_TOKEN" |
+            curl -s -o "$out" -w '%{http_code}' --max-time 30 -H @- \
+              -H "Content-Type: application/vnd.api+json" \
+              "https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE")
           echo "HTTP $code"
           if [ "$code" != 200 ]; then
             rm -f "$out"
