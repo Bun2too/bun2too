@@ -204,6 +204,12 @@ runs:
           cause=$(jq -r '[.[] | select(.type == "result" and .is_error == true)] | last | .result // empty' "$EXECUTION_FILE")
         fi
         cause=${cause:-$GEMINI_ERROR}
+        # The spend ledger (AGENTS.md rule 12): agent-review's daily limit sums these notices.
+        # Only Claude Code reports a cost; other providers' spend shows in their consoles.
+        if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+          cost=$(jq -r '[.[] | select(.type == "result")] | last | .total_cost_usd // empty' "$EXECUTION_FILE" 2>/dev/null || true)
+          if [[ "$cost" =~ ^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$ ]]; then echo "::notice title=factory-cost::$cost"; fi
+        fi
         { echo "cause<<CAUSE_EOF"; printf '%s\n' "${cause:0:500}"; echo "CAUSE_EOF"; } >> "$GITHUB_OUTPUT"
         if [ -n "$TRACE_DIR" ]; then
           mkdir -p "$TRACE_DIR"
