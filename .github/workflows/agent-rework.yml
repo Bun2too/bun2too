@@ -51,9 +51,19 @@ jobs:
           n=$(echo "$labels" | sed -n 's/^rework-\([0-9]*\)$/\1/p' | sort -n | tail -n 1)
           n=${n:-0}
           scopes=$(gh pr diff "$PR" --name-only | awk -F/ 'NF { print ($1 ~ /^bun2too-/ && NF > 1) ? $1 : "root" }' | sort -u | tr '\n' ' ')
+          # Rework may not edit factory files and the loop never merges a factory PR, so a
+          # paid round on one fixes nothing (22 of 22 rounds on PR #6, 2026-11-19/20). The
+          # path list comes from the base branch; if it cannot be read, assume a factory PR.
+          base=$(gh pr view "$PR" --json baseRefName -q .baseRefName)
+          factory_re=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GH_REPO/contents/.github/scripts/factory-paths.regex?ref=$base" 2>/dev/null | head -n 1 || true)
+          printf '%s\n' .github/workflows/ci.yml AGENTS.md | grep -qE "${factory_re:-^$}" || factory_re=""
+          files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')
           handoff=""
           if echo "$labels" | grep -qx ready-for-human; then
             handoff="This PR is already waiting for a person."
+          elif [ -z "$factory_re" ] || printf '%s\n' "$files" | grep -qE "$factory_re"; then
+            handoff="This PR changes the factory, which the rework agent may not edit and a person merges (AGENTS.md rules 10 and 12), so no paid rework round runs."
           elif [ "$n" -ge "$MAX_ROUNDS" ]; then
             handoff="$MAX_ROUNDS rework rounds did not pass review."
           fi
@@ -171,7 +181,7 @@ jobs:
         with:
           provider: ${{ vars.FACTORY_PROVIDER || 'anthropic' }}
           model: ${{ vars.FACTORY_MODEL }}
-          max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '1.00' }}
+          max-budget-usd: ${{ vars.FACTORY_MAX_BUDGET_USD || '0.50' }}
           max-turns: "60"
           github-token: ${{ github.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
