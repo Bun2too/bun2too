@@ -68,7 +68,7 @@ GitHub Actions verifies pull requests and publishes pushes according to `dev →
 
 ## Retained directories
 
-`src/app_temp` and `src/components/tsconfig.json` are legacy material from the original working tree. The active app uses the root TypeScript configuration and `src/app`. Do not use legacy files as current route definitions or remove them casually during unrelated work.
+`src/app` contains the active routes and the root TypeScript configuration is authoritative. The unused duplicate `src/app_temp` tree was removed after confirming there were no active imports. `src/components/tsconfig.json` remains legacy material and is not the app's TypeScript configuration.
 
 Public CI builds use `npm run build:test` with reserved synthetic identities in `tests/fixtures/public-env.json`; release builds use `npm run build` with the selected GitHub/Netlify environment. Never deploy the test fixture build. Run `npm run security:check` and `npm run security:scan` before public commits. See [security and configuration](security.md).
 
