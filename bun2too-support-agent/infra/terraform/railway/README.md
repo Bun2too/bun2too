@@ -12,7 +12,7 @@ Volumes are created per environment by `scripts/deploy/ensure-volume.sh`, not by
 ## First-time setup (a person, once)
 
 1. Create the HCP Terraform workspaces above as CLI-driven workspaces. Set them to **local execution**, so runs happen in GitHub Actions and only state is stored. Give the environment workspaces read access to the project workspace's state (remote state sharing).
-2. Create the GitHub environments `infra-support`, `support-infra-plan`, `support-dev`, `support-qa` and `support-prod` with the secrets in `docs/sop/environments-and-release.md`. Add required reviewers to `support-prod`.
+2. Create the GitHub environments `infra-support` (main only), `support-dev`, `support-qa` and `support-prod` with the secrets in `docs/sop/environments-and-release.md`. Add required reviewers to `support-prod`.
 3. Run Actions → `infra-support` → apply. Then push any support-agent change, or run `deploy-support` for `dev`.
 
 ## Local checks (no credentials needed)
