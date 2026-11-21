@@ -35,7 +35,7 @@ All endpoints below require the marketing Bearer key. Do not paste it into ticke
 
 - `GET /automation/operations/status`: watchdog heartbeat, generation pause, open/resolved incidents, per-channel queue counts, recent delivery IDs, errors and accepted message IDs.
 - `GET /runs/{run_id}/work`: detailed run journal and traces.
-- `POST /automation/recovery/resume` with `{"reviewer":"operator-name","run_id":"eligible-run-id"}`: after repairing billing/authentication, queue generation for that failed run and clear the durable pause. Omitting `run_id` clears only the pause, allowing future daily runs. Expired runs or runs with a prior social send cannot be regenerated.
+- `POST /automation/recovery/resume` with `{"reviewer":"operator-name","expected_circuit":{"run_id":"…","opened_at":"…","category":"provider_billing"},"run_id":"eligible-run-id"}`: after repairing billing/authentication, clear the durable pause you diagnosed and, if `run_id` is given, queue generation for that failed run. Copy `expected_circuit` from `generation_circuit` in `GET /automation/operations/status`. The server compares it with the open circuit and closes it in the same storage transaction. A different, newer or already-closed circuit, or a category other than `provider_billing`/`provider_authentication`, returns `409 {"detail":{"error":"circuit_mismatch","current":{…}|null}}` and changes nothing. An ineligible `run_id` (expired, or with a prior social send) also returns 409, and the circuit stays open. Omitting `run_id` clears only the pause, allowing future daily runs. Status reports `resume_contract: "compare-and-resume/v1"`; clients must not POST to a server that lacks it.
 - `POST /automation/notifications/{delivery_id}/retry` with `{"reviewer":"operator-name"}`: retry a blocked/exhausted alert after repairing its destination. Sent deliveries cannot be replayed with this endpoint.
 - For unknown Facebook send outcomes, use the existing social-publication reconciliation endpoint after verifying the remote post. Do not regenerate or blindly retry the send.
 
@@ -44,6 +44,14 @@ A successful HTTP `/ready` response describes service readiness; it is not a liv
 Notifications are **at least once**: a crash or transport timeout after remote acceptance can produce a duplicate alert. Stable incident/message IDs help identify duplicates. This delivery policy applies only to notifications, never Facebook publication. Incidents deduplicate repeated watchdog observations; reminders default to six hours. n8n fallback notices are throttled independently per workflow/node/channel for one hour and report their execution link without copying sensitive provider error bodies.
 
 Missing n8n outcomes trigger heartbeat alerts after the configured grace period, including if schedules stop. n8n checks the independent watchdog and can notify directly if CrewAI is down. If both Railway/n8n and CrewAI are unavailable, neither can send; a separately hosted uptime/on-call monitor is still needed for that failure domain. This change does not provision an external monitoring account.
+
+## Manual GitHub inspection and billing resume
+
+The existing deployment workflow also accepts manual `inspect-publishing` and `resume-publishing` operations, with an explicit `recovery_environment` of `production` or `qa`. These operations use only that environment's existing marketing/n8n API credentials. They run the recovery safeguard tests, then `scripts/recover_marketing.py`; they do not depend on Terraform, package publication or model evaluations. Existing environment branch protections still apply.
+
+Run inspection first and confirm the live failure category. After restoring provider billing, run resume only for a confirmed `provider_billing` pause. Resume omits `run_id`, clears the pause for future daily slots, and reads back its state. It never queues expired work or sends a Facebook post. Other pause categories require separate diagnosis and their existing operator recovery path. An already closed circuit is left alone.
+
+Reports contain selected status/error metadata and n8n activation, schedule and execution evidence; private drafts, provider bodies and credentials are withheld. A failed mutation is never retried automatically. Inspect state before retrying an ambiguous response. A successful resume means future generation is enabled, not that credits or publication have been verified. Observe the next campaign and confirm both the public article and Facebook publication.
 
 ## Offline validation
 

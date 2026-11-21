@@ -1062,15 +1062,27 @@ class RecoveryResume(BaseModel):
     run_id: str | None = Field(default=None, max_length=100)
 
 
+class ExpectedCircuit(BaseModel):
+    run_id: str = Field(min_length=1, max_length=100)
+    opened_at: str = Field(min_length=1, max_length=64)
+    category: str = Field(min_length=1, max_length=64)
+
+
+class CircuitResume(RecoveryResume):
+    expected_circuit: ExpectedCircuit
+
+
 @app.get('/automation/operations/status', dependencies=[Depends(authorize)])
 def operational_status():
     return operations.status(store())
 
 
 @app.post('/automation/recovery/resume', dependencies=[Depends(authorize)])
-def resume_generation(payload: RecoveryResume):
+def resume_generation(payload: CircuitResume):
     try:
-        return operations.resume(store(), payload.reviewer, payload.run_id)
+        return operations.resume(store(), payload.reviewer, payload.expected_circuit.model_dump(), payload.run_id)
+    except operations.CircuitMismatch as exc:
+        raise HTTPException(409, {'error': 'circuit_mismatch', 'current': exc.current}) from None
     except (KeyError, ValueError) as exc:
         raise HTTPException(409, str(exc) if isinstance(exc, ValueError) else 'Run not found') from None
 
