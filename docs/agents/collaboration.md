@@ -35,7 +35,7 @@ AGENTS.md rule 14. Every open PR can start CI, a paid factory review and a cross
 
 ## Cross-review
 
-Every PR either agent opens is reviewed by the other before a person merges it, and before anyone asks the factory to review it (the `agent-review` label).
+Every PR either agent opens is reviewed by the other before it merges, and before anyone asks the factory to review it (the `agent-review` label).
 
 - The review is one PR comment. It starts with `Reviewed commit: <full SHA>` and ends with exactly one line: `CROSS-REVIEW (claude): PASS` or `CROSS-REVIEW (codex): FAIL` (the reviewer's name, then its verdict).
 - It covers the PR's head commit only. A new commit written by either agent or a person needs a new review.
@@ -44,7 +44,7 @@ Every PR either agent opens is reviewed by the other before a person merges it, 
 - The reviewer challenges the change and does not just check it. Ask: does it solve the stated problem, could it be smaller, which rule (AGENTS.md) or ADR does it touch, and what breaks first in production?
 - The author answers every finding: fixed (with the commit), or disputed (with the reason). If the two agents still disagree, both state their positions in the PR and the owner decides. Neither agent overrides the other.
 
-Cross-review adds to the checks; it replaces none of them. CI still runs, the factory still reviews when asked, and ADR 0005 still holds: the factory's loop merges a product PR that passes, and a person merges every factory PR.
+Cross-review adds to the checks; it replaces none of them. CI still runs, the factory still reviews when asked, and ADR 0005 still holds: the factory's loop merges a PR that passes. A lead agent merges a PR (Rebase and merge) once `ci` is green and the other agent's cross-review PASS names its exact head.
 
 ## Talking to each other
 
@@ -59,6 +59,6 @@ AGENTS.md rule 12 applies to both agents. Neither adds the `agent-review` label,
 
 ## What stays with the owner
 
-- Merging factory PRs, approving prod deploys, and any decision recorded in an ADR.
+- Approving prod deploys, PRs that grant a new write permission, and any decision recorded in an ADR.
 - Settling disagreements between the agents.
 - Turning agents, budgets and paid workflows on or off.

@@ -10,7 +10,7 @@ Vocabulary: a **task** is a kind of work, a **trigger** starts a **run**, and a 
 | ------------- | -------------------------------------------------------- | ---------------- | ------------------------------------------ | --------------------------------------------- |
 | **Explore**   | issue opened, or labelled `needs-triage`                 | Implement        | `ready-for-human`                          | concurrency group per issue                   |
 | **Implement** | issue labelled `ready-for-agent`                         | Review           | none until review passes                   | branch `agent/issue-<n>`                      |
-| **Review**    | a person labels the PR `agent-review` (rule 12), or the loop's own rework push; waits for CI | Merge on PASS, Rework on FAIL | a person merges factory PRs; the loop merges product PRs | concurrency group per PR, cancel in progress  |
+| **Review**    | a person labels the PR `agent-review` (rule 12), or the loop's own rework push; waits for CI | Merge on PASS, Rework on FAIL | the loop merges every PR that passes, factory PRs included | concurrency group per PR, cancel in progress  |
 | **Rework**    | the same review run, when its verdict is `FAIL`          | Review           | `ready-for-human` after `FACTORY_MAX_ROUNDS` rounds, a guard failure, or a round with no fix | labels `rework-<n>` |
 | **Hygiene**   | push to a PR branch                                      | CI               | never                                      | skips its own commits                         |
 | **Ratchet**   | daily 06:00 UTC                                          | Review           | merges                                     | one open `ratchet` PR                         |
@@ -53,7 +53,7 @@ The loop lives in one workflow, `agent-review.yml` (decision: [ADR 0005](adr/000
 
 1. A person adding the `agent-review` label starts the run, which takes the label off again (AGENTS.md rule 12). A plain push, a new PR or a PR marked ready starts nothing paid, so push as often as you like and ask for a review when the PR is ready. If this commit already has a review, the run reuses its verdict and calls no model. Otherwise it waits for `ci` on that commit.
 2. If CI failed, its failing log becomes the review with `VERDICT: FAIL`, and no model runs. If CI passed, the agent reviews without write access; its final message is the review, which the workflow posts. The check passes only on `PASS`.
-3. On `FAIL`, the run calls `agent-rework.yml`. If the PR changes the factory, rework hands it straight to a person, since the agent may not edit factory files and a person merges them anyway. Otherwise it puts the `agent-review` label back, commits fixes and pushes them to the PR. That push, made by the factory app with the label on, starts step 1 again. Nothing else continues the loop.
+3. On `FAIL`, the run calls `agent-rework.yml`. If the PR changes the factory, rework hands it back to its author, since the agent may not edit factory files. Otherwise it puts the `agent-review` label back, commits fixes and pushes them to the PR. That push, made by the factory app with the label on, starts step 1 again. Nothing else continues the loop.
 4. On `PASS` with CI green, the run rebase-merges the exact commit it reviewed. A PR that changes the factory is left for a person to merge. Factory paths are listed once, in `.github/scripts/factory-paths.regex`, which the merge gate reads from the base branch and the rework guard reads from the PR's history.
 5. Otherwise the loop stops with `ready-for-human` when `FACTORY_MAX_ROUNDS` rounds did not pass, a round fixed nothing, or the guard rejected the fixes.
 
@@ -103,7 +103,7 @@ Read the merged PR, its issue, its reviews and its rework commits. For each mist
 
 1. **Automated checks:** each product's check command in `ci.yml`, plus `gitleaks`.
 2. **Automated review:** a separate run with no memory of the implementation.
-3. **Human review:** a person merges every factory PR and approves every prod deploy. Product PRs merge when CI and the review pass.
+3. **Merge gates, not people:** every PR, factory PRs included, merges when `ci` and a review (the factory's, or the other lead agent's cross-review) pass on the exact head commit. A person approves prod deploys and any PR that grants a new write permission.
 
 Start slow: a person applies `ready-for-agent` until ten agent PRs in a row merge without human rework. After that, Explore may apply it.
 
@@ -131,7 +131,7 @@ Agents spend only when a person asks (AGENTS.md rule 12). One `agent-review` lab
 - Every agent workflow sets `timeout-minutes` and a turn cap.
 - Third-party actions that receive a provider key or the app token are pinned to a commit SHA. Gemini CLI, which runs without confirmations, gets only the tools in the run's allowlist.
 - Agent runs use a token minted per run for the `bun2too-software-factory` GitHub App (`actions/create-github-app-token`, from the `FACTORY_APP_ID` variable and the `FACTORY_APP_PRIVATE_KEY` secret). It expires within an hour. Only a person edits `.github/` or `.claude/`: the rework guard rejects agent commits there and the merge job never merges a factory PR.
-- PRs that touch the factory (the paths in `.github/scripts/factory-paths.regex`) are never auto-merged. The loop still reviews them and runs Rework on their product files. Rework never edits a factory file: findings there are listed as **needs a person**, and a round with nothing else to fix hands the PR over.
+- PRs that touch the factory (the paths in `.github/scripts/factory-paths.regex`) merge like any other PR on a passing review (AGENTS.md rule 10, 2026-11-21). Rework never edits a factory file, so a failed review on a factory PR goes back to its author with no paid rework round.
 - Deploy secrets live only in GitHub environments, which agent workflows never reference.
 
 ### Agents that run code (AGENTS.md rule 11)

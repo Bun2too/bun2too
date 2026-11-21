@@ -8,7 +8,7 @@
 2. Keep the branch under a day and the diff under about 400 lines. Split bigger work with `/plan`.
 3. Commit one product per commit (`feat(support-agent): ...`, `fix(crew-team): ...`, `docs(root): ...`).
 4. Open a PR early. CI runs only the jobs for the products the PR touches.
-5. Under [ADR 0005](../adr/0005-factory-review-loop-merges-product-prs.md), the factory loop rebase-merges product PRs only after green `ci` and `VERDICT: PASS` on the exact head commit. A person merges factory PRs. Keep linear history; delete the branch after merge.
+5. Under [ADR 0005](../adr/0005-factory-review-loop-merges-product-prs.md), the factory loop or a lead agent rebase-merges a PR, factory PRs included, only after green `ci` and a passing review on the exact head commit. Keep linear history; delete the branch after merge.
 6. Merging to `main` deploys the support agent to **dev**, then **qa**, then waits for a person to approve **prod**. See [environments and release](environments-and-release.md).
 
 ## Unfinished work
@@ -17,7 +17,7 @@ Unfinished work merges dark. Hide it behind a tenant config field or an environm
 
 ## Branch protection on `main` (a person sets this up once)
 
-- Require a PR and the `ci` status check. Product PRs use the exact-head factory review/merge gate; factory PRs need human review and merge, as [ADR 0005](../adr/0005-factory-review-loop-merges-product-prs.md) specifies. Its accepted decision supersedes the former blanket one-approval rule.
+- Require a PR and the `ci` status check. Every PR uses the exact-head review/merge gate, as [ADR 0005](../adr/0005-factory-review-loop-merges-product-prs.md) specifies. Its accepted decision supersedes the former blanket one-approval rule.
 - Require linear history; the factory loop uses rebase merging.
 - Block force-push and deletion.
 - Restrict pushes to `.github/` with CODEOWNERS.

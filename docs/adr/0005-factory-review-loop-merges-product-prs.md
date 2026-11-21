@@ -1,6 +1,6 @@
 # 0005. The factory's review loop fixes PRs in place and merges product PRs
 
-- Status: accepted (decided by the repository owner, 2026-11-19)
+- Status: accepted (decided by the repository owner, 2026-11-19); amended 2026-11-21: factory PRs merge like product PRs
 - Date: 2026-11-19
 
 ## Context
@@ -10,7 +10,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 ## Decision
 
 - **One loop per PR**, in `agent-review.yml` with `agent-rework.yml`. CI, then review, then on FAIL a rework round that pushes to the same PR, then a new review. Merge on PASS. No new PRs.
-- **The loop merges product PRs.** It needs `VERDICT: PASS` and green `ci` on the exact head commit (`--match-head-commit`), and a same-repository branch. People still merge factory PRs (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`) and approve prod deploys. AGENTS.md rule 9 says so. The owner removed the one-approval rule from the `main` ruleset for this.
+- **The loop merges product PRs.** It needs `VERDICT: PASS` and green `ci` on the exact head commit (`--match-head-commit`), and a same-repository branch. Since 2026-11-21 this covers factory PRs too (`.claude/`, `.cursor/`, `.github/`, `AGENTS.md`, `CLAUDE.md`, `docs/factory.md`, `docs/sdlc.md`): the owner retired human-only merging as a bottleneck (AGENTS.md rules 9 and 10). People still approve prod deploys and any PR that grants a new write permission. The owner removed the one-approval rule from the `main` ruleset for this.
 - **A person is needed only when the loop stops:**
   - after `FACTORY_MAX_ROUNDS` rework rounds
   - after a round that fixed nothing, for example because the findings are in factory files
@@ -30,7 +30,7 @@ The factory reviewed PRs but never closed the loop. Failed reviews were silent, 
 
 ## Consequences
 
-- **A product PR can merge on a model's judgement alone.** Injected text in a diff could talk the reviewer into PASS. CI, the guard, same-repository branches and people merging factory PRs bound this. The audit trail is the review comment on each merged PR.
+- **A product PR can merge on a model's judgement alone.** Injected text in a diff could talk the reviewer into PASS. So can a factory PR, which can change the workflows that hold the factory's credentials. CI, the guard, same-repository branches, the lead agents' cross-review and the owner approving new write permissions bound this. The audit trail is the review comment on each merged PR.
 - **The rework agent runs repository code** (tests, the product's check command) with the model key loaded in its job. That alone would let a prompt-injected agent or a compromised dependency leak the key. The owner chose to close this rather than accept it, so AGENTS.md rule 11 requires five layers for any agent that runs code. They are listed in docs/factory.md under "Spend and safety":
   1. Dependencies install before the agent starts, after the lockdown, each in its own PID namespace and able to write only its product folder and the package caches. So no install script can leave a process behind or change what later steps run. Every command the agent runs goes through a sandbox with no network.
   2. The model key is stripped from those commands' environment.
