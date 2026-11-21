@@ -40,7 +40,6 @@
     ".next-check/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "src/app_temp"
+    "node_modules"
   ]
 }
