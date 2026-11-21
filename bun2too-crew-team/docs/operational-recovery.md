@@ -45,6 +45,14 @@ Notifications are **at least once**: a crash or transport timeout after remote a
 
 Missing n8n outcomes trigger heartbeat alerts after the configured grace period, including if schedules stop. n8n checks the independent watchdog and can notify directly if CrewAI is down. If both Railway/n8n and CrewAI are unavailable, neither can send; a separately hosted uptime/on-call monitor is still needed for that failure domain. This change does not provision an external monitoring account.
 
+## Manual GitHub inspection and billing resume
+
+The existing deployment workflow also accepts manual `inspect-publishing` and `resume-publishing` operations, with an explicit `recovery_environment` of `production` or `qa`. These operations use only that environment's existing marketing/n8n API credentials. They run the recovery safeguard tests, then `scripts/recover_marketing.py`; they do not depend on Terraform, package publication or model evaluations. Existing environment branch protections still apply.
+
+Run inspection first and confirm the live failure category. After restoring provider billing, run resume only for a confirmed `provider_billing` pause. Resume omits `run_id`, clears the pause for future daily slots, and reads back its state. It never queues expired work or sends a Facebook post. Other pause categories require separate diagnosis and their existing operator recovery path. An already closed circuit is left alone.
+
+Reports contain selected status/error metadata and n8n activation, schedule and execution evidence; private drafts, provider bodies and credentials are withheld. A failed mutation is never retried automatically. Inspect state before retrying an ambiguous response. A successful resume means future generation is enabled, not that credits or publication have been verified. Observe the next campaign and confirm both the public article and Facebook publication.
+
 ## Offline validation
 
 ```sh

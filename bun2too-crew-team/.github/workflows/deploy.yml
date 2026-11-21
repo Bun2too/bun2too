@@ -12,6 +12,13 @@ on:
           - deploy
           - infrastructure-only
           - import-state
+          - inspect-publishing
+          - resume-publishing
+      recovery_environment:
+        description: Existing environment for manual publishing inspection or billing recovery
+        type: choice
+        default: production
+        options: [production, qa]
   push:
     branches: [ main, qa, dev ]
   pull_request:
@@ -21,8 +28,34 @@ permissions:
   contents: read
 
 jobs:
+  publishing_recovery:
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["inspect-publishing","resume-publishing"]'), inputs.operation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.recovery_environment }}
+    concurrency:
+      group: publishing-recovery-${{ inputs.recovery_environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify operator recovery safeguards offline
+        run: python3 -m unittest discover -s tests -p test_recover_marketing.py -v
+      - name: Inspect publishing or explicitly resume a repaired billing pause
+        env:
+          RECOVERY_ACTION: ${{ inputs.operation == 'resume-publishing' && 'resume' || 'inspect' }}
+          CREWAI_BASE_URL: ${{ vars.CREWAI_BASE_URL }}
+          MARKETING_API_KEY: ${{ secrets.MARKETING_API_KEY }}
+          N8N_BASE_URL: ${{ vars.N8N_BASE_URL }}
+          N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+        run: python3 scripts/recover_marketing.py "$RECOVERY_ACTION"
+
   verify:
-    if: github.event_name == 'pull_request' || github.ref_name == 'dev' || github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')
+    if: ${{ !contains(fromJSON('["inspect-publishing","resume-publishing"]'), inputs.operation) && (github.event_name == 'pull_request' || github.ref_name == 'dev' || github.ref_name == 'main' || (github.ref_name == 'qa' && inputs.operation != 'import-state')) }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.packages.outputs.matrix }}
