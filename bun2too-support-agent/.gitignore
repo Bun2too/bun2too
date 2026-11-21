@@ -89,3 +89,6 @@ node_modules/
 # Relay verification evidence and local runtime
 .verify/
 .langgraph_api/
+
+# Test coverage reports
+coverage/
