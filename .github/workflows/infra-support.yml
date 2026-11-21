@@ -36,6 +36,28 @@ jobs:
             cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}",
             terraform_wrapper: false,
           }
+      # Read-only: can the stored token see the workspace, and does it run locally? Prints
+      # only the HTTP status, the name and the execution mode, never the token or the body.
+      - name: Check the workspace
+        env: { TF_TOKEN: "${{ secrets.TF_API_TOKEN }}" }
+        run: |
+          out="$RUNNER_TEMP/workspace.json"
+          # The header goes in on stdin (printf is a shell builtin), so the token is never in
+          # any process's argv, where another process on the runner could read it.
+          code=$(printf 'Authorization: Bearer %s\n' "$TF_TOKEN" |
+            curl -s -o "$out" -w '%{http_code}' --max-time 30 -H @- \
+              -H "Content-Type: application/vnd.api+json" \
+              "https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE")
+          echo "HTTP $code"
+          if [ "$code" != 200 ]; then
+            rm -f "$out"
+            echo "::error::The token in this environment cannot see workspace $TF_WORKSPACE in organization $TF_CLOUD_ORGANIZATION (HTTP $code). Check the organization, the exact name and the token's team access."
+            exit 1
+          fi
+          name=$(jq -r '.data.attributes.name // ""' "$out"); mode=$(jq -r '.data.attributes["execution-mode"] // ""' "$out")
+          rm -f "$out"
+          echo "workspace: $name"; echo "execution mode: $mode"
+          [ "$mode" = local ] || { echo "::error::Set workspace $TF_WORKSPACE to Local execution; runs pass their inputs from this job."; exit 1; }
       - run: terraform init -input=false
       - name: Plan
         run: terraform plan -input=false -no-color -lock-timeout=5m
