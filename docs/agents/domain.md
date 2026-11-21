@@ -6,8 +6,8 @@ Layout: **multi-context**. Each product has its own domain language and decision
 | ----------------- | ---------------------------------------- | -------------------------------------- |
 | Organisation      | (none yet)                               | `docs/adr/`                            |
 | Support agent     | `bun2too-support-agent/GLOSSARY.md`      | `bun2too-support-agent/docs/adr/`      |
-| Crew team         | `bun2too-crew-team/docs/` (see its AGENTS.md)    | (none yet)                             |
-| Website           | `bun2too-website/docs/` (see its AGENTS.md) | (none yet)                          |
+| Crew team         | [Marketing glossary](../../bun2too-crew-team/GLOSSARY.md)    | (none yet)                             |
+| Website           | [Website glossary](../../bun2too-website/GLOSSARY.md) | (none yet)                          |
 
 Rules for agents:
 
