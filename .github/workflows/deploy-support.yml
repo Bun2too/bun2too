@@ -5,7 +5,6 @@ on:
     paths:
       [
         "bun2too-support-agent/**",
-        "!bun2too-support-agent/infra/terraform/railway/project/**",
         ".github/workflows/deploy-support.yml",
         ".github/workflows/_deploy-support-env.yml",
       ]
