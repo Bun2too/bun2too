@@ -2,7 +2,7 @@
 
 Relay's runtime secrets reach Railway through one GitHub environment secret, `SUPPORT_RUNTIME_SECRETS`, set separately in `support-dev`, `support-qa` and `support-prod`. Its value is a JSON object whose keys are environment variable names and whose values are strings.
 
-The deploy job passes it to Terraform as `TF_VAR_runtime_secrets` ([environment layer](../infra/terraform/railway/environment/main.tf)). Terraform splits it:
+The deploy job passes it to Terraform as `TF_VAR_runtime_secrets` ([Railway module](../infra/terraform/railway/main.tf)). Terraform splits it:
 
 - `RELAY_TENANT_KEYS` goes to the **gateway** service.
 - Every other key goes to the **agents** service.

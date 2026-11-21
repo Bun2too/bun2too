@@ -2,24 +2,18 @@ mock_provider "railway" {
   mock_resource "railway_service_domain" {
     defaults = { domain = "bun2too-support-dev.up.railway.app" }
   }
+  mock_resource "railway_service" {
+    defaults = { id = "33333333-3333-4333-8333-333333333301" }
+  }
+  mock_resource "railway_project" {
+    defaults = { id = "11111111-1111-4111-8111-111111111111", default_environment = { id = "22222222-2222-4222-8222-222222222201" } }
+  }
 }
 
 mock_provider "random" {}
 
-override_data {
-  target = data.terraform_remote_state.project
-  values = {
-    outputs = {
-      project_id      = "11111111-1111-4111-8111-111111111111"
-      environment_ids = { dev = "22222222-2222-4222-8222-222222222201", qa = "22222222-2222-4222-8222-222222222202", prod = "22222222-2222-4222-8222-222222222203" }
-      service_ids     = { gateway = "33333333-3333-4333-8333-333333333301", agents = "33333333-3333-4333-8333-333333333302", postgres = "33333333-3333-4333-8333-333333333303" }
-    }
-  }
-}
-
 variables {
   railway_api_token = "test"
-  tfc_organization  = "bun2too"
   runtime_secrets = {
     RELAY_TENANT_KEYS = "k:bun2too"
     ANTHROPIC_API_KEY = "sk-test"
@@ -33,8 +27,18 @@ run "dev_is_offline_and_targets_dev" {
   }
 
   assert {
+    condition     = railway_project.support.name == "bun2too-support-dev"
+    error_message = "The Railway project is named like the HCP workspace."
+  }
+
+  assert {
+    condition     = railway_project.support.default_environment.name == "dev"
+    error_message = "The project's Railway environment is named dev, which railway-up.sh deploys to."
+  }
+
+  assert {
     condition     = output.environment_id == "22222222-2222-4222-8222-222222222201"
-    error_message = "dev must target the dev environment."
+    error_message = "Variables and the domain target the project's own environment."
   }
 
   assert {

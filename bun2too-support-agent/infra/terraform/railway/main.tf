@@ -17,19 +17,48 @@ provider "railway" {
   token = var.railway_api_token
 }
 
-data "terraform_remote_state" "project" {
-  backend = "remote"
-  config = {
-    organization = var.tfc_organization
-    workspaces   = { name = var.project_workspace }
+# One Railway project per environment, named like its HCP Terraform workspace
+# (bun2too-support-<environment>). Its only Railway environment carries the same short
+# name (dev, qa, prod), which railway-up.sh deploys to.
+resource "railway_project" "support" {
+  name         = "${var.name_prefix}-${var.environment}"
+  description  = "Relay support intake for Bun2too (${var.environment}): gateway, agents and Postgres. POC; GA target is GCP Cloud Run."
+  workspace_id = var.workspace_id
+  default_environment = {
+    name = var.environment
+  }
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Source comes from `railway up` in CI; Dockerfile paths are variables below.
+resource "railway_service" "gateway" {
+  name                = "gateway"
+  project_id          = railway_project.support.id
+  healthcheck_path    = "/healthz"
+  healthcheck_timeout = 60
+}
+
+resource "railway_service" "agents" {
+  name                = "agents"
+  project_id          = railway_project.support.id
+  healthcheck_path    = "/healthz"
+  healthcheck_timeout = 120
+}
+
+resource "railway_service" "postgres" {
+  name         = "postgres"
+  project_id   = railway_project.support.id
+  source_image = var.postgres_image
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
 locals {
-  project        = data.terraform_remote_state.project.outputs
-  environment_id = local.project.environment_ids[var.environment]
-  service_ids    = local.project.service_ids
-  subdomain      = "${var.subdomain_prefix}-${var.environment}"
+  environment_id = railway_project.support.default_environment.id
+  subdomain      = "${var.name_prefix}-${var.environment}"
   offline        = var.environment == "dev" ? "1" : ""
 
   runtime_keys        = toset(nonsensitive(keys(var.runtime_secrets)))
@@ -66,7 +95,7 @@ resource "random_password" "postgres" {
 }
 
 resource "railway_variable_collection" "postgres" {
-  service_id     = local.service_ids.postgres
+  service_id     = railway_service.postgres.id
   environment_id = local.environment_id
   variables = [
     { name = "POSTGRES_USER", value = "relay" },
@@ -79,18 +108,18 @@ resource "railway_variable_collection" "postgres" {
 resource "railway_service_domain" "gateway" {
   subdomain      = local.subdomain
   environment_id = local.environment_id
-  service_id     = local.service_ids.gateway
+  service_id     = railway_service.gateway.id
   target_port    = 8080
 }
 
 resource "railway_variable_collection" "gateway" {
-  service_id     = local.service_ids.gateway
+  service_id     = railway_service.gateway.id
   environment_id = local.environment_id
   variables      = [for name in sort(keys(local.gateway_variables)) : { name = name, value = local.gateway_variables[name] }]
 }
 
 resource "railway_variable_collection" "agents" {
-  service_id     = local.service_ids.agents
+  service_id     = railway_service.agents.id
   environment_id = local.environment_id
   variables      = [for name in sort(keys(local.agents_variables)) : { name = name, value = local.agents_variables[name] }]
 }
@@ -104,9 +133,9 @@ output "gateway_url" {
 }
 
 output "project_id" {
-  value = local.project.project_id
+  value = railway_project.support.id
 }
 
 output "postgres_service_id" {
-  value = local.service_ids.postgres
+  value = railway_service.postgres.id
 }

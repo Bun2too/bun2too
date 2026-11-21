@@ -12,19 +12,21 @@ variable "railway_api_token" {
   sensitive   = true
 }
 
-variable "tfc_organization" {
-  description = "HCP Terraform organisation holding the project workspace."
+variable "workspace_id" {
+  description = "Railway workspace that owns the projects. Required when the token can see several workspaces."
   type        = string
+  default     = null
 }
 
-variable "project_workspace" {
+variable "postgres_image" {
   type    = string
-  default = "bun2too-support-project"
+  default = "ghcr.io/railwayapp-templates/postgres-ssl:16"
 }
 
-variable "subdomain_prefix" {
-  type    = string
-  default = "bun2too-support"
+variable "name_prefix" {
+  description = "Railway project and gateway subdomain are <name_prefix>-<environment>, like the HCP Terraform workspace."
+  type        = string
+  default     = "bun2too-support"
 }
 
 variable "otel_endpoint" {
