@@ -14,7 +14,7 @@ All three environments live in one Railway project, `bun2too-support`, and run t
 merge to main
   └─ deploy-support.yml
        verify (pnpm check on the exact commit)
-       └─ dev   terraform apply (environment layer) → railway up gateway + agents → smoke + intake journey
+       └─ dev   terraform apply (bun2too-support-dev) → railway up gateway + agents → smoke + intake journey
           └─ qa terraform apply → railway up → smoke + intake journey + escalation journey + offline eval
              └─ prod  [human approval] → terraform apply → railway up → smoke (read-only, no tickets created)
 ```
@@ -23,8 +23,8 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 
 ## Configuration changes
 
-- Runtime variables and secrets are applied by the environment Terraform layer in the same deploy job, so config is promoted dev → qa → prod like code.
-- Project-level changes (new service, health-check path) go through `infra-support.yml`, which plans and applies on merge to `main` in the `infra-support` environment (main only). PRs get credential-free checks in `ci.yml`, because a plan runs PR-controlled Terraform.
+- Each environment's Railway project, services, variables, secrets and domain are applied by Terraform (`infra/terraform/railway`, workspace `bun2too-support-<environment>`) in the same deploy job. So infrastructure and config are promoted dev → qa → prod like code.
+- PRs get only credential-free checks in `ci.yml` (fmt, validate, test with mocked providers), because a plan runs PR-controlled Terraform.
 
 ## Rollback
 
@@ -41,5 +41,7 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 | `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, the Cloudflare AI Gateway `CF_AIG_*` keys, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
 | `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS` |
 | `TF_CLOUD_ORGANIZATION`    | variable | HCP Terraform organisation                                                                     |
+| `TF_WORKSPACE`             | variable | Optional. HCP workspace; defaults to `bun2too-support-<environment>`                           |
+| `RAILWAY_WORKSPACE_ID`     | variable | Railway workspace that owns the projects (a repository variable serves all three)              |
 
-The `support-prod` environment has required reviewers. `infra-support` (main only) holds the Railway and HCP tokens for the project layer, plus the variables `TF_CLOUD_ORGANIZATION` and `RAILWAY_WORKSPACE_ID`. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.
+The `support-prod` environment has required reviewers. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.

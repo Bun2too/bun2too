@@ -68,13 +68,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
       - run: terraform fmt -check -recursive
-      - name: Validate and test both Railway layers (mocked providers, no credentials)
+      - name: Validate and test the Railway module (mocked providers, no credentials)
         run: |
-          for layer in railway/project railway/environment; do
-            terraform -chdir=$layer init -backend=false -input=false
-            terraform -chdir=$layer validate
-            terraform -chdir=$layer test
-          done
+          terraform -chdir=railway init -backend=false -input=false
+          terraform -chdir=railway validate
+          terraform -chdir=railway test
 
   crew-team:
     needs: changes
