@@ -24,7 +24,7 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 ## Configuration changes
 
 - Runtime variables and secrets are applied by the environment Terraform layer in the same deploy job, so config is promoted dev → qa → prod like code.
-- Project-level changes (new service, health-check path) go through `infra-support.yml`: plan on the PR, apply on merge after approval in the `support-infra` environment.
+- Project-level changes (new service, health-check path) go through `infra-support.yml`: plan on the PR, apply on merge in the `infra-support` environment.
 
 ## Rollback
 
@@ -42,4 +42,4 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 | `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS` |
 | `TF_CLOUD_ORGANIZATION`    | variable | HCP Terraform organisation                                                                     |
 
-The `support-prod` environment has required reviewers. `support-infra` (required reviewers) and `support-infra-plan` (no reviewers, used for PR plans) hold the Railway and HCP tokens for the project layer, plus the variables `TF_CLOUD_ORGANIZATION` and `RAILWAY_WORKSPACE_ID`. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.
+The `support-prod` environment has required reviewers. `infra-support` (applies) and `support-infra-plan` (PR plans) hold the Railway and HCP tokens for the project layer, plus the variables `TF_CLOUD_ORGANIZATION` and `RAILWAY_WORKSPACE_ID`. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.
