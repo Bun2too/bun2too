@@ -116,6 +116,18 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, 'remains open'):
             recovery.recover(self.env(), 'resume', self.request(circuit, circuit))
 
+    def test_new_pause_after_resume_is_reported_separately(self):
+        first = {'category': 'provider_billing', 'run_id': 'run-a',
+                 'opened_at': '2026-11-15T14:06:40Z', 'status': 'open'}
+        second = {'category': 'provider_billing', 'run_id': 'run-b',
+                  'opened_at': '2026-11-21T08:05:00Z', 'status': 'open'}
+        request = self.request(first, after=second)
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(recovery.RecoveryError, 'different generation circuit'):
+            recovery.recover(self.env(), 'resume', request)
+        self.assertIn('new_circuit_opened_after_resume', output.getvalue())
+        self.assertIn('run-b', output.getvalue())
+
     def test_invalid_origins_fail_before_network(self):
         for url in ('http://crew.example', 'https://user:password@crew.example',
                     'https://crew.example?token=value', 'https://crew.example/#token'):

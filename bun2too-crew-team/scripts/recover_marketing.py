@@ -177,8 +177,16 @@ def recover(env, action, request=http_json):
             mutation = call(crew, crew_headers, '/automation/recovery/resume', 'POST', {
                 'reviewer': reviewer[:200], 'expected_circuit': expected, 'run_id': None})
             after = call(crew, crew_headers, '/automation/operations/status')
-            if after.get('generation_circuit'):
-                raise RecoveryError('Generation circuit remains open after resume; inspect provider access')
+            after_circuit = after.get('generation_circuit')
+            if after_circuit:
+                current_after = fields(after_circuit, ('run_id', 'opened_at', 'category', 'status'))
+                same_circuit = {key: current_after.get(key) for key in ('run_id', 'opened_at', 'category')} == expected
+                outcome = 'original_circuit_still_open' if same_circuit else 'new_circuit_opened_after_resume'
+                print(json.dumps({'after': {'generation_circuit': current_after, 'status': outcome}},
+                                 sort_keys=True), flush=True)
+                if same_circuit:
+                    raise RecoveryError('Original generation circuit remains open; inspect provider access')
+                raise RecoveryError('A different generation circuit opened after resume; inspect the new failure')
             if fields(mutation.get('resumed_circuit') or {}, ('run_id', 'opened_at', 'category')) != expected:
                 raise RecoveryError('Resume response did not confirm the inspected billing circuit; inspect state')
             report['after'] = {'generation_circuit': None, 'status': 'ready_for_future_scheduled_generation'}
