@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.7.0"
-  cloud {} # TF_CLOUD_ORGANIZATION and TF_WORKSPACE=bun2too-support-app select state.
+  cloud {} # TF_CLOUD_ORGANIZATION and TF_WORKSPACE=bun2too-support-prod select state.
   required_providers {
     railway = {
       source  = "terraform-community-providers/railway"
