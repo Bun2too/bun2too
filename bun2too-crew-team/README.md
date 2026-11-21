@@ -254,7 +254,7 @@ n8n requires persistent `/home/node/.n8n`. The optional Terraform volume must be
 
 Set CrewAI `DD_LOGS_ENABLED=true`, `DD_API_KEY` and the correct `DD_SITE` to export operational events from its durable journal. `DD_LLMOBS_ENABLED=1` enables agent/task/model traces through the `start.py` launcher. GitHub's separate Datadog secret enables deployment-outcome logs. The n8n workflows record success/failure execution events. Datadog queries and live verification are in the runbook; no host metrics or monitor provisioning is implied.
 
-Existing manual campaign Jira/Confluence publishing, reviewed lessons and legacy n8n webhook dispatch remain available. See [agent operations](docs/agent-operations.md). The daily automated campaign uses the new deterministic publisher and does not create corporate tickets every day. Do not also route the same scheduled content through the legacy publishing webhook.
+Existing manual campaign Jira/Confluence publishing, reviewed lessons and legacy n8n webhook dispatch remain available. See [agent operations](docs/agent-operations.md). The daily automated campaign uses the deterministic publisher; optional configured Atlassian tracking synchronizes scheduled lifecycle records as described in [editorial tracking](docs/editorial-and-agent-tracking.md). Do not also route the same scheduled content through the legacy publishing webhook.
 
 ## Enterprise telemetry architecture (OTLP over HTTP)
 
@@ -277,6 +277,8 @@ Task-based provider routing and offline batch usage: [model routing and cost con
 
 Build publication: [GitHub Packages pipeline and supported package types](docs/package-publishing.md).
 Agent continuity: [persistent context and ownership](docs/agent-context.md), [repository instructions](AGENTS.md), and task-specific skills under `.agents/skills/`.
+
+Domain terms: [marketing glossary](GLOSSARY.md). The environment-branch release instructions above describe the legacy mirror pipeline; monorepo development follows the shared root rules and manual subtree synchronization.
 
 ## Agent quality gates
 

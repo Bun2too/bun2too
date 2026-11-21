@@ -2,6 +2,10 @@
 
 Coding assistants discover repository instructions in root and scoped `AGENTS.md` files. The marketing team gets a separate context file per role from `crewai_agents/app/agent_context/`, loaded by `build_crew` into that role's backstory. Neither mechanism stores hidden model reasoning or restores an old conversation. Run-specific evidence remains in SQLite; code/configuration remains the authoritative behavior.
 
+Read the [marketing glossary](../GLOSSARY.md) before naming domain concepts. In the monorepo, shared root rules and organization context also apply. Codex currently focuses on this product and the website; coordinate file ownership with the owner/Claude and preserve concurrent work. Handoffs name the approved issue/spec, paths, revision, checks and remaining external blockers.
+
+The nested deployment workflow is a mirror release definition. Root CI runs offline checks; it does not activate n8n, publish packages or run paid candidate evaluations. Legacy environment branches are not the monorepo development model.
+
 | Agent | Durable work knowledge | Output responsibility |
 | --- | --- | --- |
 | Product Owner | Topic choice and enterprise reader value | Scope and reasoned topic selection |

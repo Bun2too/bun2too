@@ -10,18 +10,18 @@ flowchart TB
     NVol[(n8n volume: database, credentials, config)]
     API[CrewAI FastAPI: authenticated operations]
     Worker[Single durable generation worker]
-    Crew[PO → BA → Research → Creative → Writer → Engineering → Tester → Editor → Delivery]
+    Crew[PO → BA → Research → Creative → Writer → Engineering → Editor → Tester → Delivery]
     Gate[Evidence and business-rule checks; approval hash]
     Publish[Deterministic Facebook publisher; quota and atomic claim]
     Volume[(CrewAI volume: runs, tasks, articles, publications, events)]
     Articles[Public approved article pages]
     PG[(Existing Postgres: reserved for future shared storage)]
     N8N --- NVol
-    N8N -->|tick every 5 minutes| API
+    N8N -->|08:05 Central daily reservation| API
     API --> Worker --> Crew --> Gate
     Worker --- Volume
     Gate --> Volume
-    N8N -->|publish poll every 5 minutes| Publish
+    N8N -->|bounded generation waits, then release-time wait| Publish
     Publish --- Volume
     Articles --- Volume
     API --- Volume
@@ -34,7 +34,7 @@ flowchart TB
   FB -->|reads public article| Articles
   N8N -->|daily 07:45 Central| Metrics[Read Facebook engagement]
   FB --> Metrics --> Volume
-  Volume -->|last 20 outcomes and hypotheses| Crew
+  Volume -->|bounded measured outcomes; history as exclusions| Crew
   DD[Datadog: logs and LLM Observability]
   Volume -->|durable operational log export| DD
   Crew -->|agentless LLM spans| DD

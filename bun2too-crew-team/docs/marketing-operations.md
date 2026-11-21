@@ -17,22 +17,22 @@ The old pipeline skipped the last layer when `MARKETING_DEPLOY_ENABLED` was miss
 The runtime sequence is:
 
 ```text
-n8n Schedule Trigger: every 5 minutes
-  → CrewAI API /automation/tick
-  → durable job, at most one per campaign/day
-  → Railway worker creates and runs the nine CrewAI agents
-  → saves the reviewed article and Facebook copy
+n8n Schedule Trigger: 08:05 America/Chicago
+  → CrewAI API /automation/tick reserves the daily campaign
+  → Railway worker runs nine roles; Editor edits before Tester reviews
+  → n8n persists 15-minute waits, at most six generation checks
+  → approved run waits for its persisted publication time
+  → /automation/publish sends once within the release window
 
-n8n Schedule Trigger: every 5 minutes
-  → /automation/publish
-  → sends approved content within its daily release window
+Separate service-health workflow: every six hours at :15
+  → bounded health check and configured fallback alerts
 
 n8n Schedule Trigger: 07:45 America/Chicago
   → /automation/metrics
   → observations inform the next campaign
 ```
 
-The schedule lives inside n8n. Five-minute polling does not mean a new post every five minutes: the API enforces daily deduplication and the 08:00–22:30 Central window. After activation, expect a polling execution within five minutes; `not_due` or an existing run can be a valid result.
+The schedules live inside n8n and use America/Chicago. The API enforces daily deduplication and the 08:00–22:30 Central window. Activation does not imply a run within five minutes: the next daily trigger starts generation. See [bounded orchestration](operational-recovery.md#daily-orchestration-and-bounded-checks) for wait exhaustion and recovery.
 
 **Why no agents appear in the CrewAI account:** this repository uses the CrewAI Python framework inside Railway. `Agent`, `Task` and `Crew` objects are constructed in `crewai_agents/app/crews.py` for each execution. That does not register a hosted deployment in CrewAI AMP. Optional CrewAI tracing is also separate from hosting. Running in the CrewAI cloud account would require an AMP deployment and authenticated kickoff/status integration, which are not implemented here. Do not run both backends against the same publishing campaign. See [CrewAI AMP](https://docs.crewai.com/enterprise/introduction).
 
@@ -135,7 +135,7 @@ curl --silent --show-error --fail \
 
 Use the returned run ID in `/docs` to inspect `/runs/{run_id}` and `/runs/{run_id}/work`. Verify all role outputs, source snapshots, article, approved hash, target window and actual publication outcome. A scheduled tick returns immediately; generation can take minutes. Polling is expected. An HTTP 200 from `/automation/publish` can contain `blocked` entries, so inspect its body and run events.
 
-The status and tick responses include `publish_after`, `publish_before`, `attempt`, `reason` and sanitized `error` details. `publish_after` is the stable daily randomized target inside the configured window, not necessarily 08:00. Before that target the publisher reports `not_due`; this is normal. A successful HTTP request alone is not evidence of generation or publication. The installed workflow now records each operation's result, then checks it: failed generation, held review, blocked/expired release, failed metrics and failed/uncertain publication make the n8n execution fail. Asynchronous generation failures become visible on the next five-minute poll. Empty publish polls still report today's campaign states.
+The status and tick responses include `publish_after`, `publish_before`, `attempt`, `reason` and sanitized `error` details. `publish_after` is the stable daily randomized target inside the configured window, not necessarily 08:00. Before that target the publisher reports `not_due`; this is normal. A successful HTTP request alone is not evidence of generation or publication. The installed workflow now records each operation's result, then checks it: failed generation, held review, blocked/expired release, failed metrics and failed/uncertain publication make the n8n execution fail. Asynchronous generation failures become visible on the next bounded status check or through the independent watchdog. Empty publish polls still report today's campaign states.
 
 After a real publication, verify the Page displays the exact approved message and article link. `published` requires a returned remote post ID; a draft or approved run is not evidence of a live post. Open the public article URL without authentication to confirm it is reachable from Facebook.
 
@@ -188,15 +188,15 @@ To stop publication immediately, set CrewAI `PUBLISHING_ENABLED=false` and ensur
 
 For `publication_unknown` or a stuck `publishing`/`sending` record, inspect Facebook first. If the post exists, use `/social-publications/{id}/reconcile` with its numeric `PAGE_POST` ID and reviewer. The endpoint verifies Page and exact text. Do not resend blindly after a timeout. For auth failures renew the correct Page token; for policy blockers revise evidence/rules and regenerate. Retain failed runs for diagnosis.
 
-## Live activation inputs still needed
+## Live activation checklist
 
-1. Approved business/product facts, audience and source URLs; the profile remains intentionally incomplete.
+1. Confirm the deployed profile contains the approved business facts, audience and source feeds. The committed profile is populated; that does not establish which profile a deployment loads.
 2. Numeric Facebook Page ID, supported API version and authorized Page token.
 3. A populated shared marketing API key, installed consistently in CrewAI, GitHub and n8n.
 4. n8n management API key and saved Header Auth credential ID.
 5. Verified preservation/migration of the current n8n data and encryption key before attaching its volume.
 
-These are the remaining prerequisites for live automatic operation; the repository changes and offline tests cannot substitute for them.
+Verify these prerequisites in the selected environment; this checklist does not assert they are currently missing. Repository changes and offline tests cannot establish live automatic operation.
 
 The daily content contract supplies reviewers with the actual article URL, verified Page identity, automatic release policy and persisted window. Reviewers still require factual evidence and safe copy; they do not require an already-public draft, prior publication, infrastructure tickets, analytics instrumentation or an additional human signoff under automatic policy. All nine roles still run. The packaged profile gathers recent entries from GitHub Changelog, Cloudflare Blog and AWS News feeds; CrewAI selects a timely topic and cites only retrieved entry URLs.
 
