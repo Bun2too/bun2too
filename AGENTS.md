@@ -8,7 +8,7 @@ Every agent, whatever tool runs it, reads this file first and then the `AGENTS.m
 
 | Path                     | Product                                                     | Stack                                   | Deploys to                                | Its own spec                                                         |
 | ------------------------ | ----------------------------------------------------------- | --------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------- |
-| `bun2too-support-agent/` | **Relay**: multi-agent support intake (REST + A2A)          | TypeScript (Hono) + Python (LangGraph)  | Railway POC: dev, qa, prod. GCP for GA    | [AGENTS.md](bun2too-support-agent/AGENTS.md)                         |
+| `bun2too-support-agent/` | **Relay**: multi-agent support intake (REST + A2A)          | TypeScript (Hono) + Python (LangGraph)  | Railway POC: qa, prod. GCP for GA         | [AGENTS.md](bun2too-support-agent/AGENTS.md)                         |
 | `bun2too-crew-team/`             | Marketing crew: CrewAI agents, publishing, n8n schedules    | Python (FastAPI, CrewAI), n8n           | Railway (its own pipeline, mirror repo)   | [AGENTS.md](bun2too-crew-team/AGENTS.md)                                     |
 | `bun2too-website/`       | bun2too.com                                                 | Next.js on Netlify                      | Netlify (its own pipeline, mirror repo)   | [AGENTS.md](bun2too-website/AGENTS.md)                               |
 | `.claude/`               | Shared agents, skills, hooks and plugin settings            |                                         |                                           |                                                                      |
@@ -26,7 +26,7 @@ We follow Addy Osmani's [agent-skills](https://github.com/addyosmani/agent-skill
 | **Build**  | `/build` (test-first, one slice at a time)  | Each slice green and committed                                                |
 | **Verify** | `/test` plus the product's verify skill     | Commands, outputs and trace IDs from the running system                       |
 | **Review** | `factory-review` skill (`/agent-skills:review` locally) | One comment ending `VERDICT: PASS` or `VERDICT: FAIL`             |
-| **Ship**   | `/ship` via the CI/CD pipeline              | dev → qa → prod deploy records and a rollback path                            |
+| **Ship**   | `/ship` via the CI/CD pipeline              | qa → prod deploy records (Relay) and a rollback path                          |
 
 In Claude Code, `/review` is a built-in command; use `/agent-skills:review` for Addy's review.
 
@@ -74,7 +74,7 @@ Product skills live with the product and are listed in its `AGENTS.md`. Examples
 ## SOPs
 
 - [Trunk-based development](docs/sop/trunk-based-development.md)
-- [Environments and release](docs/sop/environments-and-release.md): dev, qa and prod, promotion and rollback
+- [Environments and release](docs/sop/environments-and-release.md): qa and prod (no dev, Relay ADR 0008), promotion and rollback
 - [Subtrees](docs/sop/subtrees.md): mirrors, pull and push, and conflict handling
 - [Lead agents](docs/agents/collaboration.md): Claude and Codex, ownership, cross-review and signalling
 - [Issue tracker](docs/agents/issue-tracker.md), [triage labels](docs/agents/triage-labels.md), [domain docs](docs/agents/domain.md)
