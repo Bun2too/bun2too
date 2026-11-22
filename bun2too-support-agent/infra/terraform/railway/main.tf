@@ -57,6 +57,9 @@ resource "railway_service" "postgres" {
   source_image = var.postgres_image
   lifecycle {
     prevent_destroy = true
+    # ensure-volume.sh owns the data volume (ADR 0004). Without this, every apply read
+    # the attached volume and planned `volume -> null`, detaching it from Postgres.
+    ignore_changes = [volume]
   }
 }
 
@@ -70,6 +73,7 @@ locals {
 
   gateway_variables = merge(
     {
+      PORT               = "8080" # Railway health-checks $PORT; it assigns one when unset.
       RELAY_GATEWAY_PORT = "8080"
       RELAY_AGENTS_URL   = "http://$${{agents.RAILWAY_PRIVATE_DOMAIN}}:8080"
       RELAY_PUBLIC_URL   = "https://${railway_service_domain.gateway.domain}"
@@ -81,6 +85,7 @@ locals {
 
   agents_variables = merge(
     {
+      PORT              = "8080" # Railway health-checks $PORT; it assigns one when unset.
       RELAY_AGENTS_HOST = "::"
       RELAY_AGENTS_PORT = "8080"
       RELAY_OFFLINE     = local.offline
