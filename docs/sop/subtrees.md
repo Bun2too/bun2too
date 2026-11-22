@@ -12,15 +12,19 @@ Each product folder is a git subtree. The monorepo is the source of truth. Each 
 
 1. Work happens in the monorepo. Do not commit to a mirror directly. If someone did, pull it in (below) before the next push.
 2. One product per commit, so the split history stays readable.
-3. Pushing to a mirror can trigger that mirror's own deploy pipeline. The website mirror deploys **prod** from `main`. Sync is manual for that reason.
+3. Pushing to a mirror can trigger that mirror's own deploy pipeline. The `bun2too-website` and `bun2too-crew-team` mirrors deploy **prod** from `main`, so a sync to them is a release and waits for the owner. The `bun2too-support-agent` mirror runs no pipeline; Relay deploys from this monorepo.
+4. Sync after every merge that touches a product (AGENTS.md rule 17), so a mirror never falls behind silently.
 
 ## Push monorepo changes to a mirror
 
-Run Actions → `subtree-sync` with the prefix, or locally:
+Agents and people use the script. It fast-forwards only, pushes as the agent's GitHub App, and refuses a prod-deploying mirror without `--release`:
 
 ```sh
-git subtree push --prefix=bun2too-crew-team bun2too-crew-team main
+scripts/sync-mirror.sh claude bun2too-support-agent
+scripts/sync-mirror.sh codex bun2too-website --release   # only once the owner says to release
 ```
+
+The Actions workflow `subtree-sync` does the same from CI, but it needs a `subtree-sync` environment with a `SUBTREE_SYNC_TOKEN` secret, which is not set up yet.
 
 A rejected push means the mirror moved on. Pull first, then push again. Never force-push a mirror.
 
