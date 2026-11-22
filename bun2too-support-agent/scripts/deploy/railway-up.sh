@@ -16,17 +16,16 @@ status_of() {
     | jq -r --arg id "$1" 'if .errors or .data.deployment.id != $id then "UNREADABLE" else .data.deployment.status end'
 }
 
-# The reason a deployment failed is only in Railway: print the tail of its build log
-# (FAILED) or runtime log (CRASHED) so it shows in CI. Best effort; never fails the script.
-show_logs() {
-  local kind
-  case "$2" in FAILED) kind=--build ;; CRASHED) kind=--deployment ;; *) return 0 ;; esac
-  # The CLI needs both the project and the environment to read a deployment's log.
-  [ -n "${RAILWAY_PROJECT_ID:-}" ] && [ -n "${environment:-}" ] || return 0
-  echo "::group::Railway ${kind#--} log for deployment $1 (last 150 lines)"
-  timeout 60 railway logs "$1" "$kind" --lines 150 --project "$RAILWAY_PROJECT_ID" --environment "$environment" 2>&1 ||
-    echo "(could not read the log)"
-  echo "::endgroup::"
+# Where to read why a deployment failed. The repo is public and so are its Actions
+# logs, so this prints only a link to the deployment in Railway (IDs only), never
+# Railway's build or runtime log: those can carry case text or credentials.
+show_link() {
+  curl -fsS https://backboard.railway.com/graphql/v2 \
+    -H "Authorization: Bearer $RAILWAY_API_TOKEN" -H 'content-type: application/json' \
+    -d "$(jq -n --arg id "$1" '{query:"query($id: String!) { deployment(id: $id) { id projectId serviceId environmentId } }", variables:{id:$id}}')" \
+    | jq -r '.data.deployment // empty
+      | "Logs (Railway sign-in): https://railway.com/project/\(.projectId)/service/\(.serviceId)?environmentId=\(.environmentId)&id=\(.id)"' \
+    || true
 }
 
 wait_for() {
@@ -38,7 +37,7 @@ wait_for() {
       SUCCESS) return 0 ;;
       FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED | UNREADABLE)
         echo "::error::deployment $id ended as $status" >&2
-        show_logs "$id" "$status"
+        show_link "$id"
         return 1 ;;
     esac
     sleep 15
