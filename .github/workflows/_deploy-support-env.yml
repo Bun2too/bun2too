@@ -30,7 +30,7 @@ jobs:
             cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}",
             terraform_wrapper: false,
           }
-      # Read-only: the token can see this environment's workspace, and it runs locally.
+      # Read-only: the token can see this environment's workspace, may lock and write its state, and it runs locally.
       - name: Check the workspace
         env: { TF_TOKEN: "${{ secrets.TF_API_TOKEN }}" }
         run: ../.github/scripts/tf-workspace-check.sh "$TF_WORKSPACE"

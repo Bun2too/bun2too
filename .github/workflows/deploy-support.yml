@@ -7,6 +7,7 @@ on:
         "bun2too-support-agent/**",
         ".github/workflows/deploy-support.yml",
         ".github/workflows/_deploy-support-env.yml",
+        ".github/scripts/tf-workspace-check.sh",
       ]
   workflow_dispatch:
     inputs:

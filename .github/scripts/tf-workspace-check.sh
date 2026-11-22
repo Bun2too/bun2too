@@ -4,6 +4,9 @@
 # The workspace must exist and use Local execution: runs happen in this job, which passes
 # the TF_VAR_* inputs. A workspace in Remote execution runs on HCP's agents without them,
 # and its apply fails with "Failed to create configuration version".
+# The token must also be allowed to lock the workspace and read and write its state. HCP
+# answers a forbidden call with 404, so without this check a read-only or organization
+# token fails later as "Error acquiring the state lock: resource not found".
 # On a miss it lists the workspace names and execution modes this token can see. It never
 # prints the token or a response body.
 # Needs TF_TOKEN and TF_CLOUD_ORGANIZATION.
@@ -54,3 +57,11 @@ if [ "$mode" != local ]; then
   echo "::error::Set workspace $ws to Local execution (Settings > General > Execution Mode). This job runs Terraform itself and passes its inputs."
   exit 1
 fi
+missing=$(jq -r '.data.attributes.permissions as $p
+  | ["can-lock", "can-unlock", "can-read-state-versions", "can-create-state-versions"]
+  | map(select($p[.] != true)) | join(" ")' "$out")
+if [ -n "$missing" ]; then
+  echo "::error::The TF_API_TOKEN in this environment may read workspace $ws but lacks: $missing. Replace it with a team token for a team that has Write access to the HCP project bun2too-support-app (an organization token cannot lock or write state)."
+  exit 1
+fi
+echo "$ws: token may lock and write state"
