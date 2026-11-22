@@ -1,4 +1,9 @@
 from dataclasses import replace
+from typing import NoReturn
+
+import anthropic
+import httpx2
+import pytest
 
 from relay_agents.contracts import IntakeCommand, IntakeRequest, Intent
 from relay_agents.graph import Deps
@@ -112,3 +117,36 @@ async def test_customer_reply_resumes_the_same_case(deps: Deps) -> None:
     assert done is not None
     assert done.status == "resolved"
     assert done.pending_question is None
+
+
+class FailingClassifier:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def classify(self, *args: object, **kwargs: object) -> NoReturn:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            anthropic.APIStatusError(
+                "payment required: secret body",
+                response=httpx2.Response(402, request=httpx2.Request("POST", "https://x.test")),
+                body=None,
+            ),
+            {"error": "APIStatusError", "status": 402},
+        ),
+        (RuntimeError("secret detail"), {"error": "RuntimeError"}),
+    ],
+)
+async def test_failed_run_records_the_error_class_and_http_status_only(
+    deps: Deps, error: Exception, expected: dict[str, object]
+) -> None:
+    service = CaseService(replace(deps, classifier=FailingClassifier(error)))
+    case_id = await submit(service, "How do I send a private inquiry?")
+
+    events = await deps.store.events("bun2too", case_id)
+    assert events[-1].reason == "run failed"
+    assert events[-1].data == expected

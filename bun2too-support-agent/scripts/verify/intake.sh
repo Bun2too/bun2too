@@ -25,5 +25,5 @@ curl -fsS "$gateway/v1/cases/$case_id/events" -H "x-api-key: $key" \
 
 echo "case $case_id -> $status (evidence: $out)"
 # The exception class of a failed run, never its message: these logs are public.
-jq -c '.[] | {seq, status, actor, reason} + (if .data.error then {error: .data.error} else {} end)' "$out/events.json"
+jq -c '.[] | {seq, status, actor, reason} + (.data | {error, http_status: .status} | with_entries(select(.value != null)))' "$out/events.json"
 case "$status" in resolved|escalated|awaiting_customer|rejected) exit 0 ;; *) exit 1 ;; esac
