@@ -1,6 +1,6 @@
 # Runtime secrets (`SUPPORT_RUNTIME_SECRETS`)
 
-Relay's runtime secrets reach Railway through one GitHub environment secret, `SUPPORT_RUNTIME_SECRETS`, set separately in `support-dev`, `support-qa` and `support-prod`. Its value is a JSON object whose keys are environment variable names and whose values are strings.
+Relay's runtime secrets reach Railway through one GitHub environment secret, `SUPPORT_RUNTIME_SECRETS`, set separately in `support-qa` and `support-prod`. There is no dev environment ([ADR 0008](adr/0008-qa-only-pre-prod.md)). Its value is a JSON object whose keys are environment variable names and whose values are strings.
 
 The deploy job passes it to Terraform as `TF_VAR_runtime_secrets` ([Railway module](../infra/terraform/railway/main.tf)). Terraform splits it:
 
@@ -11,23 +11,23 @@ Keys must be `UPPER_SNAKE_CASE`; Terraform rejects anything else. Never put thes
 
 ## What each environment needs
 
-`dev` runs with `RELAY_OFFLINE=1` (set by Terraform). Offline mode swaps the model and both ticket systems for deterministic stand-ins, so dev needs only the tenant keys. `qa` and `prod` run live: the agents service reads every key the tenant file names at start-up and fails to start if one is missing.
+Both `qa` and `prod` run live: the agents service reads every key the tenant file names at start-up and fails to start if one is missing.
 
-| Key                         | dev      | qa                 | prod     | Read by |
-| --------------------------- | -------- | ------------------ | -------- | ------- |
-| `RELAY_TENANT_KEYS`         | required | required           | required | gateway |
-| `ANTHROPIC_API_KEY`         | not used | required           | required | agents  |
-| `CF_AIG_ACCOUNT_ID`         | not used | required           | required | agents  |
-| `CF_AIG_GATEWAY_ID`         | not used | required           | required | agents  |
-| `CF_AIG_TOKEN`              | not used | required           | required | agents  |
-| `BUN2TOO_JIRA_BASE_URL`     | not used | required (sandbox) | required | agents  |
-| `BUN2TOO_JIRA_EMAIL`        | not used | required (sandbox) | required | agents  |
-| `BUN2TOO_JIRA_API_TOKEN`    | not used | required (sandbox) | required | agents  |
-| `BUN2TOO_SNOW_INSTANCE_URL` | not used | required (sandbox) | required | agents  |
-| `BUN2TOO_SNOW_USER`         | not used | required (sandbox) | required | agents  |
-| `BUN2TOO_SNOW_PASSWORD`     | not used | required (sandbox) | required | agents  |
+| Key                         | qa                 | prod     | Read by |
+| --------------------------- | ------------------ | -------- | ------- |
+| `RELAY_TENANT_KEYS`         | required           | required | gateway |
+| `ANTHROPIC_API_KEY`         | required           | required | agents  |
+| `CF_AIG_ACCOUNT_ID`         | required           | required | agents  |
+| `CF_AIG_GATEWAY_ID`         | required           | required | agents  |
+| `CF_AIG_TOKEN`              | required           | required | agents  |
+| `BUN2TOO_JIRA_BASE_URL`     | required           | required | agents  |
+| `BUN2TOO_JIRA_EMAIL`        | required           | required | agents  |
+| `BUN2TOO_JIRA_API_TOKEN`    | required           | required | agents  |
+| `BUN2TOO_SNOW_INSTANCE_URL` | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_USER`         | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_PASSWORD`     | required (sandbox) | required | agents  |
 
-**qa uses sandboxes.** The deploy runs the intake journey against qa, which creates real tickets. Point qa at a Jira sandbox project or site and a ServiceNow developer instance, never at production systems. The journey never runs against prod.
+**Every qa deploy creates real tickets.** The deploy runs the intake journey against qa. For Bun2too, its Jira issue lands in project `BUN` (label `relay`), and its incident in the ServiceNow developer instance. Never point qa at a production ServiceNow. The journey never runs against prod.
 
 The `BUN2TOO_` prefix comes from the tenant. [`tenants/bun2too.yaml`](../tenants/bun2too.yaml) names the variables it reads (`base_url_env`, `email_env`, `token_env`, `instance_url_env`, `user_env`, `password_env`). A new tenant uses its own prefix, and its keys are added to this JSON the same way. To run a tenant without one of the systems, remove that system's block from the tenant file; then its keys are not needed.
 
@@ -134,10 +134,6 @@ Relay creates a record in the tenant's table (`incident` for Bun2too), finds it 
 Build the JSON locally, set it, and delete the file. The shapes below show which keys each environment needs.
 
 ```json
-{ "RELAY_TENANT_KEYS": "<key>:bun2too,<smoke-key>:bun2too" }
-```
-
-```json
 {
   "RELAY_TENANT_KEYS": "<key>:bun2too,<smoke-key>:bun2too",
   "ANTHROPIC_API_KEY": "<anthropic-key>",
@@ -153,18 +149,18 @@ Build the JSON locally, set it, and delete the file. The shapes below show which
 }
 ```
 
-The first is for dev, the second for qa and prod.
+The same shape serves qa and prod, with each environment's own values.
 
 ```sh
 umask 077
-$EDITOR /tmp/relay-dev.json                      # fill in the dev shape
-jq empty /tmp/relay-dev.json && \
-  gh secret set SUPPORT_RUNTIME_SECRETS -R Bun2too/bun2too --env support-dev < /tmp/relay-dev.json
-gh secret set SMOKE_TENANT_KEY -R Bun2too/bun2too --env support-dev   # prompts; the <smoke-key> above
-rm /tmp/relay-dev.json
+$EDITOR /tmp/relay-qa.json                       # fill in the shape above
+jq empty /tmp/relay-qa.json && \
+  gh secret set SUPPORT_RUNTIME_SECRETS -R Bun2too/bun2too --env support-qa < /tmp/relay-qa.json
+gh secret set SMOKE_TENANT_KEY -R Bun2too/bun2too --env support-qa    # prompts; the <smoke-key> above
+rm /tmp/relay-qa.json
 ```
 
-Repeat for `support-qa` and `support-prod`. Changes take effect on the next deploy of that environment (Actions → `deploy-support` → **Run workflow**).
+Repeat for `support-prod`. Changes take effect on the next deploy of that environment (Actions → `deploy-support` → **Run workflow**).
 
 ## Local development
 

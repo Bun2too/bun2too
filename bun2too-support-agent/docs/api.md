@@ -10,7 +10,6 @@ Relay takes a customer problem and returns a tracked support **case**. Each case
 
 | Environment | Gateway                                      | Mode                                                                                       |
 | ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| dev         | `https://bun2too-support-dev.up.railway.app` | Offline. A keyword classifier, knowledge-base answers and fake tickets (`*.invalid` links) |
 | qa          | `https://bun2too-support-qa.up.railway.app`  | Live. Claude through Cloudflare AI Gateway, with real Jira and ServiceNow sandboxes        |
 | prod        | Not deployed yet                             | Live                                                                                       |
 
