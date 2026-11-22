@@ -104,7 +104,7 @@ Relay creates a Jira issue per escalated case, labels it with the case's correla
 **How to get them:**
 
 1. **Account.** Create a dedicated Atlassian account for Relay rather than using a person's account, so tickets show who made them and access can be revoked alone. Invite it to the Jira site.
-2. **Project.** Make sure the project in `tenants/bun2too.yaml` exists (`project: SUP`, issue type `Task`). Give the Relay account **Browse projects**, **Create issues** and **Add comments** in it (and **Transition issues** if `resolve_transition_id` is set).
+2. **Project.** Make sure the project in `tenants/bun2too.yaml` exists (`project: BUN`, issue type `Task`; Bun2too's existing board, so Relay's issues carry the `relay` label to tell them apart). Give the Relay account **Browse projects**, **Create issues** and **Add comments** in it (and **Transition issues** if `resolve_transition_id` is set).
 3. **Priorities.** The project's priority scheme must contain `Highest`, `High`, `Medium` and `Low`, which Relay maps from sev1–sev4. Change `priority_map` in the tenant file if your names differ.
 4. **Token.** Signed in as the Relay account, open <https://id.atlassian.com/manage-profile/security/api-tokens> → **Create API token**. Name it after the environment, set an expiry, and copy it once.
 5. **Base URL.** The address you use to open Jira, up to `.atlassian.net`.

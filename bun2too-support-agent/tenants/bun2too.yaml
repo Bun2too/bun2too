@@ -12,7 +12,7 @@ models:
   specialist: anthropic:claude-opus-5-5
 tickets:
   jira:
-    project: SUP
+    project: BUN
     issue_type: Task
     base_url_env: BUN2TOO_JIRA_BASE_URL
     email_env: BUN2TOO_JIRA_EMAIL
