@@ -32,7 +32,7 @@ case $(jq length <<<"$found") in
 esac
 
 created=$(gql "$(jq -n --arg p "$RAILWAY_PROJECT_ID" --arg e "$environment_id" --arg s "$service_id" --arg m "$mount" \
-  '{query:"mutation($input: VolumeCreateInput!) { volumeCreate(input: $input) { volume { id } } }", variables:{input:{projectId:$p, environmentId:$e, serviceId:$s, mountPath:$m}}}')" |
-  jq -r '.data.volumeCreate.volume.id // empty')
+  '{query:"mutation($input: VolumeCreateInput!) { volumeCreate(input: $input) { id } }", variables:{input:{projectId:$p, environmentId:$e, serviceId:$s, mountPath:$m}}}')" |
+  jq -r '.data.volumeCreate.id // empty')
 [ -n "$created" ] || { echo "::error::volume create not confirmed; inspect Railway before retrying" >&2; exit 1; }
 echo "created volume $created at $mount"
