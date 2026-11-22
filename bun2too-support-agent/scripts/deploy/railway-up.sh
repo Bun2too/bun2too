@@ -16,6 +16,19 @@ status_of() {
     | jq -r --arg id "$1" 'if .errors or .data.deployment.id != $id then "UNREADABLE" else .data.deployment.status end'
 }
 
+# The reason a deployment failed is only in Railway: print the tail of its build log
+# (FAILED) or runtime log (CRASHED) so it shows in CI. Best effort; never fails the script.
+show_logs() {
+  local kind
+  case "$2" in FAILED) kind=--build ;; CRASHED) kind=--deployment ;; *) return 0 ;; esac
+  # The CLI needs both the project and the environment to read a deployment's log.
+  [ -n "${RAILWAY_PROJECT_ID:-}" ] && [ -n "${environment:-}" ] || return 0
+  echo "::group::Railway ${kind#--} log for deployment $1 (last 150 lines)"
+  timeout 60 railway logs "$1" "$kind" --lines 150 --project "$RAILWAY_PROJECT_ID" --environment "$environment" 2>&1 ||
+    echo "(could not read the log)"
+  echo "::endgroup::"
+}
+
 wait_for() {
   local id=$1 status=UNKNOWN
   for attempt in $(seq 1 40); do
@@ -24,7 +37,9 @@ wait_for() {
     case "$status" in
       SUCCESS) return 0 ;;
       FAILED | CRASHED | REMOVED | SKIPPED | CANCELED | CANCELLED | UNREADABLE)
-        echo "::error::deployment $id ended as $status" >&2; return 1 ;;
+        echo "::error::deployment $id ended as $status" >&2
+        show_logs "$id" "$status"
+        return 1 ;;
     esac
     sleep 15
   done
