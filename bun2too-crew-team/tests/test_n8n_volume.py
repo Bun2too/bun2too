@@ -26,7 +26,7 @@ class N8nVolumeTests(unittest.TestCase):
         request.assert_called_once()
 
     def test_creation_targets_explicit_environment_and_waits_for_readback(self):
-        request = Mock(side_effect=[self.response(), {'data': {'volumeCreate': {'volume': {'id': 'volume'}}}},
+        request = Mock(side_effect=[self.response(), {'data': {'volumeCreate': {'id': 'volume'}}},
                                    self.response([]), self.attached()])
         sleep = Mock()
         self.assertEqual(ensure(self.env, request, sleep), 'volume')
