@@ -6,7 +6,7 @@
 # agent passes only when the owner has said to release that product.
 set -euo pipefail
 usage() { echo "usage: $0 <claude|codex> <bun2too-support-agent|bun2too-crew-team|bun2too-website> [--release]" >&2; exit 2; }
-[ $# -ge 2 ] || usage
+[ $# -eq 2 ] || [ $# -eq 3 ] || usage
 agent=$1 prefix=$2 release=${3:-}
 case "$prefix" in
   bun2too-support-agent) deploys_prod=no ;;
