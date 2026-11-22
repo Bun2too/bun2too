@@ -90,7 +90,8 @@ On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fi
 2. **Check before you say "I can't".** Before telling anyone you cannot message the other agent, reach GitHub or find a PR, read this file and try it. `scripts/agent-tell.sh` always works while both agents run in herdr; it exits non-zero and says why when it does not. `gh pr list -R Bun2too/bun2too` finds every open PR. A claim of incapacity that a command would have disproved is a false statement.
 3. **Every handoff is closed.** A review request gets a verdict or a blocker report. A blocker report gets an answer. Whoever ends a turn with work waiting on the other agent says so to that agent before stopping.
 4. **One failure is not a dead end.** Retry once. Then take the fallback: GitHub down → `agent-tell.sh`; herdr down → a PR comment; both down → tell the owner. Name the fallback you used.
-5. **Relay what the owner says.** When the owner tells you something that affects the other agent's work, pass it on with `agent-tell.sh`.
+5. **Check open PRs before you end a turn.** Run `gh pr list -R Bun2too/bun2too`. Any open PR by the other agent without your verdict at its current head is yours to review now; any PR of yours with a PASS, green `ci` and a clean merge state is yours to merge now. On 2026-11-22 #27 waited because its review request was only a PR comment and the reviewer never looked.
+6. **Relay what the owner says.** When the owner tells you something that affects the other agent's work, pass it on with `agent-tell.sh`.
 
 ## Talking to each other
 
