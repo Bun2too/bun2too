@@ -56,7 +56,7 @@ Read [root AGENTS.md](../../AGENTS.md), then the nearest product guide. Its Alwa
 | Layer | Source behavior at review | Limit |
 | --- | --- | --- |
 | [Root CI](../../.github/workflows/ci.yml) | Path-filtered website/crew offline checks and aggregate `ci` | Does not invoke their nested release workflows, browser packaging or live evaluations |
-| Root Relay release | Main commit promoted dev → qa → prod through root workflows | `support-prod` human approval; live configuration was not inspected |
+| Root Relay release | Main commit promoted qa → prod through root workflows (no dev since 2026-11-22, Relay ADR 0008) | `support-prod` human approval; live configuration was not inspected |
 | [Website mirror workflow](../../bun2too-website/.github/workflows/ci-cd.yml) | `dev`/`qa`/`main` → GitHub `dev`/`qa`/`prod`, separate Netlify sites | Legacy branch mapping; Contentful `qa`/`qa`/`master` |
 | [Crew mirror workflow](../../bun2too-crew-team/.github/workflows/deploy.yml) | Dev evaluates only; qa/main publish packages and deploy QA/production | GitHub production environment is `production`, not the website's `prod`; Railway rebuilds source, not the archived GHCR digest |
 | Product model gates | Component on dev, trajectory on qa, both on main; every dimension >= 0.5 | Live evaluations currently start on mirror pushes, conflicting with newer root rule 12 |

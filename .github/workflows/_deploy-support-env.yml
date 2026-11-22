@@ -64,7 +64,7 @@ jobs:
           scripts/deploy/railway-up.sh gateway "${{ inputs.environment }}"
       - name: Smoke (read-only)
         run: scripts/verify/smoke.sh "${{ steps.tf.outputs.gateway_url }}"
-      - name: Intake journey (dev offline, qa against ticket sandboxes; never prod)
+      - name: Intake journey (qa only, live: one real case and tickets per deploy; never prod)
         if: inputs.environment != 'prod'
         env:
           RELAY_GATEWAY: ${{ steps.tf.outputs.gateway_url }}
