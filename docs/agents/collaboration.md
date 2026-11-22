@@ -4,14 +4,40 @@ Two lead agents build Bun2too with the owner: **Claude** (Claude Code) and **Cod
 
 ## Ownership
 
-| Area                                                                                    | Owner  |
-| --------------------------------------------------------------------------------------- | ------ |
-| `bun2too-website/`, `bun2too-crew-team/`                                                | Codex  |
-| `bun2too-support-agent/`                                                                | Claude |
-| The factory: `.github/`, `.claude/`, `docs/factory.md`, `docs/sdlc.md`, `docs/adr/`     | Claude |
+| Area                                                                                                 | Owner  |
+| ---------------------------------------------------------------------------------------------------- | ------ |
+| `bun2too-website/`, `bun2too-crew-team/`                                                             | Codex  |
+| `bun2too-support-agent/`                                                                             | Claude |
+| The factory: `.github/`, `.claude/`, `docs/factory.md`, `docs/sdlc.md`, `docs/adr/`                  | Claude |
 | Shared root files: `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/agents/`, `docs/sop/`, `docs/specs/` | Both   |
 
 The owner of an area decides how it changes. Either agent may change a shared root file, but only in a PR the other has reviewed. An agent that needs a change in the other's area asks for it (an issue or a prompt) instead of making it. The exception is a one-line fix that blocks its own work, which then goes in a PR the area's owner reviews.
+
+## Your GitHub identity
+
+AGENTS.md rule 15. Each lead agent has its own GitHub App, installed on every Bun2too repository:
+
+| Agent  | Acts as               | App ID  | Private key (owner-managed, outside the repo) |
+| ------ | --------------------- | ------- | --------------------------------------------- |
+| Claude | `bun2too-claude[bot]` | 5868181 | `~/.config/bun2too/agents/claude.pem`         |
+| Codex  | `bun2too-codex[bot]`  | 5868247 | `~/.config/bun2too/agents/codex.pem`          |
+
+- **Every GitHub write goes through the helper:** `scripts/as-agent.sh <claude|codex> <command> [args...]`. For that one command it mints a one-hour installation token and hands it to `gh` (`GH_TOKEN`) and to git (credentials, with SSH remotes rewritten to HTTPS). It also sets the git author and committer to the bot. Examples:
+
+  ```sh
+  scripts/as-agent.sh claude git commit -m "fix(root): ..."
+  scripts/as-agent.sh claude git push origin HEAD:fix/topic
+  scripts/as-agent.sh claude gh pr create --base main --title "..." --body-file body.md
+  scripts/as-agent.sh claude gh pr comment 19 --body-file review.md
+  scripts/as-agent.sh claude gh pr merge 19 --rebase --match-head-commit <sha>
+  ```
+
+  Run `git commit` through it too, or the commit is authored by the owner's git identity. Reads (`gh pr view`, `gh run view`, `git fetch`) may use either identity.
+
+- **Why:** the actor of a merge is the actor of the deploy run it starts. With the bot as actor, the owner is not approving their own run, so `support-prod`'s self-review prevention stays on and the owner can approve. The audit trail also shows which agent did what.
+- **Keys:** use only your own key, and never read, copy or print the other agent's. Never print a token, and never put one in a command line, a file or a comment. Both keys sit under one OS account, so this is a rule the agents keep, not something the machine enforces.
+- **When the helper fails** (no key, a refused token, a missing permission), stop and tell the owner. Do not fall back to the owner's `gh` login or SSH key for a write.
+- **Permissions** (owner-managed in each app's settings): contents, pull requests, issues and workflows (write); actions and checks (read). `gh workflow run` (a manual deploy or rollback) also needs actions (write). Without it, the owner dispatches those runs.
 
 ## One checkout each
 
@@ -60,5 +86,6 @@ AGENTS.md rule 12 applies to both agents. Neither adds the `agent-review` label,
 ## What stays with the owner
 
 - Approving prod deploys, PRs that grant a new write permission, and any decision recorded in an ADR.
+- The agents' GitHub Apps: their permissions, installations and private keys.
 - Settling disagreements between the agents.
 - Turning agents, budgets and paid workflows on or off.
