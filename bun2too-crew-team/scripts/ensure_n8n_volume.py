@@ -66,18 +66,18 @@ def ensure(env, request=request_json, sleep=time.sleep, verify_only=False):
                          'then set N8N_VOLUME_READY=true before attaching storage')
     # Never retry a mutation blindly: a timeout can occur after successful creation.
     result = request(ENDPOINT, env['RAILWAY_API_TOKEN'], {
-        'query': 'mutation($input: VolumeCreateInput!) { volumeCreate(input: $input) { volume { id } } }',
+        'query': 'mutation($input: VolumeCreateInput!) { volumeCreate(input: $input) { id } }',
         'variables': {'input': {'projectId': env['RAILWAY_PROJECT_ID'],
                                 'environmentId': env['RAILWAY_ENVIRONMENT_ID'],
                                 'serviceId': env['N8N_SERVICE_ID'], 'mountPath': MOUNT}},
     })
-    created = ((result.get('data') or {}).get('volumeCreate') or {}).get('volume')
-    if result.get('errors') or not created or not created.get('id'):
+    created_id = ((result.get('data') or {}).get('volumeCreate') or {}).get('id')
+    if result.get('errors') or not created_id:
         raise ValueError('Railway volume creation was not confirmed. Inspect existing volumes before retrying')
     for attempt in range(12):
-        volume_id = lookup(env, request, pending_id=created['id'])
+        volume_id = lookup(env, request, pending_id=created_id)
         if volume_id:
-            if volume_id != created['id']:
+            if volume_id != created_id:
                 raise ValueError('Volume attachment changed during provisioning; inspect Railway before deploying')
             print('Created n8n volume and verified its environment-specific attachment.', flush=True)
             return volume_id
