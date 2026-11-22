@@ -67,13 +67,13 @@ curl -sS -X POST "$RELAY/v1/intake" \
 | `message`  | yes      | 1–8000 characters after trimming                                                              |
 | `subject`  | no       | 1–300 characters                                                                              |
 | `customer` | no       | Any of `id`, `email`, `name`, `locale`. Self-reported, so never treat it as proof of identity |
-| `metadata` | no       | String map. Keys up to 64 characters, values up to 500. Use it for your own references        |
+| `metadata` | no       | String map. Keys up to 64 characters, values up to 500. Validated but **not stored yet**: it is not returned on the case or its events. Keep your own mapping from your reference to `caseId` |
 
 Unknown fields are rejected with `422 invalid_intake` and an `issues` list.
 
 **Idempotency.** `Idempotency-Key` is required, at most 200 characters, and scoped to the tenant.
 
-- Derive it from your own submission ID (the website's inquiry reference, an email Message-ID).
+- Derive it from your own submission ID (the website's inquiry reference, an email Message-ID). Store the returned `caseId` next to that ID: Relay does not echo your references back.
 - Retrying with the same key returns the same case with `200` and `created: false`. It never opens a second case or a second set of tickets.
 - Retry a `503 agents_unavailable` with the same key.
 

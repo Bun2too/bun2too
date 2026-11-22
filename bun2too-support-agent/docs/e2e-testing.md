@@ -78,7 +78,7 @@ The integration is tracked in the Jira project BUN and assigned to Codex. Once i
 - `POST /v1/intake` with channel `web_widget`.
 - `Idempotency-Key` is `bun2too-inquiry-<reference>`.
 - The visitor's topic is the `subject`.
-- The reference goes in `metadata.reference`.
+- The reference goes in `metadata.reference`. Relay validates it but does not store it yet, so the website keeps the reference → `caseId` mapping on its own inquiry record.
 - The tenant key stays in the site's server-side environment.
 
 Steps (person or browser agent):
@@ -87,7 +87,7 @@ Steps (person or browser agent):
 2. Fill it in with a test identity you control. Use one message per journey above, for example "How do I send a private inquiry?" for an auto-answer, or "Please delete all my personal data" for an escalation. Give consent, complete the CAPTCHA and submit.
 3. Note the **reference** the dialog shows. The site's response also carries the Relay `caseId` (or a status line in the dialog, depending on the website ticket's design).
 4. Follow the case with `GET $RELAY_GATEWAY/v1/cases/<caseId>`, or use the event stream above. It should settle as in Level 1.
-5. Confirm the tickets as in Level 2. The Jira issue and ServiceNow incident should name the same case, and the case's `metadata.reference` should be the website reference.
+5. Confirm the tickets as in Level 2. The Jira issue and ServiceNow incident should name the same case. Confirm the link to the website through the inquiry record in Netlify Blobs, which holds the `caseId` Relay returned. Relay itself does not return the website reference.
 6. Submit the same form again with the browser's back and resubmit, or retry within the visitor session. You should get the same reference, the same case and no new tickets.
 7. Check what the customer sees.
    - **resolved**: the answer, if the website ticket shows it.
