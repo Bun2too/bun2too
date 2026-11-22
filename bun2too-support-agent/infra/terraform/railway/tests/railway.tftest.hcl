@@ -45,6 +45,11 @@ run "dev_is_offline_and_targets_dev" {
     condition     = contains([for v in railway_variable_collection.gateway.variables : v.name if v.value == "1"], "RELAY_OFFLINE")
     error_message = "dev runs in offline mode."
   }
+
+  assert {
+    condition     = railway_service.gateway.dockerfile_path == "apps/gateway/Dockerfile" && railway_service.agents.dockerfile_path == "services/agents/Dockerfile"
+    error_message = "Each service builds its own Dockerfile; railway up uploads the product directory, which has no root Dockerfile."
+  }
 }
 
 run "secrets_split_by_service" {
