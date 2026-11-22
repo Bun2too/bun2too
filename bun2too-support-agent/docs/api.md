@@ -61,12 +61,12 @@ curl -sS -X POST "$RELAY/v1/intake" \
 # 202 {"caseId":"…","status":"received","traceId":"…","created":true}
 ```
 
-| Field      | Required | Rules                                                                                         |
-| ---------- | -------- | --------------------------------------------------------------------------------------------- |
-| `channel`  | yes      | `web_widget`, `a2a`, `email`, `marketplace` or `retail`                                       |
-| `message`  | yes      | 1–8000 characters after trimming                                                              |
-| `subject`  | no       | 1–300 characters                                                                              |
-| `customer` | no       | Any of `id`, `email`, `name`, `locale`. Self-reported, so never treat it as proof of identity |
+| Field      | Required | Rules                                                                                                                                                                                         |
+| ---------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `channel`  | yes      | `web_widget`, `a2a`, `email`, `marketplace` or `retail`                                                                                                                                       |
+| `message`  | yes      | 1–8000 characters after trimming                                                                                                                                                              |
+| `subject`  | no       | 1–300 characters                                                                                                                                                                              |
+| `customer` | no       | Any of `id`, `email`, `name`, `locale`. Self-reported, so never treat it as proof of identity                                                                                                 |
 | `metadata` | no       | String map. Keys up to 64 characters, values up to 500. Validated but **not stored yet**: it is not returned on the case or its events. Keep your own mapping from your reference to `caseId` |
 
 Unknown fields are rejected with `422 invalid_intake` and an `issues` list.
