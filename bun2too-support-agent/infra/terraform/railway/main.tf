@@ -32,10 +32,13 @@ resource "railway_project" "support" {
   }
 }
 
-# Source comes from `railway up` in CI; Dockerfile paths are variables below.
+# Source comes from `railway up` in CI, which uploads the product directory as the
+# build root. The Dockerfile path is part of the service's build settings: Railway
+# looked for ./Dockerfile when it was only a RAILWAY_DOCKERFILE_PATH variable.
 resource "railway_service" "gateway" {
   name                = "gateway"
   project_id          = railway_project.support.id
+  dockerfile_path     = "apps/gateway/Dockerfile"
   healthcheck_path    = "/healthz"
   healthcheck_timeout = 60
 }
@@ -43,6 +46,7 @@ resource "railway_service" "gateway" {
 resource "railway_service" "agents" {
   name                = "agents"
   project_id          = railway_project.support.id
+  dockerfile_path     = "services/agents/Dockerfile"
   healthcheck_path    = "/healthz"
   healthcheck_timeout = 120
 }
@@ -66,11 +70,10 @@ locals {
 
   gateway_variables = merge(
     {
-      RAILWAY_DOCKERFILE_PATH = "apps/gateway/Dockerfile"
-      RELAY_GATEWAY_PORT      = "8080"
-      RELAY_AGENTS_URL        = "http://$${{agents.RAILWAY_PRIVATE_DOMAIN}}:8080"
-      RELAY_PUBLIC_URL        = "https://${railway_service_domain.gateway.domain}"
-      RELAY_OFFLINE           = local.offline
+      RELAY_GATEWAY_PORT = "8080"
+      RELAY_AGENTS_URL   = "http://$${{agents.RAILWAY_PRIVATE_DOMAIN}}:8080"
+      RELAY_PUBLIC_URL   = "https://${railway_service_domain.gateway.domain}"
+      RELAY_OFFLINE      = local.offline
     },
     var.otel_endpoint == "" ? {} : { OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_endpoint },
     { for k in local.runtime_keys : k => var.runtime_secrets[k] if contains(local.gateway_secret_keys, k) },
@@ -78,11 +81,10 @@ locals {
 
   agents_variables = merge(
     {
-      RAILWAY_DOCKERFILE_PATH = "services/agents/Dockerfile"
-      RELAY_AGENTS_HOST       = "::"
-      RELAY_AGENTS_PORT       = "8080"
-      RELAY_OFFLINE           = local.offline
-      DATABASE_URL            = "postgresql://relay:${random_password.postgres.result}@$${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
+      RELAY_AGENTS_HOST = "::"
+      RELAY_AGENTS_PORT = "8080"
+      RELAY_OFFLINE     = local.offline
+      DATABASE_URL      = "postgresql://relay:${random_password.postgres.result}@$${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
     },
     var.otel_endpoint == "" ? {} : { OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_endpoint },
     { for k in local.runtime_keys : k => var.runtime_secrets[k] if !contains(local.gateway_secret_keys, k) },
