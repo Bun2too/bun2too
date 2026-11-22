@@ -6,18 +6,18 @@ Relay is a white-label, multi-agent support intake platform. Channels hand Relay
 
 ## Map
 
-| Path                 | Language                       | Owns                                                               |
-| -------------------- | ------------------------------ | ------------------------------------------------------------------ |
-| `apps/gateway`       | TypeScript (Hono)              | REST `/v1/*`, A2A `/a2a` + agent card, SSE, webhooks, tenant auth  |
-| `apps/widget`        | TypeScript                     | `<relay-support>` embeddable web component                         |
-| `packages/contracts` | TypeScript (Zod)               | Wire contracts. Source of truth; exports JSON Schema to `schema/`  |
-| `packages/telemetry` | TypeScript                     | OpenTelemetry bootstrap for every Node process                     |
-| `services/agents`    | Python (LangGraph + LangChain) | Orchestrator graph, specialists, case store, ticket connectors     |
-| `tenants/`           | YAML                           | White-label tenant configs. Data, never code branches              |
-| `evals/`             | JSONL                          | Golden intakes and expected routing                                |
-| `docs/adr/`          | Markdown                       | Decisions. Read the ADRs in the area you touch                     |
-| `infra/terraform/`   | Terraform                      | `railway/` (POC: qa, prod) and `gcp-cloudrun/` (GA candidate) |
-| `scripts/deploy/`    | Bash                           | Railway upload, deploy wait and volume checks used by CI           |
+| Path                 | Language                       | Owns                                                              |
+| -------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| `apps/gateway`       | TypeScript (Hono)              | REST `/v1/*`, A2A `/a2a` + agent card, SSE, webhooks, tenant auth |
+| `apps/widget`        | TypeScript                     | `<relay-support>` embeddable web component                        |
+| `packages/contracts` | TypeScript (Zod)               | Wire contracts. Source of truth; exports JSON Schema to `schema/` |
+| `packages/telemetry` | TypeScript                     | OpenTelemetry bootstrap for every Node process                    |
+| `services/agents`    | Python (LangGraph + LangChain) | Orchestrator graph, specialists, case store, ticket connectors    |
+| `tenants/`           | YAML                           | White-label tenant configs. Data, never code branches             |
+| `evals/`             | JSONL                          | Golden intakes and expected routing                               |
+| `docs/adr/`          | Markdown                       | Decisions. Read the ADRs in the area you touch                    |
+| `infra/terraform/`   | Terraform                      | `railway/` (POC: qa, prod) and `gcp-cloudrun/` (GA candidate)     |
+| `scripts/deploy/`    | Bash                           | Railway upload, deploy wait and volume checks used by CI          |
 
 Architecture and plan (published for the team): see [docs/architecture.md](docs/architecture.md). The client API is in [docs/api.md](docs/api.md) and the generated `packages/contracts/schema/openapi.json`, which the gateway serves at `/openapi.json`. To test a deployed environment end to end, see [docs/e2e-testing.md](docs/e2e-testing.md).
 

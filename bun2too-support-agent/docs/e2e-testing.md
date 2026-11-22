@@ -11,9 +11,9 @@ The API itself is described in [api.md](api.md) and `GET /openapi.json`.
 
 ## Which environment
 
-| Env | Gateway                                    | What it proves                                                                                                                                                                                             |
-| --- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| qa  | https://bun2too-support-qa.up.railway.app  | The real flow: Claude classifies and answers through Cloudflare AI Gateway, and real tickets land in the **sandbox** Jira project and ServiceNow developer instance                                        |
+| Env | Gateway                                   | What it proves                                                                                                                                                      |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| qa  | https://bun2too-support-qa.up.railway.app | The real flow: Claude classifies and answers through Cloudflare AI Gateway, and real tickets land in the **sandbox** Jira project and ServiceNow developer instance |
 
 qa is the only deployed environment before prod ([ADR 0008](adr/0008-qa-only-pre-prod.md)). For the offline behaviour (keyword classifier, fake tickets), run the stack locally with `RELAY_OFFLINE=1 pnpm dev`, using `RELAY_GATEWAY=http://localhost:8787` and the default key `dev-bun2too-key`. Never run these journeys against prod: they create tickets.
 
@@ -40,7 +40,7 @@ curl -sS "$RELAY_GATEWAY/openapi.json" | jq '.info.title, (.paths|keys)'
 
 Then run the journeys. Each one prints `case <id> -> <status>` and the event log, and saves the evidence under `.verify/<timestamp>/` (`intake.json`, `case.json`, `events.json`, `trace_id.txt`).
 
-| #   | Journey          | Command                                                                                                                                                                                      | Expected (local, offline)                                               | Expected (qa, live)                                                                                 |
+| #   | Journey          | Command                                                                                                                                                                                      | Expected (local, offline)                                             | Expected (qa, live)                                                                                 |
 | --- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | 1   | Knowledge answer | `scripts/verify/intake.sh "How do I send a private inquiry?"`                                                                                                                                | `resolved`, citation `kb-private-inquiry`, two fake tickets           | `resolved` with an answer drawn from the knowledge seed, one Jira issue and one ServiceNow incident |
 | 2   | Privacy          | `scripts/verify/intake.sh "Please delete all my personal data"`                                                                                                                              | `escalated` (policy: privacy always escalates)                        | `escalated`. Both tickets carry the handoff summary                                                 |

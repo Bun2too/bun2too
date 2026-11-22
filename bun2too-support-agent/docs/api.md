@@ -8,10 +8,10 @@ Relay takes a customer problem and returns a tracked support **case**. Each case
   - Import it into Postman, Insomnia or an SDK generator, or hand it to an agent as a tool definition.
 - **Agents:** the same flow is available over [A2A](https://a2a-protocol.org) 0.3.0. The agent card is at `GET /.well-known/agent-card.json`, and the JSON-RPC endpoint is `POST /a2a`.
 
-| Environment | Gateway                                      | Mode                                                                                       |
-| ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| qa          | `https://bun2too-support-qa.up.railway.app`  | Live. Claude through Cloudflare AI Gateway, with real Jira and ServiceNow sandboxes        |
-| prod        | Not deployed yet                             | Live                                                                                       |
+| Environment | Gateway                                     | Mode                                                                                |
+| ----------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| qa          | `https://bun2too-support-qa.up.railway.app` | Live. Claude through Cloudflare AI Gateway, with real Jira and ServiceNow sandboxes |
+| prod        | Not deployed yet                            | Live                                                                                |
 
 ## Authentication
 
