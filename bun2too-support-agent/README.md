@@ -40,9 +40,9 @@ Offline mode replaces only external systems (model calls, Jira, ServiceNow) with
 
 | Environment | Where                                             | When                                      |
 | ----------- | ------------------------------------------------- | ----------------------------------------- |
-| dev         | Railway `bun2too-support` / `dev`                 | every merge to `main` (offline mode)      |
-| qa          | Railway `bun2too-support` / `qa`                  | after dev smoke passes (ticket sandboxes) |
-| prod        | Railway `bun2too-support` / `prod`                | after qa, with a person's approval        |
+| dev         | Railway `bun2too-support-dev` / `dev`             | every merge to `main` (offline mode)      |
+| qa          | Railway `bun2too-support-qa` / `qa`               | after dev smoke passes (ticket sandboxes) |
+| prod        | Railway `bun2too-support-prod` / `prod`           | after qa, with a person's approval        |
 | GA          | Google Cloud Run (`infra/terraform/gcp-cloudrun`) | after the POC                             |
 
 Pipeline: root `.github/workflows/deploy-support.yml`. Runtime secrets: [docs/runtime-secrets.md](docs/runtime-secrets.md). Terraform: [infra/terraform/railway/README.md](infra/terraform/railway/README.md). Release and rollback: [../docs/sop/environments-and-release.md](../docs/sop/environments-and-release.md).

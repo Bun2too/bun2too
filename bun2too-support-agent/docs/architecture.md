@@ -22,6 +22,6 @@ Jira / ServiceNow ─webhooks─┘                                 │  → res
 all processes ──OTLP──▶ otel-collector ──▶ traces / metrics / logs
 ```
 
-Runtime: Railway project `bun2too-support` with environments dev, qa and prod, each running `gateway` (public), `agents` (private network) and `postgres` (its own volume). GA candidate: Google Cloud Run. See the root `docs/adr/0004-railway-poc-gcp-ga.md`. Model calls go through Cloudflare AI Gateway, one gateway per environment ([ADR 0007](adr/0007-cloudflare-ai-gateway.md)).
+Runtime: one Railway project per environment (`bun2too-support-dev`, `-qa`, `-prod`), each running `gateway` (public), `agents` (private network) and `postgres` (its own volume). GA candidate: Google Cloud Run. See the root `docs/adr/0004-railway-poc-gcp-ga.md`. Model calls go through Cloudflare AI Gateway, one gateway per environment ([ADR 0007](adr/0007-cloudflare-ai-gateway.md)).
 
 Key decisions: see `docs/adr/`.
