@@ -44,6 +44,82 @@ class OperationsTests(unittest.TestCase):
             publish_before=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat())
         return self.db.update(run['id'], **changes)
 
+    def expected(self):
+        return {key: operations.circuit(self.db)[key] for key in operations.CIRCUIT_KEYS}
+
+    def open_circuit(self, category='provider_billing'):
+        run = self.scheduled(status='failed', attempts=1, error_details=billing_diagnostic())
+        operations.pause(self.db, run['id'], dict(recovery.classify(billing_diagnostic()), category=category))
+        return run
+
+    def test_compare_and_resume_closes_only_the_expected_circuit(self):
+        self.open_circuit()
+        expected = self.expected()
+        result = operations.resume(self.db, 'operator', expected)
+        self.assertEqual((result['status'], result['resumed_circuit']), ('ready', expected))
+        self.assertIsNone(operations.circuit(self.db))
+        self.assertEqual(operations.state(self.db, 'generation_circuit')['resumed_circuit'], expected)
+        self.assertEqual(operations.status(self.db)['resume_contract'], 'compare-and-resume/v1')
+
+    def test_compare_and_resume_refuses_a_newer_circuit_without_mutation(self):
+        # Circuit A is diagnosed, someone else closes it, a later attempt opens circuit B.
+        self.open_circuit()
+        stale = self.expected()
+        operations.resume(self.db, 'other operator', stale)
+        self.open_circuit()
+        newer = operations.state(self.db, 'generation_circuit')
+        with self.assertRaises(operations.CircuitMismatch) as caught:
+            operations.resume(self.db, 'operator', stale)
+        self.assertEqual(caught.exception.current, {key: newer[key] for key in operations.CIRCUIT_KEYS})
+        self.assertEqual(operations.state(self.db, 'generation_circuit'), newer)
+
+    def test_compare_and_resume_refuses_when_no_circuit_is_open_or_the_category_is_not_resumable(self):
+        with self.assertRaises(operations.CircuitMismatch) as caught:
+            operations.resume(self.db, 'operator', {'run_id': 'x', 'opened_at': 'y', 'category': 'provider_billing'})
+        self.assertIsNone(caught.exception.current)
+        self.assertIsNone(operations.state(self.db, 'generation_circuit'))
+        self.open_circuit(category='generation_error')
+        with self.assertRaises(operations.CircuitMismatch):
+            operations.resume(self.db, 'operator', self.expected())
+        self.assertIsNotNone(operations.circuit(self.db))
+
+    def test_ineligible_regeneration_rolls_back_the_close(self):
+        self.open_circuit()
+        expired = self.scheduled(status='failed', publish_before=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+        before = operations.state(self.db, 'generation_circuit')
+        with self.assertRaises(ValueError):
+            operations.resume(self.db, 'operator', self.expected(), expired['id'])
+        self.assertEqual(operations.state(self.db, 'generation_circuit'), before)
+        self.assertEqual(self.db.get(expired['id'])['status'], 'failed')
+
+    def test_concurrent_resumes_of_one_circuit_close_it_once(self):
+        self.open_circuit()
+        expected = self.expected()
+
+        def attempt(_):
+            try:
+                operations.resume(Store(self.db.path), 'operator', expected)
+                return 'closed'
+            except operations.CircuitMismatch:
+                return 'mismatch'
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            outcomes = sorted(pool.map(attempt, range(4)))
+        self.assertEqual(outcomes, ['closed', 'mismatch', 'mismatch', 'mismatch'])
+
+    def test_resume_endpoint_requires_the_expected_circuit_and_returns_409_on_mismatch(self):
+        self.open_circuit()
+        client = TestClient(main.app, headers={'Authorization': 'Bearer test-key'})
+        with patch.object(main, 'store', return_value=self.db):
+            self.assertEqual(client.post('/automation/recovery/resume', json={'reviewer': 'operator'}).status_code, 422)
+            stale = dict(self.expected(), opened_at='2026-11-15T14:06:40+00:00')
+            response = client.post('/automation/recovery/resume', json={'reviewer': 'operator', 'expected_circuit': stale})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()['detail'], {'error': 'circuit_mismatch', 'current': self.expected()})
+            self.assertIsNotNone(operations.circuit(self.db))
+            response = client.post('/automation/recovery/resume', json={'reviewer': 'operator', 'expected_circuit': self.expected()})
+            self.assertEqual(response.status_code, 200)
+            self.assertIsNone(operations.circuit(self.db))
+
     def test_billing_429_is_permanent_but_rate_limit_and_server_errors_retry(self):
         policy = recovery.classify(billing_diagnostic())
         self.assertFalse(policy['retryable']); self.assertTrue(policy['pause_generation'])
@@ -67,7 +143,7 @@ class OperationsTests(unittest.TestCase):
             build.assert_not_called()
         self.assertEqual(operations.inspect_runs(self.db), [])
         self.assertEqual(self.db.get(run['id'])['attempts'], 3)
-        operations.resume(self.db, 'operator after billing restored', run['id'])
+        operations.resume(self.db, 'operator after billing restored', self.expected(), run['id'])
         self.assertIsNone(operations.circuit(self.db))
         self.assertEqual(self.db.get(run['id'])['status'], 'queued')
         operations.bootstrap(self.db)
@@ -196,7 +272,7 @@ class OperationsTests(unittest.TestCase):
         with patch.object(main,'store',return_value=self.db), patch.object(marketing,'publish_one') as send:
             self.assertEqual(client.post('/automation/recovery/resume',json={'reviewer':'operator'}).status_code,401)
             client.headers['Authorization']='Bearer test-key'
-            response=client.post('/automation/recovery/resume',json={'reviewer':'operator','run_id':run['id']})
+            response=client.post('/automation/recovery/resume',json={'reviewer':'operator','run_id':run['id'],'expected_circuit':self.expected()})
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.json()['status'],'queued')
             send.assert_not_called()

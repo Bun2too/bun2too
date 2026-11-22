@@ -37,13 +37,41 @@ def pause(db, run_id, policy):
         db.event(run_id, 'generation_circuit_opened', status='blocked', category=policy['category'], reason=policy['reason'])
 
 
-def resume(db, reviewer, run_id=None):
-    # Explicit operator action after billing/auth repair. Never touches social sends.
-    if run_id:
-        db.retry_generation(run_id, reviewer, automatic=False)
-    save(db, 'generation_circuit', dict(status='closed', resumed_at=now(), reviewer=reviewer, run_id=run_id))
-    db.event(run_id or 'operations', 'generation_circuit_resumed', reviewer=reviewer, status='queued' if run_id else 'ready')
-    return {'status': 'queued' if run_id else 'ready', 'run_id': run_id}
+RESUMABLE = frozenset({'provider_billing', 'provider_authentication'})
+CIRCUIT_KEYS = ('run_id', 'opened_at', 'category')
+
+
+class CircuitMismatch(Exception):
+    """The open circuit is not the one the operator diagnosed; nothing was changed."""
+
+    def __init__(self, current):
+        super().__init__('The open generation circuit does not match the expected circuit')
+        self.current = current
+
+
+def resume(db, reviewer, expected, run_id=None):
+    """Close the open circuit only if it is the one the operator diagnosed (compare-and-resume).
+
+    The compare, the optional regeneration of run_id and the close share one BEGIN IMMEDIATE
+    transaction, so a circuit opened or closed by anyone else in between makes this a no-op.
+    Explicit operator action after billing/auth repair. Never touches social sends.
+    """
+    with db.connect() as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        row = connection.execute('SELECT data FROM operational_state WHERE id = ?', ('generation_circuit',)).fetchone()
+        current = json.loads(row[0]) if row else None
+        if not current or current.get('status') != 'open':
+            raise CircuitMismatch(None)
+        snapshot = {key: current.get(key) for key in CIRCUIT_KEYS}
+        if snapshot != {key: expected.get(key) for key in CIRCUIT_KEYS} or snapshot['category'] not in RESUMABLE:
+            raise CircuitMismatch(snapshot)
+        if run_id:
+            db.retry_generation_locked(connection, run_id, reviewer)
+        connection.execute('INSERT OR REPLACE INTO operational_state VALUES (?, ?)', ('generation_circuit', json.dumps(
+            dict(status='closed', resumed_at=now(), reviewer=reviewer, run_id=run_id, resumed_circuit=snapshot))))
+    db.event(run_id or 'operations', 'generation_circuit_resumed', reviewer=reviewer,
+             status='queued' if run_id else 'ready', resumed_circuit=snapshot)
+    return {'status': 'queued' if run_id else 'ready', 'run_id': run_id, 'resumed_circuit': snapshot}
 
 
 def bootstrap(db):
@@ -173,4 +201,6 @@ def loop(stop, db):
 def status(db):
     return {'enabled': os.getenv('OPERATIONS_ENABLED', 'false').lower() == 'true',
             'generation_circuit': circuit(db), 'watchdog': state(db, 'watchdog_heartbeat'),
-            'notifications': notifications.status(db)}
+            'notifications': notifications.status(db),
+            # Clients check this before POSTing; an older server would ignore expected_circuit.
+            'resume_contract': 'compare-and-resume/v1'}

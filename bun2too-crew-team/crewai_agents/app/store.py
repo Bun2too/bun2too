@@ -197,43 +197,47 @@ class Store:
         """Explicit, atomic recovery of generation only; never retries a social send."""
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT data FROM runs WHERE id = ?', (run_id,)).fetchone()
-            if row is None:
-                raise KeyError(run_id)
-            run = json.loads(row[0])
-            if content_revision:
-                if automatic or run['status'] != 'awaiting_review' or run.get('attempts', 0) >= 3:
-                    raise ValueError('Content revision requires operator review, awaiting_review state and fewer than three attempts')
-            if run['status'] != ('awaiting_review' if content_revision else 'failed') or not run.get('scheduled'):
-                raise ValueError('Only failed scheduled generation can be retried')
-            if automatic:
-                from .recovery import classify
-                policy = classify(run.get('error_details') or {})
-                legacy = not run.get('generation_settings') and policy['retryable']
-                if policy['pause_generation'] or not (run.get('retryable') or legacy) or run.get('attempts', 0) >= 3:
-                    raise ValueError('Automatic generation recovery is not eligible or its attempt limit was reached')
-                if run.get('retry_after') and datetime.fromisoformat(run['retry_after']) > datetime.now(timezone.utc):
-                    raise ValueError('Generation retry backoff has not elapsed')
-            if db.execute('SELECT 1 FROM social_posts WHERE run_id = ?', (run_id,)).fetchone():
-                raise ValueError('A publication attempt exists; reconcile it instead of regenerating')
-            deadline = run.get('publish_before')
-            if not deadline or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc):
-                raise ValueError('Publication window has expired; wait for the next daily campaign')
-            if content_revision:
-                run.setdefault('content_revision_history', []).append(dict(
-                    at=now(), reviewer=reviewer, attempt=run.get('attempts', 0),
-                    artifact=run.get('artifact'), tasks=run.get('tasks', []),
-                    source_snapshots=run.get('source_snapshots', []),
-                    editorial_context=run.get('editorial_context'),
-                    publication_blocker=run.get('publication_blocker')))
-            run.update(status='queued', tasks=[], artifact=None, approval=None, error=None,
-                       error_details=None, publication_blocker=None, retryable=False, retry_after=None, updated_at=now())
-            db.execute('UPDATE runs SET data = ? WHERE id = ?', (json.dumps(run), run_id))
-            from .observability import redact
-            event = redact(dict(kind='content_revision_requested' if content_revision else 'generation_retry_requested', at=now(), reviewer=reviewer,
-                                status='queued', attempt=run.get('attempts', 0) + 1,
-                                campaign_key=run['campaign_key']))
-            db.execute('INSERT INTO events (run_id, data) VALUES (?, ?)', (run_id, json.dumps(event)))
+            return self.retry_generation_locked(db, run_id, reviewer, automatic, content_revision)
+
+    def retry_generation_locked(self, db, run_id, reviewer, automatic=False, content_revision=False):
+        """retry_generation's checks and write, inside a caller's BEGIN IMMEDIATE transaction."""
+        row = db.execute('SELECT data FROM runs WHERE id = ?', (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        run = json.loads(row[0])
+        if content_revision:
+            if automatic or run['status'] != 'awaiting_review' or run.get('attempts', 0) >= 3:
+                raise ValueError('Content revision requires operator review, awaiting_review state and fewer than three attempts')
+        if run['status'] != ('awaiting_review' if content_revision else 'failed') or not run.get('scheduled'):
+            raise ValueError('Only failed scheduled generation can be retried')
+        if automatic:
+            from .recovery import classify
+            policy = classify(run.get('error_details') or {})
+            legacy = not run.get('generation_settings') and policy['retryable']
+            if policy['pause_generation'] or not (run.get('retryable') or legacy) or run.get('attempts', 0) >= 3:
+                raise ValueError('Automatic generation recovery is not eligible or its attempt limit was reached')
+            if run.get('retry_after') and datetime.fromisoformat(run['retry_after']) > datetime.now(timezone.utc):
+                raise ValueError('Generation retry backoff has not elapsed')
+        if db.execute('SELECT 1 FROM social_posts WHERE run_id = ?', (run_id,)).fetchone():
+            raise ValueError('A publication attempt exists; reconcile it instead of regenerating')
+        deadline = run.get('publish_before')
+        if not deadline or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc):
+            raise ValueError('Publication window has expired; wait for the next daily campaign')
+        if content_revision:
+            run.setdefault('content_revision_history', []).append(dict(
+                at=now(), reviewer=reviewer, attempt=run.get('attempts', 0),
+                artifact=run.get('artifact'), tasks=run.get('tasks', []),
+                source_snapshots=run.get('source_snapshots', []),
+                editorial_context=run.get('editorial_context'),
+                publication_blocker=run.get('publication_blocker')))
+        run.update(status='queued', tasks=[], artifact=None, approval=None, error=None,
+                   error_details=None, publication_blocker=None, retryable=False, retry_after=None, updated_at=now())
+        db.execute('UPDATE runs SET data = ? WHERE id = ?', (json.dumps(run), run_id))
+        from .observability import redact
+        event = redact(dict(kind='content_revision_requested' if content_revision else 'generation_retry_requested', at=now(), reviewer=reviewer,
+                            status='queued', attempt=run.get('attempts', 0) + 1,
+                            campaign_key=run['campaign_key']))
+        db.execute('INSERT INTO events (run_id, data) VALUES (?, ?)', (run_id, json.dumps(event)))
         return run
 
     def recover_generation(self):
