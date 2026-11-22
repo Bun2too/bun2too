@@ -82,6 +82,15 @@ A passed PR must not sit waiting for someone to notice. On 2026-11-21 PRs #19 an
 - **The reviewer still signals.** After posting the verdict, the reviewer tells the author with `scripts/agent-tell.sh <author> "..."`: the verdict and the comment link.
 - **If GitHub fails, the verdict still travels.** A reviewer who cannot post sends the full verdict through `agent-tell.sh`: the exact head SHA, PASS or FAIL, and the findings. The author posts it on the PR as a quoted relay, credited to the reviewer, and merges on it as usual. The reviewer replaces the relay with its own comment once it can.
 
+## After a merge: sync the mirror
+
+AGENTS.md rule 17. Each product folder is mirrored to its own repo ([subtrees SOP](../sop/subtrees.md)). Until 2026-11-22 nobody synced them, and all three mirrors were days and dozens of commits behind.
+
+- **Who and when.** The agent that merges a PR touching `bun2too-support-agent/`, `bun2too-crew-team/` or `bun2too-website/` syncs that product's mirror in the same turn, right after the merge: `scripts/sync-mirror.sh <you> <prefix>`.
+- **How.** The script splits the subtree from `origin/main` and pushes it to the mirror's `main` as your app. It only fast-forwards; it never force-pushes. If the mirror has commits the monorepo lacks, it stops; pull them in first, as the SOP describes.
+- **Mirrors that deploy prod.** A push to the `bun2too-crew-team` or `bun2too-website` mirror's `main` starts that product's production pipeline. The script refuses these without `--release` (exit 3). Pass `--release` only when the owner has said to release that product. Otherwise, tell the owner in your reply that the mirror is N commits behind and is waiting for a release.
+- **Close the loop.** Say in the PR, or in your reply, which mirror you synced and to which commit, or why you did not.
+
 ## Never go silent
 
 On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fixes. It stopped without telling Claude, who sat waiting for a verdict. Asked by the owner, it said it had no way to message Claude, after many rounds of doing exactly that in the same session. Both are failures, and these rules exist so neither happens again.
@@ -90,7 +99,7 @@ On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fi
 2. **Check before you say "I can't".** Before telling anyone you cannot message the other agent, reach GitHub or find a PR, read this file and try it. `scripts/agent-tell.sh` always works while both agents run in herdr; it exits non-zero and says why when it does not. `gh pr list -R Bun2too/bun2too` finds every open PR. A claim of incapacity that a command would have disproved is a false statement.
 3. **Every handoff is closed.** A review request gets a verdict or a blocker report. A blocker report gets an answer. Whoever ends a turn with work waiting on the other agent says so to that agent before stopping.
 4. **One failure is not a dead end.** Retry once. Then take the fallback: GitHub down → `agent-tell.sh`; herdr down → a PR comment; both down → tell the owner. Name the fallback you used.
-5. **Check open PRs before you end a turn.** Run `gh pr list -R Bun2too/bun2too`. Any open PR by the other agent without your verdict at its current head is yours to review now; any PR of yours with a PASS, green `ci` and a clean merge state is yours to merge now. On 2026-11-22 #27 waited because its review request was only a PR comment and the reviewer never looked.
+5. **Check open PRs before you end a turn.** Run `gh pr list -R Bun2too/bun2too`, and sync the mirror of any product you merged (rule 17). Any open PR by the other agent without your verdict at its current head is yours to review now; any PR of yours with a PASS, green `ci` and a clean merge state is yours to merge now. On 2026-11-22 #27 waited because its review request was only a PR comment and the reviewer never looked.
 6. **Relay what the owner says.** When the owner tells you something that affects the other agent's work, pass it on with `agent-tell.sh`.
 
 ## Talking to each other
