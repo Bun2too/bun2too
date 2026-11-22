@@ -50,6 +50,12 @@ run "dev_is_offline_and_targets_dev" {
     condition     = railway_service.gateway.dockerfile_path == "apps/gateway/Dockerfile" && railway_service.agents.dockerfile_path == "services/agents/Dockerfile"
     error_message = "Each service builds its own Dockerfile; railway up uploads the product directory, which has no root Dockerfile."
   }
+
+  assert {
+    condition = alltrue([for c in [railway_variable_collection.gateway, railway_variable_collection.agents] :
+    [for v in c.variables : v.value if v.name == "PORT"] == ["8080"]])
+    error_message = "Railway health-checks $PORT, so both services set it to the port they listen on."
+  }
 }
 
 run "secrets_split_by_service" {
