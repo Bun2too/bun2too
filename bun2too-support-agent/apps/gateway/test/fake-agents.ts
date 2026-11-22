@@ -1,5 +1,5 @@
 import type { Case, CaseEvent, IntakeAccepted, IntakeCommand } from "@relay/contracts";
-import type { AgentsClient } from "../src/agents-client.js";
+import { type AgentsClient, NotAwaitingCustomer } from "../src/agents-client.js";
 
 export class FakeAgents implements AgentsClient {
   readonly cases = new Map<string, Case>();
@@ -64,6 +64,8 @@ export class FakeAgents implements AgentsClient {
   }
 
   async reply(tenant: string, caseId: string): Promise<Case | null> {
-    return this.getCase(tenant, caseId);
+    const found = await this.getCase(tenant, caseId);
+    if (found && found.status !== "awaiting_customer") throw new NotAwaitingCustomer();
+    return found;
   }
 }

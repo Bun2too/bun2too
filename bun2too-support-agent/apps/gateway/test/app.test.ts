@@ -92,6 +92,57 @@ describe("REST intake", () => {
   });
 });
 
+describe("OpenAPI", () => {
+  it("serves the document without a key, pointing at this gateway", async () => {
+    const { app } = setup();
+    const res = await app.request("/openapi.json");
+    expect(res.status).toBe(200);
+    const doc = await res.json();
+    expect(doc.openapi).toBe("3.1.0");
+    expect(doc.servers).toEqual([{ url: "http://relay.test" }]);
+    expect(Object.keys(doc.paths)).toEqual(
+      expect.arrayContaining(["/v1/intake", "/v1/cases/{id}", "/v1/cases/{id}/messages", "/a2a"]),
+    );
+  });
+});
+
+describe("Customer replies", () => {
+  it("returns 409 when the case is not waiting for the customer", async () => {
+    const { app } = setup();
+    const created = await app.request("/v1/intake", {
+      method: "POST",
+      headers: headers({ "idempotency-key": "k1" }),
+      body: JSON.stringify({ channel: "web_widget", message: "help" }),
+    });
+    const { caseId } = await created.json();
+    const res = await app.request(`/v1/cases/${caseId}/messages`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ message: "more detail" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "not_awaiting_customer" });
+  });
+
+  it("accepts a reply while the case awaits the customer", async () => {
+    const { app, agents } = setup();
+    const created = await app.request("/v1/intake", {
+      method: "POST",
+      headers: headers({ "idempotency-key": "k1" }),
+      body: JSON.stringify({ channel: "web_widget", message: "help" }),
+    });
+    const { caseId } = await created.json();
+    const stored = agents.cases.get(caseId);
+    if (stored) agents.cases.set(caseId, { ...stored, status: "awaiting_customer" });
+    const res = await app.request(`/v1/cases/${caseId}/messages`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ message: "more detail" }),
+    });
+    expect(res.status).toBe(202);
+  });
+});
+
 describe("A2A", () => {
   const rpc = (app: ReturnType<typeof setup>["app"], body: unknown) =>
     app.request("/a2a", { method: "POST", headers: headers(), body: JSON.stringify(body) });
@@ -117,6 +168,21 @@ describe("A2A", () => {
     expect(body.result.kind).toBe("task");
     expect(body.result.status.state).toBe("completed");
     expect(body.result.artifacts[0].parts[0].text).toContain("knowledge base");
+  });
+
+  it("rejects a reply to a task that is not waiting for input", async () => {
+    const { app } = setup();
+    const message = (messageId: string, taskId?: string) => ({
+      jsonrpc: "2.0",
+      id: messageId,
+      method: "message/send",
+      params: {
+        message: { role: "user", messageId, taskId, parts: [{ kind: "text", text: "hi" }] },
+      },
+    });
+    const opened = await (await rpc(app, message("m-1"))).json();
+    const body = await (await rpc(app, message("m-2", opened.result.id))).json();
+    expect(body.error).toEqual({ code: -32602, message: "Task is not waiting for input" });
   });
 
   it("returns method-not-found for unknown methods", async () => {
