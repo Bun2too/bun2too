@@ -10,6 +10,7 @@ export interface AgentsClient {
 }
 
 export class AgentsUnavailable extends Error {}
+export class NotAwaitingCustomer extends Error {}
 
 const CaseEvents = z.array(CaseEvent);
 
@@ -49,6 +50,8 @@ export class HttpAgentsClient implements AgentsClient {
       throw new AgentsUnavailable(`agents service unreachable: ${String(error)}`);
     });
     if (response.status === 404) return null;
+    if (response.status === 409)
+      throw new NotAwaitingCustomer("case is not waiting for the customer");
     if (!response.ok) throw new AgentsUnavailable(`agents service returned ${response.status}`);
     return response.json();
   }

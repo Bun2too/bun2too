@@ -1,6 +1,6 @@
 import { type Case, type CaseStatus, IntakeRequest } from "@relay/contracts";
 import { z } from "zod";
-import type { AgentsClient } from "./agents-client.js";
+import { type AgentsClient, NotAwaitingCustomer } from "./agents-client.js";
 
 export const A2A_PROTOCOL_VERSION = "0.3.0";
 
@@ -106,7 +106,11 @@ export async function handleRpc(raw: unknown, tenant: string, agents: AgentsClie
         .flatMap((p) => (p.kind === "text" && "text" in p ? [String(p.text)] : []))
         .join("\n");
       if (message.taskId) {
-        const updated = await agents.reply(tenant, message.taskId, text);
+        const updated = await agents.reply(tenant, message.taskId, text).catch((error) => {
+          if (error instanceof NotAwaitingCustomer) return "not_waiting" as const;
+          throw error;
+        });
+        if (updated === "not_waiting") return fail(id, -32602, "Task is not waiting for input");
         return updated ? ok(id, toTask(updated)) : fail(id, -32001, "Task not found");
       }
       const intake = IntakeRequest.safeParse({ channel: "a2a", message: text });

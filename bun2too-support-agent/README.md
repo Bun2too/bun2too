@@ -3,6 +3,8 @@
 White-label, multi-agent support intake. A channel (website widget, retail system, marketplace, partner agent) hands Relay a customer problem over **REST** or **A2A**. Relay opens a tracked **case**, raises one **Jira** issue and one **ServiceNow** record, and sends a **specialist** agent to resolve it, escalating to people only when policy or confidence requires it. `bun2too` is the demo tenant.
 
 - Architecture: https://claude.ai/artifact/Hje8YdHV3njx2TXgywGS1D
+- API for clients and agents: [docs/api.md](docs/api.md). OpenAPI 3.1 at `GET /openapi.json` on every gateway ([repo copy](packages/contracts/schema/openapi.json))
+- Testing a deployed environment end to end, including tickets and the website: [docs/e2e-testing.md](docs/e2e-testing.md)
 - Execution plan (three weeks): https://claude.ai/artifact/HxXS4MGBucVm5BYuY2zMSM
 - Pitch deck: https://claude.ai/artifact/Pz9GdCothnDgwBEFVqWmae
 

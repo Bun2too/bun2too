@@ -8,6 +8,7 @@ import {
   IntakeCommand,
   IntakeRequest,
 } from "./case.js";
+import { openApiDocument } from "./openapi.js";
 
 const SCHEMAS = { IntakeRequest, IntakeCommand, IntakeAccepted, CustomerReply, Case, CaseEvent };
 const dir = new URL("../schema/", import.meta.url);
@@ -15,11 +16,17 @@ const dir = new URL("../schema/", import.meta.url);
 const render = (schema: z.ZodType) =>
   `${JSON.stringify(z.toJSONSchema(schema, { io: "input" }), null, 2)}\n`;
 
+const FILES: Record<string, string> = {
+  ...Object.fromEntries(
+    Object.entries(SCHEMAS).map(([name, schema]) => [`${name}.schema.json`, render(schema)]),
+  ),
+  "openapi.json": `${JSON.stringify(openApiDocument(), null, 2)}\n`,
+};
+
 async function main(mode: string | undefined) {
   const drifted: string[] = [];
-  for (const [name, schema] of Object.entries(SCHEMAS)) {
-    const file = new URL(`${name}.schema.json`, dir);
-    const next = render(schema);
+  for (const [name, next] of Object.entries(FILES)) {
+    const file = new URL(name, dir);
     if (mode === "write") {
       await writeFile(file, next);
       continue;
