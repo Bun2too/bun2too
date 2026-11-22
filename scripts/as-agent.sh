@@ -56,10 +56,14 @@ export GIT_AUTHOR_EMAIL="$bot_id+$slug[bot]@users.noreply.github.com"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 # Command-scope git config: clear inherited credential helpers (the owner's keychain),
 # answer with the token instead, and send SSH remotes over HTTPS.
-export GIT_CONFIG_COUNT=4
+# Both SSH spellings are rewritten: scp-style git@github.com:owner/repo and
+# ssh://git@github.com/owner/repo.
+export GIT_CONFIG_COUNT=6
 export GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
 export GIT_CONFIG_KEY_1=credential.helper
 export GIT_CONFIG_VALUE_1='!f() { test "$1" = get && printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
 export GIT_CONFIG_KEY_2=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_2=git@github.com:
-export GIT_CONFIG_KEY_3=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_3=git@github.com:
+export GIT_CONFIG_KEY_3=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_3=ssh://git@github.com/
+export GIT_CONFIG_KEY_4=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_4=git@github.com:
+export GIT_CONFIG_KEY_5=url.https://github.com/.pushInsteadOf GIT_CONFIG_VALUE_5=ssh://git@github.com/
 exec "$@"
