@@ -1,6 +1,6 @@
 mock_provider "railway" {
   mock_resource "railway_service_domain" {
-    defaults = { domain = "bun2too-support-dev.up.railway.app" }
+    defaults = { domain = "bun2too-support-qa.up.railway.app" }
   }
   mock_resource "railway_service" {
     defaults = { id = "33333333-3333-4333-8333-333333333301" }
@@ -20,20 +20,20 @@ variables {
   }
 }
 
-run "dev_is_offline_and_targets_dev" {
+run "qa_is_live_and_targets_qa" {
   command = apply
   variables {
-    environment = "dev"
+    environment = "qa"
   }
 
   assert {
-    condition     = railway_project.support.name == "bun2too-support-dev"
+    condition     = railway_project.support.name == "bun2too-support-qa"
     error_message = "The Railway project is named like the HCP workspace."
   }
 
   assert {
-    condition     = railway_project.support.default_environment.name == "dev"
-    error_message = "The project's Railway environment is named dev, which railway-up.sh deploys to."
+    condition     = railway_project.support.default_environment.name == "qa"
+    error_message = "The project's Railway environment is named qa, which railway-up.sh deploys to."
   }
 
   assert {
@@ -42,8 +42,9 @@ run "dev_is_offline_and_targets_dev" {
   }
 
   assert {
-    condition     = contains([for v in railway_variable_collection.gateway.variables : v.name if v.value == "1"], "RELAY_OFFLINE")
-    error_message = "dev runs in offline mode."
+    condition = alltrue([for c in [railway_variable_collection.gateway, railway_variable_collection.agents] :
+    !contains([for v in c.variables : v.name], "RELAY_OFFLINE")])
+    error_message = "Deployed environments run live; offline mode is for local runs only."
   }
 
   assert {
@@ -61,7 +62,7 @@ run "dev_is_offline_and_targets_dev" {
 run "secrets_split_by_service" {
   command = apply
   variables {
-    environment = "qa"
+    environment = "prod"
   }
 
   assert {
@@ -79,16 +80,20 @@ run "secrets_split_by_service" {
     error_message = "Model keys belong to agents."
   }
 
-  assert {
-    condition     = [for v in railway_variable_collection.agents.variables : v.value if v.name == "RELAY_OFFLINE"][0] == ""
-    error_message = "qa runs live."
-  }
 }
 
 run "rejects_unknown_environment" {
   command = plan
   variables {
     environment = "staging"
+  }
+  expect_failures = [var.environment]
+}
+
+run "rejects_dev" {
+  command = plan
+  variables {
+    environment = "dev"
   }
   expect_failures = [var.environment]
 }

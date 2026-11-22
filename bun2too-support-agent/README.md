@@ -42,8 +42,7 @@ Offline mode replaces only external systems (model calls, Jira, ServiceNow) with
 
 | Environment | Where                                             | When                                      |
 | ----------- | ------------------------------------------------- | ----------------------------------------- |
-| dev         | Railway `bun2too-support-dev` / `dev`             | every merge to `main` (offline mode)      |
-| qa          | Railway `bun2too-support-qa` / `qa`               | after dev smoke passes (ticket sandboxes) |
+| qa          | Railway `bun2too-support-qa` / `qa`               | every merge to `main` (live; the only pre-prod environment, [ADR 0008](docs/adr/0008-qa-only-pre-prod.md)) |
 | prod        | Railway `bun2too-support-prod` / `prod`           | after qa, with a person's approval        |
 | GA          | Google Cloud Run (`infra/terraform/gcp-cloudrun`) | after the POC                             |
 

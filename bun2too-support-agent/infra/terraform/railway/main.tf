@@ -19,7 +19,7 @@ provider "railway" {
 
 # One Railway project per environment, named like its HCP Terraform workspace
 # (bun2too-support-<environment>). Its only Railway environment carries the same short
-# name (dev, qa, prod), which railway-up.sh deploys to.
+# name (qa, prod), which railway-up.sh deploys to.
 resource "railway_project" "support" {
   name         = "${var.name_prefix}-${var.environment}"
   description  = "Relay support intake for Bun2too (${var.environment}): gateway, agents and Postgres. POC; GA target is GCP Cloud Run."
@@ -66,7 +66,6 @@ resource "railway_service" "postgres" {
 locals {
   environment_id = railway_project.support.default_environment.id
   subdomain      = "${var.name_prefix}-${var.environment}"
-  offline        = var.environment == "dev" ? "1" : ""
 
   runtime_keys        = toset(nonsensitive(keys(var.runtime_secrets)))
   gateway_secret_keys = toset(["RELAY_TENANT_KEYS"])
@@ -77,7 +76,6 @@ locals {
       RELAY_GATEWAY_PORT = "8080"
       RELAY_AGENTS_URL   = "http://$${{agents.RAILWAY_PRIVATE_DOMAIN}}:8080"
       RELAY_PUBLIC_URL   = "https://${railway_service_domain.gateway.domain}"
-      RELAY_OFFLINE      = local.offline
     },
     var.otel_endpoint == "" ? {} : { OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_endpoint },
     { for k in local.runtime_keys : k => var.runtime_secrets[k] if contains(local.gateway_secret_keys, k) },
@@ -88,7 +86,6 @@ locals {
       PORT              = "8080" # Railway health-checks $PORT; it assigns one when unset.
       RELAY_AGENTS_HOST = "::"
       RELAY_AGENTS_PORT = "8080"
-      RELAY_OFFLINE     = local.offline
       DATABASE_URL      = "postgresql://relay:${random_password.postgres.result}@$${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
     },
     var.otel_endpoint == "" ? {} : { OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_endpoint },

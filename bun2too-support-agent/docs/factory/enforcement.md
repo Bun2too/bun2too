@@ -17,6 +17,6 @@ A rule repeated twice becomes a check (the Retro role in the root `docs/factory.
 | Formatting                     | Biome + Ruff format via hooks and Hygiene task                                                                                                                                             | lint                 |
 | No secrets                     | gitleaks in CI; root `.claude/settings.json` denies reads of `.env*` and `*.tfvars`; the guard hook blocks edits                                                                           | CI + harness         |
 | Deploys only through CI        | root `.claude/settings.json` denies `terraform apply` and `railway up`; `support-prod` environment needs approval                                                                          | harness + CI         |
-| Railway config per environment | `environment.tftest.hcl` asserts offline dev, live qa, and the secret split between gateway and agents                                                                                     | tests                |
+| Railway config per environment | `railway.tftest.hcl` asserts that qa runs live (no `RELAY_OFFLINE`), that `dev` is rejected, and the secret split between gateway and agents                                                                                     | tests                |
 
 When a review finding recurs, add a row here in the same PR as its new enforcer.
