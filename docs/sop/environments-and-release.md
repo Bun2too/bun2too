@@ -1,12 +1,12 @@
 # SOP: environments and release (support agent)
 
-| Environment | Railway environment | Trigger                                                 | Data and integrations                                         | Who approves      |
-| ----------- | ------------------- | ------------------------------------------------------- | ------------------------------------------------------------- | ----------------- |
-| dev         | `dev`               | every merge to `main` that touches the support agent    | Offline mode: stand-in model and ticket systems               | nobody            |
-| qa          | `qa`                | dev smoke passes                                        | Live model, Jira and ServiceNow **sandboxes**                 | nobody            |
-| prod        | `prod`              | qa smoke and eval pass                                  | Live model; production Jira and ServiceNow for the tenant     | `support-prod` reviewers |
+| Environment | Railway project / environment   | Trigger                                              | Data and integrations                                     | Who approves             |
+| ----------- | ------------------------------- | ---------------------------------------------------- | --------------------------------------------------------- | ------------------------ |
+| dev         | `bun2too-support-dev` / `dev`   | every merge to `main` that touches the support agent | Offline mode: stand-in model and ticket systems           | nobody                   |
+| qa          | `bun2too-support-qa` / `qa`     | dev smoke passes                                     | Live model, Jira and ServiceNow **sandboxes**             | nobody                   |
+| prod        | `bun2too-support-prod` / `prod` | qa smoke and eval pass                               | Live model; production Jira and ServiceNow for the tenant | `support-prod` reviewers |
 
-All three environments live in one Railway project, `bun2too-support`, and run the same three services: `gateway` (public), `agents` (private network only) and `postgres` (volume per environment).
+Each environment is its own Railway project, named like its HCP Terraform workspace (`bun2too-support-dev`, `-qa`, `-prod`), with one Railway environment of the short name. Each runs the same three services: `gateway` (public), `agents` (private network only) and `postgres` (volume per environment).
 
 ## How a release flows
 
@@ -34,14 +34,14 @@ Each environment gets the same commit SHA, recorded as the Railway deployment me
 
 ## Secrets and variables (per GitHub environment `support-dev`, `support-qa`, `support-prod`)
 
-| Name                       | Kind     | Holds                                                                                          |
-| -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `RAILWAY_API_TOKEN`        | secret   | Railway account or workspace token (not a project token)                                      |
-| `TF_API_TOKEN`             | secret   | HCP Terraform token                                                                            |
-| `SUPPORT_RUNTIME_SECRETS`  | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, the Cloudflare AI Gateway `CF_AIG_*` keys, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
-| `SMOKE_TENANT_KEY`         | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS` |
-| `TF_CLOUD_ORGANIZATION`    | variable | HCP Terraform organisation                                                                     |
-| `TF_WORKSPACE`             | variable | Optional. HCP workspace; defaults to `bun2too-support-<environment>`                           |
-| `RAILWAY_WORKSPACE_ID`     | variable | Railway workspace that owns the projects (a repository variable serves all three)              |
+| Name                      | Kind     | Holds                                                                                                                                                                                                                                                                                      |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RAILWAY_API_TOKEN`       | secret   | Railway account or workspace token (not a project token)                                                                                                                                                                                                                                   |
+| `TF_API_TOKEN`            | secret   | HCP Terraform token                                                                                                                                                                                                                                                                        |
+| `SUPPORT_RUNTIME_SECRETS` | secret   | JSON map: `RELAY_TENANT_KEYS` (all environments), plus `ANTHROPIC_API_KEY`, the Cloudflare AI Gateway `CF_AIG_*` keys, `BUN2TOO_JIRA_*` and `BUN2TOO_SNOW_*` in qa and prod. What each key is and how to obtain it: [runtime secrets](../../bun2too-support-agent/docs/runtime-secrets.md) |
+| `SMOKE_TENANT_KEY`        | secret   | A tenant API key that the smoke journey may use; must be one of the keys in `RELAY_TENANT_KEYS`                                                                                                                                                                                            |
+| `TF_CLOUD_ORGANIZATION`   | variable | HCP Terraform organisation                                                                                                                                                                                                                                                                 |
+| `TF_WORKSPACE`            | variable | Optional. HCP workspace; defaults to `bun2too-support-<environment>`                                                                                                                                                                                                                       |
+| `RAILWAY_WORKSPACE_ID`    | variable | Railway workspace that owns the projects (a repository variable serves all three)                                                                                                                                                                                                          |
 
 The `support-prod` environment has required reviewers. `subtree-sync` holds `SUBTREE_SYNC_TOKEN` (contents write on the mirror repos only). Optional variable `OTEL_EXPORTER_OTLP_ENDPOINT` per environment enables trace export.
