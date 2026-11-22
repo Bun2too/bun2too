@@ -53,7 +53,7 @@ class CaseService:
                     case_id,
                     actor="orchestrator",
                     reason="run failed",
-                    data={"error": type(error).__name__},
+                    data=_failure(error),
                 )
 
     async def reply(self, tenant: str, case_id: str, message: str) -> Case | None:
@@ -70,3 +70,10 @@ class CaseService:
             reason="customer replied",
             pending_question=None,
         )
+
+
+def _failure(error: Exception) -> dict[str, object]:
+    """The exception class and, for an HTTP error, its status code: never the message,
+    which can carry a provider's response body."""
+    status = getattr(error, "status_code", None)
+    return {"error": type(error).__name__} | ({"status": status} if isinstance(status, int) else {})
