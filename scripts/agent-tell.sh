@@ -12,16 +12,32 @@ set -euo pipefail
 agent=$1 message=$2
 case $agent in claude | codex) ;; *) echo "unknown agent: $agent" >&2; exit 2 ;; esac
 
-pane=$(herdr agent list | jq -r --arg a "$agent" '[.result.agents[] | select(.agent == $a)][0].pane_id // empty')
+fallback="Post the message on the PR and tell the owner."
+# The reason herdr gave, from its JSON error or its raw output.
+reason() { jq -r '.error.code // .error.message // .result.type // empty' <<<"$1" 2>/dev/null || true; }
+
+if ! list=$(herdr agent list 2>&1); then
+  why=$(reason "$list")
+  echo "agent-tell: herdr agent list failed: ${why:-$(head -c 200 <<<"$list")}. $fallback" >&2
+  exit 1
+fi
+if ! pane=$(jq -r --arg a "$agent" '[.result.agents[] | select(.agent == $a)][0].pane_id // empty' <<<"$list" 2>/dev/null); then
+  echo "agent-tell: could not read herdr agent list output. $fallback" >&2
+  exit 1
+fi
 if [ -z "$pane" ]; then
-  echo "agent-tell: no $agent pane in herdr. Post the message on the PR and tell the owner." >&2
+  echo "agent-tell: no $agent pane in herdr. $fallback" >&2
   exit 1
 fi
 [ "$pane" != "${HERDR_PANE_ID:-}" ] || { echo "agent-tell: $pane is your own pane" >&2; exit 2; }
 
 # Never interrupt a turn, and never type into the other agent's approval dialog.
-if ! herdr agent wait "$pane" --until idle --until done --timeout 600000 >/dev/null 2>&1; then
-  echo "agent-tell: $agent ($pane) stayed busy or blocked for 10 minutes. Post the message on the PR and tell the owner." >&2
+if ! waited=$(herdr agent wait "$pane" --until idle --until done --timeout 600000 2>&1); then
+  why=$(reason "$waited")
+  case $why in
+    timeout) echo "agent-tell: $agent ($pane) was still working or blocked after 10 minutes. $fallback" >&2 ;;
+    *) echo "agent-tell: herdr agent wait failed for $agent ($pane): ${why:-$(head -c 200 <<<"$waited")}. $fallback" >&2 ;;
+  esac
   exit 1
 fi
 
@@ -30,5 +46,6 @@ if jq -e '.result.type == "agent_prompted" and .result.agent.agent_status == "wo
   echo "agent-tell: delivered to $agent ($pane); it started a turn."
   exit 0
 fi
-echo "agent-tell: not delivered to $agent ($pane): $(jq -r '.error.code // .result.type // "unknown"' <<<"$out" 2>/dev/null || echo unknown). Post the message on the PR and tell the owner." >&2
+why=$(reason "$out")
+echo "agent-tell: not delivered to $agent ($pane): ${why:-$(head -c 200 <<<"$out")}. $fallback" >&2
 exit 1
