@@ -8,11 +8,11 @@ Relay takes a customer problem and returns a tracked support **case**. Each case
   - Import it into Postman, Insomnia or an SDK generator, or hand it to an agent as a tool definition.
 - **Agents:** the same flow is available over [A2A](https://a2a-protocol.org) 0.3.0. The agent card is at `GET /.well-known/agent-card.json`, and the JSON-RPC endpoint is `POST /a2a`.
 
-| Environment | Gateway                                       | Mode                                                                                      |
-| ----------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| dev         | `https://bun2too-support-dev.up.railway.app`  | Offline. A keyword classifier, knowledge-base answers and fake tickets (`*.invalid` links) |
-| qa          | `https://bun2too-support-qa.up.railway.app`   | Live. Claude through Cloudflare AI Gateway, with real Jira and ServiceNow sandboxes        |
-| prod        | Not deployed yet                              | Live                                                                                      |
+| Environment | Gateway                                      | Mode                                                                                       |
+| ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| dev         | `https://bun2too-support-dev.up.railway.app` | Offline. A keyword classifier, knowledge-base answers and fake tickets (`*.invalid` links) |
+| qa          | `https://bun2too-support-qa.up.railway.app`  | Live. Claude through Cloudflare AI Gateway, with real Jira and ServiceNow sandboxes        |
+| prod        | Not deployed yet                             | Live                                                                                       |
 
 ## Authentication
 
@@ -61,17 +61,18 @@ curl -sS -X POST "$RELAY/v1/intake" \
 # 202 {"caseId":"…","status":"received","traceId":"…","created":true}
 ```
 
-| Field      | Required | Rules                                                                                     |
-| ---------- | -------- | ----------------------------------------------------------------------------------------- |
-| `channel`  | yes      | `web_widget`, `a2a`, `email`, `marketplace` or `retail`                                    |
-| `message`  | yes      | 1–8000 characters after trimming                                                          |
-| `subject`  | no       | 1–300 characters                                                                          |
+| Field      | Required | Rules                                                                                         |
+| ---------- | -------- | --------------------------------------------------------------------------------------------- |
+| `channel`  | yes      | `web_widget`, `a2a`, `email`, `marketplace` or `retail`                                       |
+| `message`  | yes      | 1–8000 characters after trimming                                                              |
+| `subject`  | no       | 1–300 characters                                                                              |
 | `customer` | no       | Any of `id`, `email`, `name`, `locale`. Self-reported, so never treat it as proof of identity |
-| `metadata` | no       | String map. Keys up to 64 characters, values up to 500. Use it for your own references     |
+| `metadata` | no       | String map. Keys up to 64 characters, values up to 500. Use it for your own references        |
 
 Unknown fields are rejected with `422 invalid_intake` and an `issues` list.
 
 **Idempotency.** `Idempotency-Key` is required, at most 200 characters, and scoped to the tenant.
+
 - Derive it from your own submission ID (the website's inquiry reference, an email Message-ID).
 - Retrying with the same key returns the same case with `200` and `created: false`. It never opens a second case or a second set of tickets.
 - Retry a `503 agents_unavailable` with the same key.
@@ -89,6 +90,7 @@ curl -sSN "$RELAY/v1/cases/$CASE/events" -H "x-api-key: $RELAY_KEY"
 ```
 
 `event.data` explains each step:
+
 - `tickets` on the `ticketed` event.
 - The policy rule on an escalation.
 - On a failed run, `reason: "run failed"` with `error` (an exception class) and, for an upstream HTTP failure, `status`.
@@ -107,34 +109,34 @@ curl -sS -X POST "$RELAY/v1/cases/$CASE/messages" -H "x-api-key: $RELAY_KEY" \
 
 Every error body is `{"error": "<code>"}`, plus `issues` on a 422.
 
-| HTTP | `error`                    | Meaning                                                       |
-| ---- | -------------------------- | ------------------------------------------------------------- |
-| 400  | `idempotency_key_required` | Header missing or longer than 200 characters                  |
-| 401  | `unauthorized`             | Missing or unknown tenant key                                 |
-| 404  | `not_found`                | No such case for this tenant                                  |
-| 409  | `not_awaiting_customer`    | Reply sent to a case that is not waiting for one              |
-| 422  | `invalid_intake`, `invalid_reply` | Body failed validation                                  |
-| 503  | `agents_unavailable`       | The agents service is down or slow. Retry with the same key   |
-| 500  | `internal`                 | Unexpected. Report the case's `traceId`                       |
+| HTTP | `error`                           | Meaning                                                     |
+| ---- | --------------------------------- | ----------------------------------------------------------- |
+| 400  | `idempotency_key_required`        | Header missing or longer than 200 characters                |
+| 401  | `unauthorized`                    | Missing or unknown tenant key                               |
+| 404  | `not_found`                       | No such case for this tenant                                |
+| 409  | `not_awaiting_customer`           | Reply sent to a case that is not waiting for one            |
+| 422  | `invalid_intake`, `invalid_reply` | Body failed validation                                      |
+| 503  | `agents_unavailable`              | The agents service is down or slow. Retry with the same key |
+| 500  | `internal`                        | Unexpected. Report the case's `traceId`                     |
 
 ## A2A (agents)
 
 Discover the agent at `/.well-known/agent-card.json`, then call `POST /a2a` with JSON-RPC 2.0, using the same tenant key header.
 
-| Method         | Use                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------ |
+| Method         | Use                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `message/send` | Opens a case from the text parts (`messageId` is the idempotency key). With `message.taskId`, it answers that case's question |
-| `tasks/get`    | `params.id` is the task (case) ID                                                                       |
+| `tasks/get`    | `params.id` is the task (case) ID                                                                                             |
 
 A task's `status.state` follows the case:
 
-| Case status                     | Task state       |
-| ------------------------------- | ---------------- |
-| `received`                      | `submitted`      |
-| `triaged` … `escalated`         | `working`        |
-| `awaiting_customer`             | `input-required` |
-| `resolved`                      | `completed`      |
-| `rejected`                      | `rejected`       |
+| Case status             | Task state       |
+| ----------------------- | ---------------- |
+| `received`              | `submitted`      |
+| `triaged` … `escalated` | `working`        |
+| `awaiting_customer`     | `input-required` |
+| `resolved`              | `completed`      |
+| `rejected`              | `rejected`       |
 
 `metadata.relayStatus`, `metadata.traceId` and `metadata.tickets` carry Relay's own view. Streaming, push notifications and `tasks/cancel` are not supported.
 
