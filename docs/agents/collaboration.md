@@ -79,11 +79,22 @@ A passed PR must not sit waiting for someone to notice. On 2026-11-21 PRs #19 an
 - **The author watches GitHub, not the pane.** Right after asking for a review, the author runs `scripts/wait-review.sh <pr> <full head sha>` in the background. It polls the PR, and exits with the verdict and the comment's link as soon as a `Reviewed commit: <sha>` comment lands (0 PASS, 1 FAIL, 3 if the head moved).
 - **The author merges on PASS.** On a PASS with green `ci` and a clean merge state, the PR's author merges it right away (`scripts/as-agent.sh <you> gh pr merge <n> --rebase --match-head-commit <sha>`). It doesn't wait for the owner or for a second signal. If the author is mid-task for long, the reviewer may merge instead and says so on the PR.
 - **On FAIL, the author fixes it first.** The fix comes before new work, then the author asks for a review of the new head and starts a new `wait-review.sh`.
-- **The reviewer still signals.** After posting the verdict, the reviewer sends the author a herdr prompt with the verdict and the comment link (see below).
+- **The reviewer still signals.** After posting the verdict, the reviewer tells the author with `scripts/agent-tell.sh <author> "..."`: the verdict and the comment link.
+- **If GitHub fails, the verdict still travels.** A reviewer who cannot post sends the full verdict through `agent-tell.sh`: the exact head SHA, PASS or FAIL, and the findings. The author posts it on the PR as a quoted relay, credited to the reviewer, and merges on it as usual. The reviewer replaces the relay with its own comment once it can.
+
+## Never go silent
+
+On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fixes. It stopped without telling Claude, who sat waiting for a verdict. Asked by the owner, it said it had no way to message Claude, after many rounds of doing exactly that in the same session. Both are failures, and these rules exist so neither happens again.
+
+1. **A blocker is a message, not a stop.** When a tool, network call, PR lookup, credential or permission fails, finish the turn by telling the other agent (`scripts/agent-tell.sh`) and the owner (your reply): what failed, with the exact error, what you tried, and what you need. Never just end the turn.
+2. **Check before you say "I can't".** Before telling anyone you cannot message the other agent, reach GitHub or find a PR, read this file and try it. `scripts/agent-tell.sh` always works while both agents run in herdr; it exits non-zero and says why when it does not. `gh pr list -R Bun2too/bun2too` finds every open PR. A claim of incapacity that a command would have disproved is a false statement.
+3. **Every handoff is closed.** A review request gets a verdict or a blocker report. A blocker report gets an answer. Whoever ends a turn with work waiting on the other agent says so to that agent before stopping.
+4. **One failure is not a dead end.** Retry once. Then take the fallback: GitHub down → `agent-tell.sh`; herdr down → a PR comment; both down → tell the owner. Name the fallback you used.
+5. **Relay what the owner says.** When the owner tells you something that affects the other agent's work, pass it on with `agent-tell.sh`.
 
 ## Talking to each other
 
-- Signal with a short `herdr agent prompt <pane> "..." --wait --until working --timeout 30000` that points to a PR, issue or commit. Claude and Codex each run in their own pane: find them with `herdr agent list`, and your own with `$HERDR_PANE_ID`.
+- Signal with `scripts/agent-tell.sh <claude|codex> "..."`, a short message that points to a PR, issue or commit. It finds the other agent's pane by name in `herdr agent list`, waits until that agent is idle, and succeeds only when the message starts a turn. Use raw `herdr agent prompt <pane> "..." --wait --until working --timeout 30000` only if the script itself is broken, and say so.
 - **A prompt counts only once it starts a turn.** `herdr agent prompt` can report success while the text sits unsent in the other agent's input box, or mixes into what the owner is typing. With `--wait --until working`, a prompt that doesn't start a turn within 30 seconds fails. Then post the same message as a PR comment, and try the prompt again once the other agent is idle. The GitHub comment and `wait-review.sh` stay the reliable path.
 - Send only when the other agent is `idle` or `done`. Never interrupt a turn, and never answer the other agent's approval or question dialog.
 - Put the substance (findings, decisions, plans) on GitHub, where the owner can see it, not in prompts.
