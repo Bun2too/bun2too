@@ -1,10 +1,10 @@
-import { CustomerReply, IntakeRequest, SETTLED_STATUSES } from "@relay/contracts";
+import { CustomerReply, IntakeRequest, openApiDocument, SETTLED_STATUSES } from "@relay/contracts";
 import { annotateActiveSpan, RELAY_ATTR } from "@relay/telemetry";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { streamSSE } from "hono/streaming";
 import { agentCard, handleRpc } from "./a2a.js";
-import { type AgentsClient, AgentsUnavailable } from "./agents-client.js";
+import { type AgentsClient, AgentsUnavailable, NotAwaitingCustomer } from "./agents-client.js";
 
 export interface AppDeps {
   agents: AgentsClient;
@@ -23,6 +23,8 @@ export function createApp(deps: AppDeps) {
 
   app.onError((error, c) => {
     if (error instanceof AgentsUnavailable) return c.json({ error: "agents_unavailable" }, 503);
+    if (error instanceof NotAwaitingCustomer)
+      return c.json({ error: "not_awaiting_customer" }, 409);
     return c.json({ error: "internal" }, 500);
   });
 
@@ -30,6 +32,9 @@ export function createApp(deps: AppDeps) {
   app.get("/.well-known/agent-card.json", (c) =>
     c.json(agentCard(deps.publicUrl, deps.agentName ?? "Relay Support Intake")),
   );
+
+  const openApi = openApiDocument(deps.publicUrl);
+  app.get("/openapi.json", (c) => c.json(openApi));
 
   const authenticate = createMiddleware<Env>(async (c, next) => {
     const bearer = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");

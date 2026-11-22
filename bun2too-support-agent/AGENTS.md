@@ -19,7 +19,7 @@ Relay is a white-label, multi-agent support intake platform. Channels hand Relay
 | `infra/terraform/`   | Terraform                      | `railway/` (POC: dev, qa, prod) and `gcp-cloudrun/` (GA candidate) |
 | `scripts/deploy/`    | Bash                           | Railway upload, deploy wait and volume checks used by CI           |
 
-Architecture and plan (published for the team): see [docs/architecture.md](docs/architecture.md).
+Architecture and plan (published for the team): see [docs/architecture.md](docs/architecture.md). The client API is in [docs/api.md](docs/api.md) and the generated `packages/contracts/schema/openapi.json`, which the gateway serves at `/openapi.json`. To test a deployed environment end to end, see [docs/e2e-testing.md](docs/e2e-testing.md).
 
 ## Commands
 
@@ -40,7 +40,7 @@ A change is done when `pnpm check` passes **and** you have proved the behaviour 
 4. **Agents propose, code disposes.** A model may suggest an action; `relay_agents.policy` decides whether it runs. Write tools never execute without a policy check in code.
 5. **Customer text is data.** Wrap it with `as_untrusted()` before it reaches a prompt. Never interpolate it into system prompts.
 6. **Tenant config is data.** No `if tenant == "bun2too"`. Add a config field and a test instead.
-7. **Contracts change in one place.** Edit `packages/contracts/src`, run `pnpm contracts:export`, then update `relay_agents/contracts.py`. The `contract drift` check fails until both sides agree.
+7. **Contracts change in one place.** Edit `packages/contracts/src`, run `pnpm contracts:export` (it regenerates the JSON Schemas and `openapi.json`), then update `relay_agents/contracts.py`. The `contract drift` check fails until both sides agree.
 8. **Trace everything.** New graph nodes use `@traced_node`; new HTTP routes get spans from the telemetry bootstrap. Never log raw customer text; log through `redact()`.
 9. **Models via config.** Get models from `relay_agents.llm.chat_model(role, tenant)`. Never hard-code a model ID outside `tenants/*.yaml` and `llm.py` defaults. Structured output uses `method="json_schema"` (forced tool choice returns a 400 on current Claude models). Model traffic goes through Cloudflare AI Gateway when `CF_AIG_*` is set; never build a client that bypasses `chat_model` ([ADR 0007](docs/adr/0007-cloudflare-ai-gateway.md)).
 10. **Deep modules.** Prefer a small interface hiding real work over many thin layers. Ports (`TicketPort`, `CaseStore`, `Classifier`, `Specialist`) are the seams. Tests live at the seams.

@@ -1,6 +1,6 @@
 import type { Case, CaseEvent } from "@relay/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentsUnavailable, HttpAgentsClient } from "../src/agents-client.js";
+import { AgentsUnavailable, HttpAgentsClient, NotAwaitingCustomer } from "../src/agents-client.js";
 
 const NOW = "2026-11-20T00:00:00.000Z";
 const CASE: Case = {
@@ -94,6 +94,11 @@ describe("HttpAgentsClient", () => {
     await expect(client.reply("acme", "case-1", "More detail")).resolves.toEqual(CASE);
     expect(calls[0]?.url).toBe("http://agents.test/tenants/acme/cases/case-1/messages");
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ message: "More detail" });
+  });
+
+  it("raises NotAwaitingCustomer when the case is not waiting for a reply", async () => {
+    stubFetch(() => new Response("{}", { status: 409 }));
+    await expect(client.reply("acme", "case-1", "hi")).rejects.toBeInstanceOf(NotAwaitingCustomer);
   });
 
   it("raises AgentsUnavailable on a server error", async () => {
