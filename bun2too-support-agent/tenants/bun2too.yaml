@@ -8,7 +8,7 @@ brand:
 channels: [web_widget, a2a, email]
 specialists: [knowledge, identity, integration, privacy]
 models:
-  classifier: anthropic:claude-sonnet-4-5  # owner test 2026-11-22: qa got HTTP 402 on Opus 5.5; Sonnet 4.5 retires 2026-11-30
+  classifier: anthropic:claude-sonnet-4-5 # owner test 2026-11-22: qa got HTTP 402 on Opus 5.5; Sonnet 4.5 retires 2026-11-30
   specialist: anthropic:claude-sonnet-4-5
 tickets:
   jira:
