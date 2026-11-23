@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Deliver a short message to the other lead agent's herdr pane, found by name, and fail
+# Deliver a short message to another lead agent's herdr pane, found by name, and fail
 # loudly if it does not start a turn (docs/agents/collaboration.md, "Never go silent").
-#   scripts/agent-tell.sh <claude|codex> "<message>"
+#   scripts/agent-tell.sh <claude|codex|antigravity> "<message>"
+# Antigravity runs in herdr under the name agy; either name reaches it.
 # Exits 0 once the message started a turn. Otherwise exits non-zero and says why: then put
 # the same message on the PR and tell the owner in your reply. Never stop silently.
-# This path always exists while both agents run in herdr: "I have no way to message the
+# This path always exists while the agents run in herdr: "I have no way to message the
 # other agent" is not true here. Run this script before saying it.
 set -euo pipefail
 
-[ $# -eq 2 ] || { echo "usage: $0 <claude|codex> <message>" >&2; exit 2; }
+[ $# -eq 2 ] || { echo "usage: $0 <claude|codex|antigravity> <message>" >&2; exit 2; }
 agent=$1 message=$2
-case $agent in claude | codex) ;; *) echo "unknown agent: $agent" >&2; exit 2 ;; esac
+case $agent in
+  claude | codex) ;;
+  antigravity | agy) agent=agy ;;
+  *) echo "unknown agent: $agent" >&2; exit 2 ;;
+esac
 
 fallback="Post the message on the PR and tell the owner."
 # The reason herdr gave, from its JSON error or its raw output.

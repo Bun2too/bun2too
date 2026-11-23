@@ -1,6 +1,12 @@
-# Lead agents: how Claude and Codex work together
+# Lead agents: how Claude, Codex and Antigravity work together
 
-Two lead agents build Bun2too with the owner: **Claude** (Claude Code) and **Codex**. They run side by side in a [herdr](https://herdr.dev) workspace. Each owns part of the monorepo, works only in its own checkout, and reviews the other's work before a person acts on it. Neither replaces the owner's judgement, CI or the factory's review. This page is the protocol; AGENTS.md rule 13 points here.
+Three lead agents build Bun2too with the owner: **Claude** (Claude Code), **Codex** and **Antigravity** (Google's coding agent, Gemini; joined 2026-11-23). They run side by side in a [herdr](https://herdr.dev) workspace.
+
+- Claude and Codex each own part of the monorepo and cross-review each other's PRs.
+- Antigravity owns no product folder. It runs the [quality pass](#quality-pass-antigravity) on product PRs before cross-review: code review, security scan, local testing, performance and algorithms.
+- All three design solutions together, and with the owner form the [Architecture Board of Review](#architecture-board-of-review-abr).
+
+Each agent works only in its own checkout. None replaces the owner's judgement, CI or the factory's review. This page is the protocol; AGENTS.md rule 13 points here. Antigravity's own agent file is [GEMINI.md](../../GEMINI.md).
 
 ## Ownership
 
@@ -9,9 +15,10 @@ Two lead agents build Bun2too with the owner: **Claude** (Claude Code) and **Cod
 | `bun2too-website/`, `bun2too-crew-team/`                                                             | Codex  |
 | `bun2too-support-agent/`                                                                             | Claude |
 | The factory: `.github/`, `.claude/`, `docs/factory.md`, `docs/sdlc.md`, `docs/adr/`                  | Claude |
-| Shared root files: `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/agents/`, `docs/sop/`, `docs/specs/` | Both   |
+| Shared root files: `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `docs/agents/`, `docs/sop/`, `docs/specs/` | All three |
+| Quality pass on product PRs; performance, security and algorithm refinement                          | Antigravity |
 
-The owner of an area decides how it changes. Either agent may change a shared root file, but only in a PR the other has reviewed. An agent that needs a change in the other's area asks for it (an issue or a prompt) instead of making it. The exception is a one-line fix that blocks its own work, which then goes in a PR the area's owner reviews.
+The owner of an area decides how it changes. Any lead agent may change a shared root file, but only in a PR another lead agent has reviewed. An agent that needs a change in the other's area asks for it (an issue or a prompt) instead of making it. The exception is a one-line fix that blocks its own work, which then goes in a PR the area's owner reviews.
 
 ## Your GitHub identity
 
@@ -21,6 +28,9 @@ AGENTS.md rule 15. Each lead agent has its own GitHub App, installed on every Bu
 | ------ | --------------------- | ------- | --------------------------------------------- |
 | Claude | `bun2too-claude[bot]` | 5868181 | `~/.config/bun2too/agents/claude.pem`         |
 | Codex  | `bun2too-codex[bot]`  | 5868247 | `~/.config/bun2too/agents/codex.pem`          |
+| Antigravity | `bun2too-antigravity[bot]` (not created yet) | pending | `~/.config/bun2too/agents/antigravity.pem` |
+
+Until the owner creates Antigravity's app and adds it to `scripts/as-agent.sh`, Antigravity makes no GitHub writes. It sends its verdicts with `agent-tell.sh`, and the PR's author posts them as a quoted relay credited to Antigravity (see [Review handoff](#review-handoff)).
 
 - **Every GitHub write goes through the helper:** `scripts/as-agent.sh <claude|codex> <command> [args...]`. For that one command it mints a one-hour installation token and hands it to `gh` (`GH_TOKEN`) and to git (credentials, with SSH remotes rewritten to HTTPS). It also sets the git author and committer to the bot. Examples:
 
@@ -91,6 +101,44 @@ AGENTS.md rule 17. Each product folder is mirrored to its own repo ([subtrees SO
 - **Mirrors that deploy prod.** A push to the `bun2too-crew-team` or `bun2too-website` mirror's `main` starts that product's production pipeline. The script refuses these without `--release` (exit 3). Pass `--release` only when the owner has said to release that product. Otherwise, tell the owner in your reply that the mirror is N commits behind and is waiting for a release.
 - **Close the loop.** Say in the PR, or in your reply, which mirror you synced and to which commit, or why you did not.
 
+## Quality pass (Antigravity)
+
+Every PR that changes product code gets a quality pass from Antigravity before its author asks for cross-review. Docs-only and config-only PRs skip it. It checks what cross-review tends not to have time for. It adds to CI, cross-review and the factory review; it replaces none of them.
+
+- **Ask.** When the PR is pushed and its checks pass locally, the author sends `scripts/agent-tell.sh antigravity "Quality pass: PR #<n> at <full sha>"`.
+- **What Antigravity does.** It works in its own worktree at that exact commit, as [GEMINI.md](../../GEMINI.md#how-to-do-a-quality-pass) describes:
+  - runs the product's checks and the real system, offline;
+  - security scan (secrets, dependencies, injection, authz, data reaching public logs);
+  - performance and algorithm review, measured, not guessed.
+- **Verdict.** One report per commit:
+  - It starts with `Quality pass for commit <full sha>`.
+  - Each finding gives `file:line`, a failure scenario and a fix. Non-blocking improvements are marked as such.
+  - It ends with `QUALITY (antigravity): PASS` or `QUALITY (antigravity): FAIL`.
+  - It is posted on the PR. Until Antigravity has its GitHub App, it goes through `agent-tell.sh` and the author posts it as a quoted relay.
+- **On FAIL** the author fixes or disputes each blocking finding, then asks again for the new head. Disagreements go on the PR, and the owner decides.
+- **Then cross-review** as usual. The cross-reviewer checks that the quality pass names the current head, or that the author said why it was skipped.
+- **No waiting game.** If Antigravity is not running in herdr, or has not answered within two hours, the author writes on the PR: `Quality pass skipped: <reason>`. Then the author tells the owner and continues. A skipped pass is visible, never silent.
+- **Changes by Antigravity.** Antigravity pushes to another agent's PR branch only when that PR's author agrees, taking turns as in [One PR per feature](#one-pr-per-feature). An optimisation of its own is its own PR, reviewed by the owner of the area.
+
+## Architecture Board of Review (ABR)
+
+The ABR is Claude, Codex, Antigravity and the owner. It settles the solution design of each application (Relay, the marketing crew, the website, or anything new) before building starts. **The owner makes the final decision.**
+
+- **When.** Anything that needs an ADR (AGENTS.md rule 8):
+  - a new application or service;
+  - a change to an architecture, a data store, a deploy target or an environment;
+  - a new external provider with cost, security or data-handling consequences;
+  - anything hard to reverse.
+- **Proposal.** Whoever drafts the design (any agent or the owner) opens a PR with an ADR in the right `docs/adr/` (organisation-wide or the product's). Its status is `proposed`, and it covers context, options considered, the recommendation and consequences. The proposer tells the other two agents with `agent-tell.sh`.
+- **Reviews.** Each agent posts one comment ending `ABR (<agent>): ACCEPT`, `ABR (<agent>): CHANGES` or `ABR (<agent>): REJECT`. The body gives reasons, risks and what would change its mind. Each brings its own lens:
+  - the owning agent: fit with the product and its constraints;
+  - the other lead: cross-product consistency and operations;
+  - Antigravity: performance, algorithms, security and testability.
+
+  Antigravity's review goes by relay until it has its app.
+- **Decision.** The owner reads the positions and decides, in the PR or in chat. The proposer then records it in the ADR: status `accepted` (or `rejected`), with `Decided by: ABR, <date>, the owner`. It merges like any PR, and implementation starts from it. A later change to an accepted design goes back to the ABR.
+- **No waiting game.** The proposer chases missing reviews with `agent-tell.sh`. A review still missing after a day is noted in the PR and raised with the owner, who may decide without it.
+
 ## Never go silent
 
 On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fixes. It stopped without telling Claude, who sat waiting for a verdict. Asked by the owner, it said it had no way to message Claude, after many rounds of doing exactly that in the same session. Both are failures, and these rules exist so neither happens again.
@@ -104,7 +152,7 @@ On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fi
 
 ## Talking to each other
 
-- Signal with `scripts/agent-tell.sh <claude|codex> "..."`, a short message that points to a PR, issue or commit. It finds the other agent's pane by name in `herdr agent list`, waits until that agent is idle, and succeeds only when the message starts a turn. Use raw `herdr agent prompt <pane> "..." --wait --until working --timeout 30000` only if the script itself is broken, and say so.
+- Signal with `scripts/agent-tell.sh <claude|codex|antigravity> "..."`, a short message that points to a PR, issue or commit. Antigravity's herdr name is `agy`, and the script accepts either name. It finds the other agent's pane by name in `herdr agent list`, waits until that agent is idle, and succeeds only when the message starts a turn. Use raw `herdr agent prompt <pane> "..." --wait --until working --timeout 30000` only if the script itself is broken, and say so.
 - **A prompt counts only once it starts a turn.** `herdr agent prompt` can report success while the text sits unsent in the other agent's input box, or mixes into what the owner is typing. With `--wait --until working`, a prompt that doesn't start a turn within 30 seconds fails. Then post the same message as a PR comment, and try the prompt again once the other agent is idle. The GitHub comment and `wait-review.sh` stay the reliable path.
 - Send only when the other agent is `idle` or `done`. Never interrupt a turn, and never answer the other agent's approval or question dialog.
 - Put the substance (findings, decisions, plans) on GitHub, where the owner can see it, not in prompts.
