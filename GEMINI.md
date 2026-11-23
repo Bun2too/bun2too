@@ -82,9 +82,9 @@ The author answers every finding (fixed or disputed). If you still disagree, bot
 
 Antigravity reported this on 2026-11-23:
 
-- **Tools:** shell (`run_command`), file system, search and MCP. There is no native GitHub tool, so use the `gh` CLI for reads (`gh pr view`, `gh pr diff`, `gh run view`).
+- **Tools:** shell (`run_command`), file system, search and MCP. There is no native GitHub tool. Use the `gh` CLI for reads (`gh pr view`, `gh pr diff`, `gh run view`), and `scripts/as-agent.sh antigravity gh …` for writes.
 - **Sandbox:** the default sandbox blocks the network, IPC and herdr's socket.
-  - **Bypass (`BypassSandbox: true`) only for** `herdr`, `gh` and `git fetch`. These are our own tools, talking to herdr and GitHub. A permission error from the sandbox on one of them is a cue to retry with the bypass, not a reason to stop (collaboration.md, "Never go silent", rule 2).
+  - **Bypass (`BypassSandbox: true`) only for** `herdr`, `gh`, `git fetch` and `scripts/as-agent.sh`. These are our own tools, talking to herdr and GitHub. A permission error from the sandbox on one of them is a cue to retry with the bypass, not a reason to stop (collaboration.md, "Never go silent", rule 2).
   - **Never bypass for a dependency install or a build.** `pnpm install`, `npm ci`, `uv sync` and the code they build run package lifecycle scripts. Outside the sandbox, those scripts get the host's files and network, including the keys under `~/.config/bun2too/`. Install inside the sandbox from the lockfile with scripts off, as in [Safe installs](#safe-installs).
   - If that cannot reach the registry, or a check needs lifecycle scripts, mark the check **inconclusive**, say why, and ask the owner. Do not widen the sandbox yourself.
   - Run the checks themselves inside the sandbox.
@@ -112,7 +112,12 @@ If a check fails only because a package's install script did not run (for exampl
 
 - **Secrets (rule 7).** Never read, print or paste `.env*`, `*.tfvars`, tokens, private keys (`~/.config/bun2too/agents/*.pem`) or output that contains them. Claude Code blocks these with hooks; you have no such guard, so this is on you.
 - **Your own checkout (rule 6).** Work only in your own worktree. Never edit, stage, reset or discard files you did not write, and never switch another agent's branch.
-- **GitHub identity (rule 15).** Every GitHub write goes through `scripts/as-agent.sh antigravity …` as `bun2too-antigravity[bot]`, once the owner has created that app and its key. **Until then, make no GitHub writes.** Send your verdict to the PR's author with `scripts/agent-tell.sh <claude|codex> "…"` (the exact SHA, the verdict and the findings). The author posts it on the PR as a quoted relay credited to you. Never use the owner's `gh` login or SSH key.
+- **GitHub identity (rule 15).** Every GitHub write goes through `scripts/as-agent.sh antigravity …`, which acts as `bun2too-antigravity[bot]` (app 5892227) with your own key at `~/.config/bun2too/agents/antigravity.pem`. Never read or use Claude's or Codex's key, and never use the owner's `gh` login or SSH key.
+  - Post your quality-pass verdict on the PR: `scripts/as-agent.sh antigravity gh pr comment <n> --body-file <file>`.
+  - Then tell the author with `scripts/agent-tell.sh`.
+  - `as-agent.sh` reaches GitHub, so run it with the sandbox bypass, like `gh`.
+  - If it fails, send the verdict through `agent-tell.sh`. The author posts it as a quoted relay, and you tell the owner what failed.
+- **Workflows.** Your app can re-run and dispatch workflows (actions: write); the other agents' apps cannot. Do it only when the owner asks (rule 12).
 - **Changing code.** Push to another agent's PR branch only when its author agrees, taking turns as in rule 14. A refactor or optimisation of your own is its own PR, reviewed by the area's owner. One PR per feature, from `origin/main`.
 - **Spend (rule 12).** No paid runs, workflow dispatches or live-model calls unless the owner asks. Local checks run offline (`RELAY_OFFLINE=1`).
 - **Prod and decisions.** Prod deploys and ABR decisions are the owner's.
