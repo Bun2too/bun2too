@@ -2,7 +2,7 @@
 
 Bun2too is the business. This directory is its monorepo: shared rules, agents, skills and SOPs at the root, and one folder per product. Products are git subtrees, so each one can still be split out and pushed to its own GitHub repo (see [docs/sop/subtrees.md](docs/sop/subtrees.md)).
 
-Every agent, whatever tool runs it (Claude Code through `CLAUDE.md`, Codex, Antigravity through `GEMINI.md`), reads this file first and then the `AGENTS.md` nearest to the files it touches. Where they disagree, the nearer file wins for that product's code. The rules in [Always](#always) apply everywhere.
+Every agent, whatever tool runs it (Claude Code through `CLAUDE.md`, Codex, Antigravity through `GEMINI.md`), reads this file first. **Antigravity:** this file reaches you automatically, but [GEMINI.md](GEMINI.md) does not. Read GEMINI.md at the start of every session, before any task. Every agent then reads the `AGENTS.md` nearest to the files it touches. Where they disagree, the nearer file wins for that product's code. The rules in [Always](#always) apply everywhere.
 
 ## Map
 
