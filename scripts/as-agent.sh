@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run one command as a lead agent's own GitHub App, so GitHub records the agent, not the
 # owner (AGENTS.md rule 15):
-#   scripts/as-agent.sh <claude|codex> gh pr create ...
+#   scripts/as-agent.sh <claude|codex|antigravity> gh pr create ...
 #   scripts/as-agent.sh claude git commit -m "..."
 #   scripts/as-agent.sh claude git push origin HEAD:<branch>
 # For that one command it sets:
@@ -15,7 +15,7 @@
 # in a process's argv.
 set -euo pipefail
 
-usage() { echo "usage: $0 <claude|codex> <command> [args...]" >&2; exit 2; }
+usage() { echo "usage: $0 <claude|codex|antigravity> <command> [args...]" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 agent=$1
 shift
@@ -23,6 +23,7 @@ shift
 case "$agent" in
   claude) app_id=5868181 installation_id=184504804 bot_id=359689245 ;;
   codex) app_id=5868247 installation_id=184505544 bot_id=359690649 ;;
+  antigravity) app_id=5892227 installation_id=185109835 bot_id=360378822 ;;
   *) usage ;;
 esac
 slug="bun2too-$agent"

@@ -28,9 +28,9 @@ AGENTS.md rule 15. Each lead agent has its own GitHub App, installed on every Bu
 | ------ | --------------------- | ------- | --------------------------------------------- |
 | Claude | `bun2too-claude[bot]` | 5868181 | `~/.config/bun2too/agents/claude.pem`         |
 | Codex  | `bun2too-codex[bot]`  | 5868247 | `~/.config/bun2too/agents/codex.pem`          |
-| Antigravity | `bun2too-antigravity[bot]` (not created yet) | pending | `~/.config/bun2too/agents/antigravity.pem` |
+| Antigravity | `bun2too-antigravity[bot]` | 5892227 | `~/.config/bun2too/agents/antigravity.pem` |
 
-Until the owner creates Antigravity's app and adds it to `scripts/as-agent.sh`, Antigravity makes no GitHub writes. It sends its verdicts with `agent-tell.sh`, and the PR's author posts them as a quoted relay credited to Antigravity (see [Review handoff](#review-handoff)).
+Antigravity's app (since 2026-11-23) also has **actions (write)**, so it can re-run and dispatch workflows. Claude's and Codex's apps cannot. Rule 12 still applies: no paid run or dispatch unless the owner asks.
 
 - **Every GitHub write goes through the helper:** `scripts/as-agent.sh <claude|codex> <command> [args...]`. For that one command it mints a one-hour installation token and hands it to `gh` (`GH_TOKEN`) and to git (credentials, with SSH remotes rewritten to HTTPS). It also sets the git author and committer to the bot. Examples:
 
@@ -114,7 +114,7 @@ Every PR that changes product code gets a quality pass from Antigravity before i
   - It starts with `Quality pass for commit <full sha>`.
   - Each finding gives `file:line`, a failure scenario and a fix. Non-blocking improvements are marked as such.
   - It ends with `QUALITY (antigravity): PASS` or `QUALITY (antigravity): FAIL`.
-  - It is posted on the PR. Until Antigravity has its GitHub App, it goes through `agent-tell.sh` and the author posts it as a quoted relay.
+  - Antigravity posts it on the PR as `bun2too-antigravity[bot]` and tells the author with `agent-tell.sh`. If GitHub fails, it sends the verdict through `agent-tell.sh`, and the author posts it as a quoted relay.
 - **On FAIL** the author fixes or disputes each blocking finding, then asks again for the new head. Disagreements go on the PR, and the owner decides.
 - **Then cross-review** as usual. The cross-reviewer checks that the quality pass names the current head, or that the author said why it was skipped.
 - **No waiting game.** If Antigravity is not running in herdr, or has not answered within two hours, the author writes on the PR: `Quality pass skipped: <reason>`. Then the author tells the owner and continues. A skipped pass is visible, never silent.
@@ -135,7 +135,6 @@ The ABR is Claude, Codex, Antigravity and the owner. It settles the solution des
   - the other lead: cross-product consistency and operations;
   - Antigravity: performance, algorithms, security and testability.
 
-  Antigravity's review goes by relay until it has its app.
 - **Decision.** The owner reads the positions and decides, in the PR or in chat. The proposer then records it in the ADR: status `accepted` (or `rejected`), with `Decided by: ABR, <date>, the owner`. It merges like any PR. Implementation starts only from an `accepted` ADR. A `rejected` one is kept as the record of what was decided against, and nothing is built from it. A later change to an accepted design goes back to the ABR.
 - **No waiting game.** The proposer chases missing reviews with `agent-tell.sh`. A review still missing after a day is noted in the PR and raised with the owner, who may decide without it.
 
