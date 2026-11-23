@@ -23,9 +23,9 @@ You own no product folder. Claude owns `bun2too-support-agent/` and the factory;
 
 | Product | Path | Stack | Checks |
 | --- | --- | --- | --- |
-| **Relay**: multi-agent support intake (REST + A2A) that opens Jira (`BUN`) and ServiceNow tickets | `bun2too-support-agent/` | TypeScript (Hono), Python (LangGraph), Postgres; Railway qa → prod | `pnpm install && uv sync --directory services/agents`, then `pnpm check`. Run it with `RELAY_OFFLINE=1 pnpm dev` and drive it with `scripts/verify/intake.sh` ([verify-relay skill](bun2too-support-agent/.claude/skills/verify-relay/SKILL.md)) |
+| **Relay**: multi-agent support intake (REST + A2A) that opens Jira (`BUN`) and ServiceNow tickets | `bun2too-support-agent/` | TypeScript (Hono), Python (LangGraph), Postgres; Railway qa → prod | Install and check as in [Safe installs](#safe-installs), then `pnpm check`. Run it with `RELAY_OFFLINE=1 pnpm dev` and drive it with `scripts/verify/intake.sh` ([verify-relay skill](bun2too-support-agent/.claude/skills/verify-relay/SKILL.md)) |
 | Marketing crew | `bun2too-crew-team/` | Python (FastAPI, CrewAI), n8n | `python3 scripts/verify_marketing.py`, `node --test evals/*.test.mjs` and the unittest suites under coverage (see `ci.yml`) |
-| bun2too.com | `bun2too-website/` | Next.js on Netlify | `npm ci`, `npm run docs:check`, `npm run typecheck`, `npm test`, `npm run build` and `npm run test:e2e` ([its AGENTS.md](bun2too-website/AGENTS.md)) |
+| bun2too.com | `bun2too-website/` | Next.js on Netlify | `npm ci --ignore-scripts`, `npm run docs:check`, `npm run typecheck`, `npm test`, `npm run build` and `npm run test:e2e` ([its AGENTS.md](bun2too-website/AGENTS.md)) |
 
 The factory runs in GitHub Actions ([docs/factory.md](docs/factory.md)):
 - Explore/triage, Implement, Review with Rework, Hygiene autofix, Ratchet and Retro.
@@ -85,11 +85,28 @@ Antigravity reported this on 2026-11-23:
 - **Tools:** shell (`run_command`), file system, search and MCP. There is no native GitHub tool, so use the `gh` CLI for reads (`gh pr view`, `gh pr diff`, `gh run view`).
 - **Sandbox:** the default sandbox blocks the network, IPC and herdr's socket.
   - **Bypass (`BypassSandbox: true`) only for** `herdr`, `gh` and `git fetch`. These are our own tools, talking to herdr and GitHub. A permission error from the sandbox on one of them is a cue to retry with the bypass, not a reason to stop (collaboration.md, "Never go silent", rule 2).
-  - **Never bypass for a dependency install or a build.** `pnpm install`, `npm ci`, `uv sync` and the code they build run package lifecycle scripts. Outside the sandbox, those scripts get the host's files and network, including the keys under `~/.config/bun2too/`. Install inside the sandbox from the lockfile with scripts off: `pnpm install --frozen-lockfile --ignore-scripts`, `npm ci --ignore-scripts`, `uv sync --frozen --no-build`.
+  - **Never bypass for a dependency install or a build.** `pnpm install`, `npm ci`, `uv sync` and the code they build run package lifecycle scripts. Outside the sandbox, those scripts get the host's files and network, including the keys under `~/.config/bun2too/`. Install inside the sandbox from the lockfile with scripts off, as in [Safe installs](#safe-installs).
   - If that cannot reach the registry, or a check needs lifecycle scripts, mark the check **inconclusive**, say why, and ask the owner. Do not widen the sandbox yourself.
   - Run the checks themselves inside the sandbox.
 - **Your worktree:** `/Users/beball/dev/bun2too-antigravity`. Never work in the owner's checkout at the monorepo root.
 - **Time:** a quality pass takes about 10–20 minutes, well inside the two-hour window.
+
+## Safe installs
+
+Use these exact commands, inside the sandbox. They install from the lockfile, run no package scripts, and build nothing, including our own Python package, whose `hatchling` backend is third-party code.
+
+Relay (`bun2too-support-agent/`), tested on 2026-11-23: every `pnpm check` gate passes this way.
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+uv sync --directory services/agents --frozen --no-build --no-install-project
+export UV_NO_SYNC=1 PYTHONPATH="$PWD/services/agents/src"   # uv run must not sync (it would build the project)
+pnpm check
+```
+
+Website (`bun2too-website/`): `npm ci --ignore-scripts`, then its checks.
+
+If a check fails only because a package's install script did not run (for example a native binary), or because the sandbox cannot reach the registry, mark that check **inconclusive** with the reason and ask the owner. Never rerun it with scripts on or outside the sandbox.
 
 ## Boundaries
 
