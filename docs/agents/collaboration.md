@@ -136,7 +136,7 @@ The ABR is Claude, Codex, Antigravity and the owner. It settles the solution des
   - Antigravity: performance, algorithms, security and testability.
 
   Antigravity's review goes by relay until it has its app.
-- **Decision.** The owner reads the positions and decides, in the PR or in chat. The proposer then records it in the ADR: status `accepted` (or `rejected`), with `Decided by: ABR, <date>, the owner`. It merges like any PR, and implementation starts from it. A later change to an accepted design goes back to the ABR.
+- **Decision.** The owner reads the positions and decides, in the PR or in chat. The proposer then records it in the ADR: status `accepted` (or `rejected`), with `Decided by: ABR, <date>, the owner`. It merges like any PR. Implementation starts only from an `accepted` ADR. A `rejected` one is kept as the record of what was decided against, and nothing is built from it. A later change to an accepted design goes back to the ABR.
 - **No waiting game.** The proposer chases missing reviews with `agent-tell.sh`. A review still missing after a day is noted in the PR and raised with the owner, who may decide without it.
 
 ## Never go silent
