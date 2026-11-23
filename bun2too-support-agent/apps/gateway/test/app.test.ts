@@ -185,6 +185,53 @@ describe("A2A", () => {
     expect(body.error).toEqual({ code: -32602, message: "Task is not waiting for input" });
   });
 
+  it("gets a task by its case id, and reports a missing or unknown one", async () => {
+    const { app } = setup();
+    const opened = await (
+      await rpc(app, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "message/send",
+        params: {
+          message: { role: "user", messageId: "m-1", parts: [{ kind: "text", text: "hi" }] },
+        },
+      })
+    ).json();
+    const found = await (
+      await rpc(app, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tasks/get",
+        params: { id: opened.result.id },
+      })
+    ).json();
+    expect(found.result).toMatchObject({ kind: "task", id: opened.result.id });
+    const missing = await (
+      await rpc(app, { jsonrpc: "2.0", id: 3, method: "tasks/get", params: {} })
+    ).json();
+    expect(missing.error).toEqual({ code: -32602, message: "params.id is required" });
+    const unknown = await (
+      await rpc(app, { jsonrpc: "2.0", id: 4, method: "tasks/get", params: { id: "nope" } })
+    ).json();
+    expect(unknown.error).toEqual({ code: -32001, message: "Task not found" });
+  });
+
+  it("refuses cancel and streaming, and rejects a bad envelope", async () => {
+    const { app } = setup();
+    const call = async (body: unknown) => (await rpc(app, body)).json();
+    expect(
+      (await call({ jsonrpc: "2.0", id: 1, method: "tasks/cancel", params: {} })).error.code,
+    ).toBe(-32002);
+    expect(
+      (await call({ jsonrpc: "2.0", id: 2, method: "message/stream", params: {} })).error.code,
+    ).toBe(-32004);
+    expect(await call({ jsonrpc: "1.0", id: 3, method: "x" })).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600, message: "Invalid JSON-RPC request" },
+    });
+  });
+
   it("returns method-not-found for unknown methods", async () => {
     const { app } = setup();
     const body = await (
