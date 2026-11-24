@@ -132,8 +132,10 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - name: Check the daily metrics reporter syntax
-        run: python3 -m py_compile scripts/metrics/daily_productivity.py
+      - name: Test and compile the daily metrics reporter
+        run: |
+          python3 -m unittest discover -s scripts/metrics -p 'test_*.py'
+          python3 -m py_compile scripts/metrics/daily_productivity.py
 
   secrets:
     runs-on: ubuntu-latest

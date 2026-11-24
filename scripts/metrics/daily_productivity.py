@@ -20,7 +20,7 @@ from statistics import median
 GITHUB_API = "https://api.github.com"
 ATLASSIAN_AUTH = "https://auth.atlassian.com"
 ATLASSIAN_API = "https://api.atlassian.com"
-SPACE_ID = "~557058817542a500e54a3aac53cc45b225cb37"
+SPACE_KEY = "~557058817542a500e54a3aac53cc45b225cb37"
 PARENT_ID = "250970113"
 WINDOW_DAYS = 30
 OUTPUT_DIR = Path(os.environ.get("METRICS_OUTPUT_DIR", "artifacts/daily-agent-productivity"))
@@ -110,11 +110,16 @@ def summarize_qa_job(job: dict) -> dict:
     steps = job.get("steps", [])
     intake = next((step for step in steps if "intake journey" in step.get("name", "").lower()), None)
     first_failed = next((step for step in steps if step.get("conclusion") == "failure"), None)
+    failure_stage = first_failed.get("name", "unknown") if first_failed else None
+    if job.get("conclusion") == "success" and intake and intake.get("conclusion") != "success":
+        failure_stage = "Intake journey"
+    elif job.get("conclusion") == "success" and not intake:
+        failure_stage = "Intake journey (missing)"
     return {
         "conclusion": job.get("conclusion", "unknown"),
         "intake_conclusion": intake.get("conclusion", "missing") if intake else "missing",
         "intake_is_offline": bool(intake and "offline" in intake.get("name", "").lower()),
-        "failure_stage": first_failed.get("name", "unknown") if first_failed else None,
+        "failure_stage": failure_stage,
         "started_at": job.get("started_at"),
         "completed_at": job.get("completed_at"),
     }
@@ -140,24 +145,48 @@ def product_area(files: list[dict]) -> str:
 
 
 def collect_pr_context(repo: str, token: str, since: dt.date) -> list[dict]:
-    prs = github_pages(f"repos/{repo}/pulls?state=all&sort=updated&direction=desc", token)
     results = []
-    for pr in prs:
-        merged_at = pr.get("merged_at")
-        if not merged_at or utc_datetime(merged_at).date() < since:
-            continue
-        number = pr["number"]
-        files = github_pages(f"repos/{repo}/pulls/{number}/files", token)
-        reviews = github_pages(f"repos/{repo}/pulls/{number}/reviews", token)
-        merged_time = utc_datetime(merged_at)
-        requested_changes = any(
-            review.get("state") == "CHANGES_REQUESTED"
-            and review.get("submitted_at")
-            and utc_datetime(review["submitted_at"]) <= merged_time
-            for review in reviews
-        )
-        results.append(
-            {
+    path = f"repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100"
+    page = 1
+    while True:
+        prs = github_get(f"{path}&page={page}", token)
+        if not isinstance(prs, list):
+            raise ApiError("GitHub pull request metadata", 0)
+        if not prs:
+            break
+        stop = False
+        for pr in prs:
+            if utc_datetime(pr["updated_at"]).date() < since:
+                stop = True
+                break
+            merged_at = pr.get("merged_at")
+            if not merged_at or utc_datetime(merged_at).date() < since:
+                continue
+            number = pr["number"]
+            files = github_pages(f"repos/{repo}/pulls/{number}/files", token)
+            reviews = github_pages(f"repos/{repo}/pulls/{number}/reviews", token)
+            comments = github_pages(f"repos/{repo}/issues/{number}/comments", token)
+            merged_time = utc_datetime(merged_at)
+            requested_changes = any(
+                review.get("state") == "CHANGES_REQUESTED"
+                and review.get("submitted_at")
+                and utc_datetime(review["submitted_at"]) <= merged_time
+                for review in reviews
+            )
+            failed_verdict = any(
+                review.get("user", {}).get("type") == "Bot"
+                and has_failed_verdict(review.get("body", ""))
+                and review.get("submitted_at")
+                and utc_datetime(review["submitted_at"]) <= merged_time
+                for review in reviews
+            ) or any(
+                comment.get("user", {}).get("type") == "Bot"
+                and has_failed_verdict(comment.get("body", ""))
+                and comment.get("created_at")
+                and utc_datetime(comment["created_at"]) <= merged_time
+                for comment in comments
+            )
+            results.append({
                 "number": number,
                 "created_at": pr["created_at"],
                 "merged_at": merged_at,
@@ -166,9 +195,45 @@ def collect_pr_context(repo: str, token: str, since: dt.date) -> list[dict]:
                 "area": product_area(files),
                 "author_type": (pr.get("user") or {}).get("type", "Unknown"),
                 "requested_changes": requested_changes,
-            }
-        )
+                "failed_verdict": failed_verdict,
+            })
+        if stop or len(prs) < 100:
+            break
+        page += 1
     return results
+
+
+def has_failed_verdict(body: str) -> bool:
+    patterns = (r"(?:CROSS-REVIEW|QUALITY) \(\w+\): FAIL", r"VERDICT: FAIL")
+    return any(re.fullmatch(pattern, line.strip()) for line in body.splitlines() for pattern in patterns)
+
+
+def classify_run(run: dict, jobs: list[dict]) -> str:
+    if not jobs:
+        if run.get("conclusion") == "failure":
+            return "workflow_invalid"
+        return "cancelled" if run.get("conclusion") == "cancelled" else "in_progress_no_jobs"
+    qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
+    dev_jobs = [job for job in jobs if is_environment_deploy(job, "dev")]
+    if dev_jobs and summarize_qa_job(dev_jobs[0])["intake_is_offline"]:
+        return "retired_dev_offline"
+    if qa_jobs:
+        qa = summarize_qa_job(qa_jobs[0])
+        if qa["conclusion"] == "success" and qa["intake_conclusion"] == "success":
+            return "qa_green"
+        if qa["conclusion"] == "cancelled":
+            return "cancelled"
+        if qa["conclusion"] == "failure" or qa["intake_conclusion"] != "success":
+            return f"qa_failed:{qa['failure_stage'] or 'unknown'}"
+        return "qa_unclassified"
+    verify = next((job for job in jobs if job.get("name", "").lower().startswith("verify")), None)
+    if verify and verify.get("conclusion") == "failure":
+        return "verify_failed"
+    if run.get("conclusion") == "cancelled":
+        return "cancelled"
+    if run.get("conclusion") == "failure":
+        return "workflow_failed_other"
+    return "non_qa_deploy"
 
 
 def empty_day(day: dt.date) -> dict:
@@ -179,6 +244,9 @@ def empty_day(day: dt.date) -> dict:
         "qa_failures": 0,
         "qa_cancelled": 0,
         "qa_unclassified": 0,
+        "workflow_runs": 0,
+        "run_classes": {},
+        "failed_verdict_prs": 0,
         "retired_dev_offline_attempts": 0,
         "retired_dev_offline_completions": 0,
         "failure_stages": {},
@@ -206,6 +274,11 @@ def build_report(repo: str, token: str) -> dict:
         if day < since or day > today:
             continue
         jobs = run_jobs(repo, run["id"], token)
+        if day in days:
+            row = days[day]
+            row["workflow_runs"] += 1
+            run_class = classify_run(run, jobs)
+            row["run_classes"][run_class] = row["run_classes"].get(run_class, 0) + 1
         qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
         if qa_jobs:
             qa_status = summarize_qa_job(qa_jobs[0])
@@ -246,7 +319,7 @@ def build_report(repo: str, token: str) -> dict:
             sha = run.get("head_sha")
             if sha and run.get("updated_at"):
                 qa_success_shas[sha].append(utc_datetime(run["updated_at"]))
-        elif conclusion == "failure":
+        elif conclusion == "failure" or summary["intake_conclusion"] != "success":
             row["qa_failures"] += 1
             stage = summary["failure_stage"] or "unknown"
             row["failure_stages"][stage] = row["failure_stages"].get(stage, 0) + 1
@@ -269,6 +342,7 @@ def build_report(repo: str, token: str) -> dict:
         elif author_type == "User":
             row["merged_human_prs"] += 1
         row["requested_change_prs"] += int(pr["requested_changes"])
+        row["failed_verdict_prs"] += int(pr["failed_verdict"])
         row["merged_by_area"][pr["area"]] = row["merged_by_area"].get(pr["area"], 0) + 1
         area_counts[pr["area"]] += 1
         candidates = []
@@ -299,7 +373,7 @@ def build_report(repo: str, token: str) -> dict:
         "window_start_utc": since.isoformat(),
         "window_end_utc": report_date.isoformat(),
         "repository": repo,
-        "source": "GitHub Actions and pull-request metadata; no logs or artifacts",
+        "source": "GitHub Actions, pull-request and verdict-line metadata; no logs or artifacts",
         "today": today_row,
         "history": history,
         "totals": {
@@ -310,9 +384,12 @@ def build_report(repo: str, token: str) -> dict:
             "retired_dev_offline_attempts": sum(row["retired_dev_offline_attempts"] for row in history),
             "retired_dev_offline_completions": sum(row["retired_dev_offline_completions"] for row in history),
             "merged_prs": len(prs),
+            "workflow_runs": sum(row["workflow_runs"] for row in history),
+            "run_classes": dict(sum((Counter(row["run_classes"]) for row in history), Counter())),
             "merged_bot_prs": sum(pr["author_type"] == "Bot" for pr in prs),
             "merged_human_prs": sum(pr["author_type"] == "User" for pr in prs),
             "requested_change_prs": sum(pr["requested_changes"] for pr in prs),
+            "failed_verdict_prs": sum(pr["failed_verdict"] for pr in prs),
             "merged_by_area": dict(area_counts),
             "qa_completion_rate": round(total_passes / total_attempts, 4) if total_attempts else None,
             "failure_stages": dict(failed_stage_totals),
@@ -345,18 +422,20 @@ def page_storage(report: dict) -> str:
     title = f"Daily agent delivery and quality — {report['report_date_utc']} UTC"
     rows = []
     for row in history:
+        classes = ", ".join(f"{name}: {count}" for name, count in sorted(row["run_classes"].items())) or "—"
         rows.append(
             "<tr>"
-            f"<td>{row['date']}</td><td>{row['merged_prs']}</td>"
+            f"<td>{row['date']}</td><td>{row['workflow_runs']}</td><td>{html.escape(classes)}</td><td>{row['merged_prs']}</td>"
             f"<td>{row['qa_gate_passes']}</td><td>{row['qa_attempts']}</td>"
             f"<td>{row['qa_failures']}</td><td>{row['qa_cancelled']}</td>"
             f"<td>{row['retired_dev_offline_completions']}/{row['retired_dev_offline_attempts']}</td><td>{row['merged_bot_prs']}</td>"
-            f"<td>{row['requested_change_prs']}</td>"
+            f"<td>{row['requested_change_prs']}</td><td>{row['failed_verdict_prs']}</td>"
             f"<td>{row['pr_to_qa_minutes'] if row['pr_to_qa_minutes'] is not None else '—'}</td>"
             "</tr>"
         )
     product_rows = "".join(f"<tr><td>{html.escape(area)}</td><td>{count}</td></tr>" for area, count in sorted(totals["merged_by_area"].items()))
     failures = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(today["failure_stages"].items())) or "<li>None</li>"
+    run_classes = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(today["run_classes"].items())) or "<li>None</li>"
     limitations = "".join(f"<li>{html.escape(item)}</li>" for item in report["limitations"])
     date = report["report_date_utc"]
     pass_chart = " ".join(bar(row["qa_gate_passes"], max_pass) for row in history)
@@ -367,8 +446,8 @@ def page_storage(report: dict) -> str:
 <p>Read-only report from GitHub workflow and pull-request metadata. The report emphasizes verified release gates; merged PR count is context only.</p>
 <h2>Yesterday (UTC)</h2>
 <table><tbody>
-<tr><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PR-to-QA median</th></tr>
-<tr><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_offline_completions']} / {today['retired_dev_offline_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{pr_to_qa}</td></tr>
+<tr><th>Workflow runs</th><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PRs with agent FAIL verdicts</th><th>PR-to-QA median</th></tr>
+<tr><td>{today['workflow_runs']}</td><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_offline_completions']} / {today['retired_dev_offline_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{today['failed_verdict_prs']}</td><td>{pr_to_qa}</td></tr>
 </tbody></table>
 <h2>Delivery definition</h2>
 <p><strong>Delivered = QA green</strong>, as approved by the owner. A green QA run means deployment, smoke check, and intake journey completed. The intake script treats <code>rejected</code> as terminal success, so the metric does not prove an accepted resolution; production release remains separately human-approved.</p>
@@ -378,7 +457,8 @@ def page_storage(report: dict) -> str:
 <h2>30-day trend (each bar is scaled within its row)</h2>
 <table><tbody><tr><th>QA gate passes</th><td><code>{pass_chart}</code></td></tr><tr><th>QA failures</th><td><code>{fail_chart}</code></td></tr></tbody></table>
 <h2>Daily history (UTC)</h2>
-<table><tbody><tr><th>Date</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
+<table><tbody><tr><th>Date</th><th>Workflow runs</th><th>Run classifications</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>Agent FAIL verdict PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
+<h2>Current-day workflow run classifications</h2><ul>{run_classes}</ul>
 <h2>Current-day QA failure stages</h2><ul>{failures}</ul>
 <h2>Merged PRs by product area (30 days)</h2><table><tbody><tr><th>Area</th><th>Count</th></tr>{product_rows or '<tr><td>None</td><td>0</td></tr>'}</tbody></table>
 <h2>Reading this report</h2><ul>{limitations}</ul>
@@ -427,8 +507,17 @@ def confluence_request(method: str, path: str, body: dict | None, api_base: str,
     return response if isinstance(response, dict) else {}
 
 
-def publish_page(title: str, storage: str, api_base: str, token: str) -> str:
-    query = urllib.parse.urlencode({"space-id": SPACE_ID, "title": title, "status": "current", "limit": 100})
+def resolve_space_id(api_base: str, token: str) -> str:
+    query = urllib.parse.urlencode({"keys": SPACE_KEY, "limit": 100})
+    response = confluence_request("GET", f"/wiki/api/v2/spaces?{query}", None, api_base, token)
+    matches = [space for space in response.get("results", []) if space.get("key") == SPACE_KEY]
+    if len(matches) != 1 or not str(matches[0].get("id", "")).isdigit():
+        raise ApiError("Confluence space lookup", 0)
+    return str(matches[0]["id"])
+
+
+def publish_page(title: str, storage: str, api_base: str, token: str, space_id: str) -> str:
+    query = urllib.parse.urlencode({"space-id": space_id, "title": title, "status": "current", "limit": 100})
     existing = confluence_request("GET", f"/wiki/api/v2/pages?{query}", None, api_base, token)
     titled_pages = [page for page in existing.get("results", []) if page.get("title") == title]
     pages = [page for page in titled_pages if str(page.get("parentId")) == PARENT_ID]
@@ -443,14 +532,14 @@ def publish_page(title: str, storage: str, api_base: str, token: str) -> str:
             "id": page["id"],
             "status": "current",
             "title": title,
-            "spaceId": SPACE_ID,
+            "spaceId": int(space_id),
             "body": {"representation": "storage", "value": storage},
             "version": {"number": version + 1, "message": "Refresh daily delivery metrics"},
         }
         updated = confluence_request("PUT", f"/wiki/api/v2/pages/{page['id']}", payload, api_base, token)
         return updated.get("_links", {}).get("webui", "page updated")
     payload = {
-        "spaceId": SPACE_ID,
+        "spaceId": int(space_id),
         "parentId": PARENT_ID,
         "status": "current",
         "title": title,
@@ -523,12 +612,12 @@ def markdown_to_storage(markdown: str) -> str:
 def write_artifacts(report: dict) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    fields = ["date", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "retired_dev_offline_completions", "retired_dev_offline_attempts", "requested_change_prs", "pr_to_qa_minutes"]
+    fields = ["date", "workflow_runs", "run_classes", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "retired_dev_offline_completions", "retired_dev_offline_attempts", "requested_change_prs", "failed_verdict_prs", "pr_to_qa_minutes"]
     with (OUTPUT_DIR / "history.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for row in report["history"]:
-            writer.writerow({key: row.get(key, "") for key in fields})
+            writer.writerow({key: json.dumps(row.get(key, {}), sort_keys=True) if key == "run_classes" else row.get(key, "") for key in fields})
 
 
 def main() -> int:
@@ -547,14 +636,16 @@ def main() -> int:
         if not confluence_url or not cloud_id or not client_id or not client_secret:
             raise ApiError("Confluence credentials unavailable", 0)
         api_base, access_token = confluence_context(confluence_url, cloud_id, client_id, client_secret)
+        space_id = resolve_space_id(api_base, access_token)
         design_path = Path("docs/agents/daily-agent-delivery-metrics.md")
         design_storage = markdown_to_storage(design_path.read_text(encoding="utf-8"))
-        design_page = publish_page("Daily agent delivery and quality metrics", design_storage, api_base, access_token)
+        design_page = publish_page("Daily agent delivery and quality metrics", design_storage, api_base, access_token, space_id)
         report_page = publish_page(
             f"Daily agent delivery and quality — {report['report_date_utc']} UTC",
             page_storage(report),
             api_base,
             access_token,
+            space_id,
         )
     except ApiError as error:
         print(str(error), file=sys.stderr)
