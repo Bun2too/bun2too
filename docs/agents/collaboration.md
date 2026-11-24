@@ -103,7 +103,7 @@ AGENTS.md rule 17. Each product folder is mirrored to its own repo ([subtrees SO
 
 ## Quality pass (Antigravity)
 
-Every PR that changes product code gets a quality pass from Antigravity before its author asks for cross-review. Docs-only and config-only PRs skip it. It checks what cross-review tends not to have time for. It adds to CI, cross-review and the factory review; it replaces none of them.
+Every PR gets a quality pass from Antigravity before its author asks for cross-review, docs-only and config-only PRs included. A PR is never exempt because of the files it touches; the only way past the pass is a recorded skip (below). It checks what cross-review tends not to have time for. It adds to CI, cross-review and the factory review; it replaces none of them.
 
 - **Ask.** When the PR is pushed and its checks pass locally, the author sends `scripts/agent-tell.sh antigravity "Quality pass: PR #<n> at <full sha>"`.
 - **What Antigravity does.** It works in its own worktree at that exact commit, as [GEMINI.md](../../GEMINI.md#how-to-do-a-quality-pass) describes:
