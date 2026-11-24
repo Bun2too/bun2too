@@ -94,9 +94,9 @@ def run_jobs(repo: str, run_id: int, token: str) -> list[dict]:
     return payload.get("jobs", []) if isinstance(payload, dict) else []
 
 
-def is_qa_deploy(job: dict) -> bool:
+def is_environment_deploy(job: dict, environment: str) -> bool:
     name = job.get("name", "").lower()
-    return "deploy" in name and re.search(r"(^|[^a-z])qa([^a-z]|$)", name) is not None
+    return "deploy" in name and re.search(rf"(^|[^a-z]){re.escape(environment)}([^a-z]|$)", name) is not None
 
 
 def summarize_qa_job(job: dict) -> dict:
@@ -166,6 +166,8 @@ def empty_day(day: dt.date) -> dict:
         "qa_failures": 0,
         "qa_cancelled": 0,
         "qa_unclassified": 0,
+        "retired_dev_attempts": 0,
+        "retired_dev_gate_passes": 0,
         "failure_stages": {},
         "merged_prs": 0,
         "requested_change_prs": 0,
@@ -190,7 +192,14 @@ def build_report(repo: str, token: str) -> dict:
         if day not in days:
             continue
         jobs = run_jobs(repo, run["id"], token)
-        qa_jobs = [job for job in jobs if is_qa_deploy(job)]
+        qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
+        dev_jobs = [job for job in jobs if is_environment_deploy(job, "dev")]
+        if dev_jobs:
+            dev_summary = summarize_qa_job(dev_jobs[0])
+            if dev_summary["conclusion"] not in ("cancelled", "skipped"):
+                days[day]["retired_dev_attempts"] += 1
+                if dev_summary["conclusion"] == "success" and dev_summary["intake_conclusion"] == "success":
+                    days[day]["retired_dev_gate_passes"] += 1
         # A skipped QA job (for example, a manual dev-only run) is not an attempt.
         if not qa_jobs:
             continue
@@ -268,6 +277,8 @@ def build_report(repo: str, token: str) -> dict:
             "qa_gate_passes": total_passes,
             "qa_failures": total_failures,
             "qa_cancelled": sum(row["qa_cancelled"] for row in history),
+            "retired_dev_attempts": sum(row["retired_dev_attempts"] for row in history),
+            "retired_dev_gate_passes": sum(row["retired_dev_gate_passes"] for row in history),
             "merged_prs": len(prs),
             "merged_bot_prs": sum(pr["author_type"] == "Bot" for pr in prs),
             "merged_human_prs": sum(pr["author_type"] == "User" for pr in prs),
@@ -307,7 +318,8 @@ def page_storage(report: dict) -> str:
             "<tr>"
             f"<td>{row['date']}</td><td>{row['merged_prs']}</td>"
             f"<td>{row['qa_gate_passes']}</td><td>{row['qa_attempts']}</td>"
-            f"<td>{row['qa_failures']}</td><td>{row['qa_cancelled']}</td><td>{row['merged_bot_prs']}</td>"
+            f"<td>{row['qa_failures']}</td><td>{row['qa_cancelled']}</td>"
+            f"<td>{row['retired_dev_gate_passes']}/{row['retired_dev_attempts']}</td><td>{row['merged_bot_prs']}</td>"
             f"<td>{row['requested_change_prs']}</td>"
             f"<td>{row['pr_to_qa_minutes'] if row['pr_to_qa_minutes'] is not None else '—'}</td>"
             "</tr>"
@@ -324,15 +336,15 @@ def page_storage(report: dict) -> str:
 <p>Read-only report from GitHub workflow and pull-request metadata. The report emphasizes verified release gates; merged PR count is context only.</p>
 <h2>Yesterday (UTC)</h2>
 <table><tbody>
-<tr><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PR-to-QA median</th></tr>
-<tr><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{pr_to_qa}</td></tr>
+<tr><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev gate passes / attempts</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PR-to-QA median</th></tr>
+<tr><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_gate_passes']} / {today['retired_dev_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{pr_to_qa}</td></tr>
 </tbody></table>
 <h2>Verified customer outcomes</h2>
 <p><strong>Not measured.</strong> The QA workflow does not emit a sanitized business outcome. A successful intake script may include a rejected terminal state, so this report does not infer accepted delivery from a green workflow.</p>
 <h2>30-day trend (each bar is scaled within its row)</h2>
 <table><tbody><tr><th>QA gate passes</th><td><code>{pass_chart}</code></td></tr><tr><th>QA failures</th><td><code>{fail_chart}</code></td></tr></tbody></table>
 <h2>Daily history (UTC)</h2>
-<table><tbody><tr><th>Date</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
+<table><tbody><tr><th>Date</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev passes / attempts</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
 <h2>Current-day QA failure stages</h2><ul>{failures}</ul>
 <h2>Merged PRs by product area (30 days)</h2><table><tbody><tr><th>Area</th><th>Count</th></tr>{product_rows or '<tr><td>None</td><td>0</td></tr>'}</tbody></table>
 <h2>Reading this report</h2><ul>{limitations}</ul>
@@ -457,7 +469,7 @@ def markdown_to_storage(markdown: str) -> str:
 def write_artifacts(report: dict) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    fields = ["date", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "requested_change_prs", "pr_to_qa_minutes"]
+    fields = ["date", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "retired_dev_gate_passes", "retired_dev_attempts", "requested_change_prs", "pr_to_qa_minutes"]
     with (OUTPUT_DIR / "history.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
