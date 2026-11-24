@@ -17,7 +17,6 @@ from relay_agents.contracts import Classification, IntakeRequest, Intent, Resolu
 from relay_agents.policy import Decision, assess
 from relay_agents.specialists.base import Specialist, SpecialistContext, SpecialistResult
 from relay_agents.store import CaseNotFound, CaseStore
-from relay_agents.telemetry import is_traced, traced_node
 from relay_agents.tenants import TenantConfig
 
 ESCALATION_MESSAGE = (
@@ -64,7 +63,6 @@ async def _each_ticket(deps: Deps, state: GraphState, action: str, text: str) ->
     ]
 
 
-@traced_node("classify")
 async def classify(state: GraphState, deps: Deps) -> dict[str, Any]:
     tenant = deps.tenants[state["tenant"]]
     case = await _case(deps, state)
@@ -83,7 +81,6 @@ async def classify(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {"classification": classification}
 
 
-@traced_node("open_tickets")
 async def open_tickets(state: GraphState, deps: Deps) -> dict[str, Any]:
     case = await _case(deps, state)
     c = state["classification"]
@@ -114,7 +111,6 @@ async def open_tickets(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {}
 
 
-@traced_node("run_specialist")
 async def run_specialist(state: GraphState, deps: Deps) -> dict[str, Any]:
     tenant = deps.tenants[state["tenant"]]
     case = await _case(deps, state)
@@ -154,7 +150,6 @@ async def run_specialist(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {"classification": classification, "result": result, "attempts": attempts}
 
 
-@traced_node("assess")
 async def assess_node(state: GraphState, deps: Deps) -> dict[str, Any]:
     tenant = deps.tenants[state["tenant"]]
     decision = assess(
@@ -163,7 +158,6 @@ async def assess_node(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {"decision": decision}
 
 
-@traced_node("resolve")
 async def resolve(state: GraphState, deps: Deps) -> dict[str, Any]:
     result = state["result"]
     assert result is not None
@@ -192,7 +186,6 @@ async def resolve(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {}
 
 
-@traced_node("await_customer")
 async def await_customer(state: GraphState, deps: Deps) -> dict[str, Any]:
     result = state["result"]
     assert result is not None
@@ -208,7 +201,6 @@ async def await_customer(state: GraphState, deps: Deps) -> dict[str, Any]:
     return {}
 
 
-@traced_node("escalate")
 async def escalate(state: GraphState, deps: Deps) -> dict[str, Any]:
     result = state.get("result")
     decision = state["decision"]
@@ -255,9 +247,6 @@ def _after_assess(state: GraphState) -> str:
 
 
 def build_graph(deps: Deps, nodes: Mapping[str, Any] = NODES) -> Any:
-    untraced = [name for name, fn in nodes.items() if not is_traced(fn)]
-    if untraced:
-        raise TypeError(f"graph nodes must use @traced_node: {', '.join(untraced)}")
     graph = StateGraph(GraphState)
     for name, fn in nodes.items():
         graph.add_node(name, partial(fn, deps=deps))

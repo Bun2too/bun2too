@@ -1,9 +1,17 @@
 import logging
 import uuid
 
+from opentelemetry.trace import Status, StatusCode
+
 from relay_agents.contracts import Case, IntakeAccepted, IntakeCommand
 from relay_agents.graph import Deps, GraphState, build_graph
-from relay_agents.telemetry import ATTR_CASE_ID, ATTR_TENANT, current_trace_id, tracer
+from relay_agents.telemetry import (
+    ATTR_CASE_ID,
+    ATTR_TENANT,
+    ATTR_THREAD_ID,
+    current_trace_id,
+    tracer,
+)
 
 log = logging.getLogger("relay.agents")
 
@@ -43,11 +51,16 @@ class CaseService:
         with tracer.start_as_current_span("relay.case.run") as span:
             span.set_attribute(ATTR_TENANT, tenant)
             span.set_attribute(ATTR_CASE_ID, case_id)
+            span.set_attribute(ATTR_THREAD_ID, case_id)
             state: GraphState = {"case_id": case_id, "tenant": tenant, "resume": resume}
+            # LangSmith copies no metadata from a parent run to its children, so every
+            # LangChain run in the graph gets the thread from the config it inherits.
+            config = {"metadata": {"thread_id": case_id, "relay_tenant": tenant}}
             try:
-                await self._graph.ainvoke(state)
+                await self._graph.ainvoke(state, config=config)
             except Exception as error:
                 span.record_exception(error)
+                span.set_status(Status(StatusCode.ERROR, type(error).__name__))
                 log.exception("case run failed", extra={"case_id": case_id, "tenant": tenant})
                 await self._deps.store.note(
                     case_id,

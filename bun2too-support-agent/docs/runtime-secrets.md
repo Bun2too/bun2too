@@ -26,6 +26,7 @@ Both `qa` and `prod` run live: the agents service reads every key the tenant fil
 | `BUN2TOO_SNOW_INSTANCE_URL` | required (sandbox) | required | agents  |
 | `BUN2TOO_SNOW_USER`         | required (sandbox) | required | agents  |
 | `BUN2TOO_SNOW_PASSWORD`     | required (sandbox) | required | agents  |
+| `LANGSMITH_API_KEY`         | required           | optional | agents  |
 
 **Every qa deploy creates real tickets.** The deploy runs the intake journey against qa. For Bun2too, its Jira issue lands in project `BUN` (label `relay`), and its incident in the ServiceNow developer instance. Never point qa at a production ServiceNow. The journey never runs against prod.
 
@@ -129,6 +130,28 @@ Relay creates a record in the tenant's table (`incident` for Bun2too), finds it 
 5. **Instance URL.** The address you open ServiceNow at, up to `.service-now.com`.
 6. Developer instances go to sleep when unused and are reclaimed after a period of inactivity. Wake the qa instance before a qa deploy.
 
+### `LANGSMITH_API_KEY` (LangSmith tracing)
+
+Sends the agents service's traces to LangSmith ([ADR 0009](adr/0009-langsmith-tracing.md)). It works only together with the trace settings below; one without the other stops the service at start-up.
+
+1. Sign in to LangSmith (<https://smith.langchain.com>) with the Bun2too organisation and open the workspace that holds the agent `bun2too-support-agent`.
+2. In **Settings → API Keys**, create a **service key** named after the environment (`relay-qa`, `relay-prod`), with permission to write traces, and copy it once.
+3. One key per environment, so qa's can be revoked alone. Never reuse a coding agent's key (Claude Code, Codex, Antigravity) here.
+
+### Trace settings (GitHub environment variables, not secrets)
+
+Set these as **variables** of the GitHub environment (`gh variable set … --env support-qa`). The deploy passes them to the agents service ([tracing matrix](../../docs/sop/tracing.md)):
+
+| Variable                                          | qa                                                              | prod                              |
+| ------------------------------------------------- | --------------------------------------------------------------- | --------------------------------- |
+| `LANGSMITH_ENDPOINT`                              | `https://api.smith.langchain.com`                               | `https://api.smith.langchain.com` |
+| `LANGSMITH_AGENT_ID`                              | `bun2too-support-agent`                                         | `bun2too-support-agent`           |
+| `LANGSMITH_AGENT_ENVIRONMENT`                     | `staging`                                                       | `production`                      |
+| `LANGSMITH_WORKSPACE_ID`                          | only if the key reaches several workspaces                      | same                              |
+| `LANGSMITH_HIDE_INPUTS`, `LANGSMITH_HIDE_OUTPUTS` | unset (hidden), or `false` once the owner allows payloads in qa | unset (hidden)                    |
+
+To turn tracing off in an environment, delete the three `LANGSMITH_*` variables and remove `LANGSMITH_API_KEY` from its `SUPPORT_RUNTIME_SECRETS`, then redeploy.
+
 ## Set the secret
 
 Build the JSON locally, set it, and delete the file. The shapes below show which keys each environment needs.
@@ -145,7 +168,8 @@ Build the JSON locally, set it, and delete the file. The shapes below show which
   "BUN2TOO_JIRA_API_TOKEN": "<jira-token>",
   "BUN2TOO_SNOW_INSTANCE_URL": "https://<instance>.service-now.com",
   "BUN2TOO_SNOW_USER": "relay.integration",
-  "BUN2TOO_SNOW_PASSWORD": "<snow-password>"
+  "BUN2TOO_SNOW_PASSWORD": "<snow-password>",
+  "LANGSMITH_API_KEY": "<langsmith-service-key>"
 }
 ```
 
@@ -164,4 +188,4 @@ Repeat for `support-prod`. Changes take effect on the next deploy of that enviro
 
 ## Local development
 
-`pnpm dev` defaults `RELAY_TENANT_KEYS` to `dev-bun2too-key:bun2too`. With `RELAY_OFFLINE=1` (as in `.env.example`) no other key is needed. To try real systems locally, unset `RELAY_OFFLINE` and set the same keys with sandbox values in `.env.local`, which git ignores.
+`pnpm dev` defaults `RELAY_TENANT_KEYS` to `dev-bun2too-key:bun2too`. With `RELAY_OFFLINE=1` (as in `.env.example`) no other key is needed. To try real systems locally, unset `RELAY_OFFLINE` and set the same keys with sandbox values in `.env.local`, which git ignores. To trace a local run, set `LANGSMITH_API_KEY` (your own key), `LANGSMITH_AGENT_ID=bun2too-support-agent` and `LANGSMITH_AGENT_ENVIRONMENT=local` there too.

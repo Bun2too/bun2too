@@ -35,6 +35,17 @@ variable "otel_endpoint" {
   default     = ""
 }
 
+variable "langsmith" {
+  description = "LangSmith trace settings for the agents service (ADR 0009): LANGSMITH_ENDPOINT, LANGSMITH_AGENT_ID, LANGSMITH_AGENT_ENVIRONMENT, LANGSMITH_WORKSPACE_ID, LANGSMITH_HIDE_INPUTS and LANGSMITH_HIDE_OUTPUTS. Empty values stay unset. The API key is LANGSMITH_API_KEY in runtime_secrets."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for k in keys(var.langsmith) : contains(["LANGSMITH_ENDPOINT", "LANGSMITH_AGENT_ID", "LANGSMITH_AGENT_ENVIRONMENT", "LANGSMITH_WORKSPACE_ID", "LANGSMITH_HIDE_INPUTS", "LANGSMITH_HIDE_OUTPUTS"], k)])
+    error_message = "langsmith takes only LANGSMITH_ENDPOINT, LANGSMITH_AGENT_ID, LANGSMITH_AGENT_ENVIRONMENT, LANGSMITH_WORKSPACE_ID, LANGSMITH_HIDE_INPUTS and LANGSMITH_HIDE_OUTPUTS."
+  }
+}
+
 variable "runtime_secrets" {
   description = "Secrets from the GitHub environment's SUPPORT_RUNTIME_SECRETS JSON. RELAY_TENANT_KEYS goes to the gateway; everything else to agents."
   type        = map(string)

@@ -89,6 +89,7 @@ locals {
       DATABASE_URL      = "postgresql://relay:${random_password.postgres.result}@$${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
     },
     var.otel_endpoint == "" ? {} : { OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_endpoint },
+    { for k, v in var.langsmith : k => v if v != "" },
     { for k in local.runtime_keys : k => var.runtime_secrets[k] if !contains(local.gateway_secret_keys, k) },
   )
 }
