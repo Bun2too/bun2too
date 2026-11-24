@@ -19,7 +19,7 @@ All model calls in qa and prod go through Cloudflare AI Gateway, one gateway per
 - `CF_AIG_TOKEN` authenticates to the gateway (`cf-aig-authorization`). It is required whenever the IDs are set, and gateways run with **Authenticated Gateway** on, so a leaked URL cannot spend our quota.
 - One ID without the other, or the IDs without a token, stops the agents service at start-up, before it reports healthy. With the gateway on, so does a non-Anthropic model, which has no gateway route; with it off, any provider is built directly. Offline mode (`RELAY_OFFLINE=1`, used by tests and evals) builds no models, so it skips this check.
 - Every call sends `cf-aig-collect-log-payload: false`, so Cloudflare keeps token, cost and latency metadata but never prompts or responses, and `cf-aig-skip-cache: true`, so a cached answer can never reach another customer even if someone turns caching on. Both are enforced in code, not left to dashboard settings.
-- The provider key goes out the way the Anthropic SDK sends it, as `Authorization: Bearer`, and the gateway forwards it. The Anthropic key stays in our secrets.
+- The gateway bills the Anthropic key stored in it under the alias `claude` (BYOK), named on every call by `cf-aig-byok-alias: claude`. Amended 2026-11-24: the gateway does not use the `Authorization: Bearer` key the SDK sends. With Unified Billing on and no stored key applied, it bills Cloudflare credits instead, and with none it answers 402 (`rejection_reason: payment_defaulted`, `byok: null`). That broke every qa intake from 2026-11-22 to 2026-11-24. Only a key stored under the alias `default` is applied without the header.
 - The gateway token lives in a private attribute of the model, not in its fields (`default_headers` included); it joins the SDK client's headers only when the client is built. Model fields appear in `repr()`, in `dumpd()` and in the payload every LangChain callback (LangSmith included) receives; private attributes do not. A test guards this.
 
 The settings arrive through `SUPPORT_RUNTIME_SECRETS` like every other runtime secret ([runtime secrets](../runtime-secrets.md)). The gateways are created once in the Cloudflare dashboard; they hold no state we need to manage as code.
@@ -27,7 +27,7 @@ The settings arrive through `SUPPORT_RUNTIME_SECRETS` like every other runtime s
 ## Consequences
 
 - Spend, rate limits and per-call analytics are configured in Cloudflare per environment, without code or deploys. Provider fallback becomes a gateway setting.
-- Cloudflare sees the provider key: it travels in the `Authorization` header through the gateway on every call, and the gateway forwards it. Trusting Cloudflare with it, as with our other traffic, is part of this decision; payloads are not logged (`cf-aig-collect-log-payload: false`).
+- Cloudflare holds the provider key: it is stored in each gateway, and rotating it is a dashboard change. Trusting Cloudflare with it, as with our other traffic, is part of this decision; payloads are not logged (`cf-aig-collect-log-payload: false`).
 - Model calls add one network hop through the nearest Cloudflare location. The agents service itself still runs on Railway, so this is a proxy at the edge, not edge compute for our code.
 - Adding another provider means routing it in `llm.py`; until then it fails at start-up instead of silently bypassing the gateway.
 - Response caching stays off: support conversations are personal, and a cached answer could reach the wrong customer.

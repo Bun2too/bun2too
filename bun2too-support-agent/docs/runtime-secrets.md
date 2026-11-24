@@ -88,7 +88,7 @@ Leave both IDs out to call Anthropic directly (local development, or the rollbac
    - select **Create authentication token** and copy it once. This is `CF_AIG_TOKEN`.
    - Leave **Cache** off; support answers are personal. Relay also sends `cf-aig-skip-cache: true` on every call.
    - Optionally set **Rate limiting** and a spend alert for the environment.
-4. Leave the Anthropic key with Relay (`ANTHROPIC_API_KEY` above). The gateway forwards it; do not also store it in the gateway.
+4. In the gateway's **Provider Keys**, add the Anthropic key with the alias `claude`. Relay names that alias on every call (`cf-aig-byok-alias: claude`, ADR 0007); the gateway does not use the key Relay sends, and without a stored key it bills Cloudflare credits and answers 402. Keep `ANTHROPIC_API_KEY` above as well: it is the direct route when both IDs are cleared.
 5. After the next deploy, open the gateway's **Analytics** and **Logs**: requests, tokens and cost should appear, and log entries should show no request or response bodies. Keep **DLP**, **Guardrails** and **Logpush** off for these gateways unless a decision record allows them; they process or export the payloads.
 
 ### `BUN2TOO_JIRA_*` (Jira Cloud)

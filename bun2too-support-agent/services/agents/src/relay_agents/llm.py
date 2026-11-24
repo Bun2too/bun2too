@@ -15,7 +15,13 @@ log = logging.getLogger("relay.agents")
 _GATEWAY_URL = "https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic"
 # Customer text is in every prompt: Cloudflare keeps token, cost and latency metadata but
 # never the payload, and never answers one customer with another's cached reply.
-_GATEWAY_HEADERS = {"cf-aig-collect-log-payload": "false", "cf-aig-skip-cache": "true"}
+# The gateway bills the Anthropic key stored under the alias "claude" (ADR 0007). Without
+# the alias it ignores the request's key and bills Cloudflare credits, which answer 402.
+_GATEWAY_HEADERS = {
+    "cf-aig-collect-log-payload": "false",
+    "cf-aig-skip-cache": "true",
+    "cf-aig-byok-alias": "claude",
+}
 
 
 class _GatewayChatAnthropic(ChatAnthropic):
