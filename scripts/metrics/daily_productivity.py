@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import csv
 import datetime as dt
 import html
@@ -19,7 +18,8 @@ from pathlib import Path
 from statistics import median
 
 GITHUB_API = "https://api.github.com"
-CONFLUENCE = "https://bun2too.atlassian.net"
+ATLASSIAN_AUTH = "https://auth.atlassian.com"
+ATLASSIAN_API = "https://api.atlassian.com"
 SPACE_ID = "~557058817542a500e54a3aac53cc45b225cb37"
 PARENT_ID = "250970113"
 WINDOW_DAYS = 30
@@ -113,6 +113,11 @@ def summarize_qa_job(job: dict) -> dict:
     }
 
 
+def is_waiting_for_prod_approval(job: dict) -> bool:
+    environment = job.get("environment") or {}
+    return environment.get("name") == "support-prod" and job.get("status") == "waiting"
+
+
 def product_area(files: list[dict]) -> str:
     prefixes = {
         "bun2too-support-agent/": "support-agent",
@@ -188,11 +193,23 @@ def build_report(repo: str, token: str) -> dict:
     runs = action_runs(repo, token, since)
     qa_success_shas: dict[str, list[dt.datetime]] = defaultdict(list)
     failed_stage_totals: Counter[str] = Counter()
+    pending_prod_approvals = []
     for run in runs:
         day = utc_datetime(run["created_at"]).date()
-        if day not in days:
+        if day < since or day > today:
             continue
         jobs = run_jobs(repo, run["id"], token)
+        pending_prod_approvals.extend(
+            {
+                "run_id": run["id"],
+                "url": f"https://github.com/{urllib.parse.quote(repo, safe='/')}/actions/runs/{run['id']}",
+                "sha": run.get("head_sha", ""),
+            }
+            for job in jobs
+            if is_waiting_for_prod_approval(job)
+        )
+        if day not in days:
+            continue
         qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
         dev_jobs = [job for job in jobs if is_environment_deploy(job, "dev")]
         if dev_jobs:
@@ -227,6 +244,7 @@ def build_report(repo: str, token: str) -> dict:
             row["qa_unclassified"] += 1
 
     prs = collect_pr_context(repo, token, since)
+    prs = [pr for pr in prs if utc_datetime(pr["merged_at"]).date() <= report_date]
     area_counts = Counter()
     for pr in prs:
         merged_day = utc_datetime(pr["merged_at"]).date()
@@ -288,10 +306,11 @@ def build_report(repo: str, token: str) -> dict:
             "qa_completion_rate": round(total_passes / total_attempts, 4) if total_attempts else None,
             "failure_stages": dict(failed_stage_totals),
         },
-        "customer_outcomes": {"status": "not_measured", "reason": "No sanitized business outcome is emitted by the QA workflow."},
+        "pending_prod_approvals": pending_prod_approvals,
+        "delivery_definition": "QA green, as approved by the owner",
         "limitations": [
             "QA gate pass means the deployment and intake script completed; the script currently accepts rejected as a terminal success.",
-            "A green QA gate is not a production release or proof of an accepted customer outcome.",
+            "The owner defines delivery as QA green; because rejected is terminal success, a green gate does not prove an accepted resolution or production release.",
             "PR-to-QA requires an exact merge SHA match; unmatched runs are not inferred.",
             "Historical days with no run are zero attempts only when GitHub metadata is available; API failures fail the report.",
             "No total token or model cost is reported because interactive agent usage is not fully instrumented.",
@@ -340,8 +359,11 @@ def page_storage(report: dict) -> str:
 <tr><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PR-to-QA median</th></tr>
 <tr><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_offline_completions']} / {today['retired_dev_offline_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{pr_to_qa}</td></tr>
 </tbody></table>
-<h2>Verified customer outcomes</h2>
-<p><strong>Not measured.</strong> The QA workflow does not emit a sanitized business outcome. A successful intake script may include a rejected terminal state, so this report does not infer accepted delivery from a green workflow.</p>
+<h2>Delivery definition</h2>
+<p><strong>Delivered = QA green</strong>, as approved by the owner. A green QA run means deployment, smoke check, and intake journey completed. The intake script treats <code>rejected</code> as terminal success, so the metric does not prove an accepted resolution; production release remains separately human-approved.</p>
+<h2>Awaiting production approval (current snapshot)</h2>
+<p>{len(report['pending_prod_approvals'])} QA-green run(s) currently waiting for a human approval in <code>support-prod</code>. This is reported separately and is not part of the delivered count.</p>
+<ul>{''.join(f'<li><a href="{html.escape(item["url"], quote=True)}">Run {item["run_id"]}</a> ({html.escape(item["sha"][:12])})</li>' for item in report['pending_prod_approvals']) or '<li>None</li>'}</ul>
 <h2>30-day trend (each bar is scaled within its row)</h2>
 <table><tbody><tr><th>QA gate passes</th><td><code>{pass_chart}</code></td></tr><tr><th>QA failures</th><td><code>{fail_chart}</code></td></tr></tbody></table>
 <h2>Daily history (UTC)</h2>
@@ -352,31 +374,51 @@ def page_storage(report: dict) -> str:
 <p><small>Window: {report['window_start_utc']} through {report['window_end_utc']} UTC. No customer data, prompts, model responses, logs, or artifact contents were read.</small></p>"""
 
 
-def confluence_request(method: str, path: str, body: dict | None, email: str, token: str) -> dict:
-    auth = base64.b64encode(f"{email}:{token}".encode()).decode()
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(
-        f"{CONFLUENCE}{path}",
-        data=data,
-        method=method,
-        headers={
-            "Accept": "application/json",
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/json",
-        },
-    )
+def atlassian_request(url: str, method: str, body: dict | bytes | None, token: str, content_type: str) -> dict | list:
+    data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
+    headers = {"Accept": "application/json", "Content-Type": content_type}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return json.load(response) if response.status != 204 else {}
     except urllib.error.HTTPError as error:
-        raise ApiError(f"Confluence {method}", error.code) from None
+        raise ApiError(f"Atlassian {method}", error.code) from None
     except (urllib.error.URLError, TimeoutError):
-        raise ApiError(f"Confluence {method}", 0) from None
+        raise ApiError(f"Atlassian {method}", 0) from None
 
 
-def publish_page(title: str, storage: str, email: str, token: str) -> str:
+def confluence_context(base_url: str, cloud_id: str, client_id: str, client_secret: str) -> tuple[str, str]:
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme != "https" or parsed.hostname != "bun2too.atlassian.net" or parsed.path not in ("", "/"):
+        raise ApiError("Confluence base URL validation", 0)
+    if not re.fullmatch(r"[A-Fa-f0-9-]{36}", cloud_id):
+        raise ApiError("Confluence Cloud ID validation", 0)
+    form = urllib.parse.urlencode(
+        {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
+    ).encode()
+    credentials = atlassian_request(
+        f"{ATLASSIAN_AUTH}/oauth/token",
+        "POST",
+        form,
+        "",
+        "application/x-www-form-urlencoded",
+    )
+    access_token = credentials.get("access_token") if isinstance(credentials, dict) else None
+    if not access_token:
+        raise ApiError("Atlassian OAuth token request", 0)
+    return f"{ATLASSIAN_API}/ex/confluence/{urllib.parse.quote(cloud_id, safe='')}", access_token
+
+
+def confluence_request(method: str, path: str, body: dict | None, api_base: str, token: str) -> dict:
+    response = atlassian_request(f"{api_base}{path}", method, body, token, "application/json")
+    return response if isinstance(response, dict) else {}
+
+
+def publish_page(title: str, storage: str, api_base: str, token: str) -> str:
     query = urllib.parse.urlencode({"space-id": SPACE_ID, "title": title, "status": "current", "limit": 100})
-    existing = confluence_request("GET", f"/wiki/api/v2/pages?{query}", None, email, token)
+    existing = confluence_request("GET", f"/wiki/api/v2/pages?{query}", None, api_base, token)
     titled_pages = [page for page in existing.get("results", []) if page.get("title") == title]
     pages = [page for page in titled_pages if str(page.get("parentId")) == PARENT_ID]
     if titled_pages and not pages:
@@ -394,7 +436,7 @@ def publish_page(title: str, storage: str, email: str, token: str) -> str:
             "body": {"representation": "storage", "value": storage},
             "version": {"number": version + 1, "message": "Refresh daily delivery metrics"},
         }
-        updated = confluence_request("PUT", f"/wiki/api/v2/pages/{page['id']}", payload, email, token)
+        updated = confluence_request("PUT", f"/wiki/api/v2/pages/{page['id']}", payload, api_base, token)
         return updated.get("_links", {}).get("webui", "page updated")
     payload = {
         "spaceId": SPACE_ID,
@@ -403,7 +445,7 @@ def publish_page(title: str, storage: str, email: str, token: str) -> str:
         "title": title,
         "body": {"representation": "storage", "value": storage},
     }
-    created = confluence_request("POST", "/wiki/api/v2/pages", payload, email, token)
+    created = confluence_request("POST", "/wiki/api/v2/pages", payload, api_base, token)
     return created.get("_links", {}).get("webui", "page created")
 
 
@@ -481,24 +523,27 @@ def write_artifacts(report: dict) -> None:
 def main() -> int:
     repo = os.environ.get("GITHUB_REPOSITORY", "Bun2too/bun2too")
     token = os.environ.get("GITHUB_TOKEN")
-    email = os.environ.get("ATLASSIAN_EMAIL")
-    atlassian_token = os.environ.get("ATLASSIAN_API_TOKEN")
+    confluence_url = os.environ.get("CONFLUENCE_BASE_URL", "")
+    cloud_id = os.environ.get("CONFLUENCE_CLOUD_ID", "")
+    client_id = os.environ.get("CLAUDE_ATLASSIAN_CLIENT_ID", "")
+    client_secret = os.environ.get("CLAUDE_ATLASSIAN_CLIENT_SECRET", "")
     if not token:
         print("Missing GITHUB_TOKEN", file=sys.stderr)
         return 2
     try:
         report = build_report(repo, token)
         write_artifacts(report)
-        if not email or not atlassian_token:
+        if not confluence_url or not cloud_id or not client_id or not client_secret:
             raise ApiError("Confluence credentials unavailable", 0)
+        api_base, access_token = confluence_context(confluence_url, cloud_id, client_id, client_secret)
         design_path = Path("docs/agents/daily-agent-delivery-metrics.md")
         design_storage = markdown_to_storage(design_path.read_text(encoding="utf-8"))
-        design_page = publish_page("Daily agent delivery and quality metrics", design_storage, email, atlassian_token)
+        design_page = publish_page("Daily agent delivery and quality metrics", design_storage, api_base, access_token)
         report_page = publish_page(
             f"Daily agent delivery and quality — {report['report_date_utc']} UTC",
             page_storage(report),
-            email,
-            atlassian_token,
+            api_base,
+            access_token,
         )
     except ApiError as error:
         print(str(error), file=sys.stderr)
