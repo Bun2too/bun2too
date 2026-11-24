@@ -17,6 +17,7 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       crew: ${{ steps.filter.outputs.crew }}
       website: ${{ steps.filter.outputs.website }}
+      agent_ops: ${{ steps.filter.outputs.agent_ops }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
@@ -27,6 +28,7 @@ jobs:
             infra: ['bun2too-support-agent/infra/terraform/**']
             crew: ['bun2too-crew-team/**']
             website: ['bun2too-website/**']
+            agent_ops: ['scripts/metrics/**', 'docs/agents/daily-agent-delivery-metrics.md', 'AGENTS.md', '.github/workflows/daily-agent-productivity.yml']
 
   support-agent:
     needs: changes
@@ -121,6 +123,18 @@ jobs:
           npx -y c8@10.1.3 --all --include='src/**' --exclude='src/**/*.d.ts'
           --reporter=text-summary --check-coverage --lines 65 npm test
 
+  agent-ops:
+    needs: changes
+    if: needs.changes.outputs.agent_ops == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Check the daily metrics reporter syntax
+        run: python3 -m py_compile scripts/metrics/daily_productivity.py
+
   secrets:
     runs-on: ubuntu-latest
     permissions:
@@ -138,7 +152,7 @@ jobs:
   ci:
     # The single required status check for branch protection.
     if: always()
-    needs: [support-agent, support-infra, crew-team, website, secrets]
+    needs: [support-agent, support-infra, crew-team, website, agent-ops, secrets]
     runs-on: ubuntu-latest
     steps:
       - run: |
