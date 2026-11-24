@@ -247,6 +247,7 @@ def empty_day(day: dt.date) -> dict:
         "workflow_runs": 0,
         "run_classes": {},
         "failed_verdict_prs": 0,
+        "qa_completion_rate": None,
         "retired_dev_offline_attempts": 0,
         "retired_dev_offline_completions": 0,
         "failure_stages": {},
