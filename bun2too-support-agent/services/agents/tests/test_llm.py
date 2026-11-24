@@ -61,6 +61,7 @@ def test_with_gateway_settings_routes_through_cloudflare_ai_gateway() -> None:
     assert request.headers["cf-aig-authorization"] == "Bearer gateway-token-secret"
     assert request.headers["cf-aig-collect-log-payload"] == "false"
     assert request.headers["cf-aig-skip-cache"] == "true"
+    assert request.headers["cf-aig-byok-alias"] == "claude"
     assert request.headers["authorization"] == "Bearer provider-key-secret"
     assert "x-api-key" not in request.headers
 
