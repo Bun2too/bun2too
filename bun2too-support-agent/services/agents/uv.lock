@@ -927,6 +927,13 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/11/4da3faa7fd20c487c4770f14aa2b4247871e787ad305c2ba528fcf0f2bcc/langsmith-0.14.17-py3-none-any.whl", hash = "sha256:0aa2c79936c93c7cea9c55656f05e21cc5da715fecbdbda439d084adc08429be", size = 940828, upload-time = "2026-11-02T00:58:43.727Z" },
 ]
 
+[package.optional-dependencies]
+otel = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+]
+
 [[package]]
 name = "librt"
 version = "0.16.0"
@@ -1669,6 +1676,7 @@ dependencies = [
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
     { name = "langgraph" },
+    { name = "langsmith", extra = ["otel"] },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation-fastapi" },
@@ -1699,6 +1707,7 @@ requires-dist = [
     { name = "langchain-anthropic", specifier = ">=1.0" },
     { name = "langchain-core", specifier = ">=1.0" },
     { name = "langgraph", specifier = ">=1.0" },
+    { name = "langsmith", extras = ["otel"], specifier = ">=0.14.9" },
     { name = "opentelemetry-api", specifier = ">=1.37" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.37" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.58b0" },

@@ -57,6 +57,15 @@ curl -sSN "$RELAY_GATEWAY/v1/cases/<id>/events" -H "x-api-key: $RELAY_TENANT_KEY
 
 A healthy run moves through `received → triaged → ticketed → in_progress → <settled>`. The `ticketed` event's `data.tickets` lists both keys. If `data.pending` is not empty, one ticket system failed; see [Troubleshooting](#troubleshooting).
 
+### Find the case's trace (qa)
+
+Every case is one trace in LangSmith ([ADR 0009](adr/0009-langsmith-tracing.md)): the agents' HTTP request, `relay.case.run`, the LangGraph run, each node, each model call and each outgoing HTTP call. Open the agent `bun2too-support-agent`, environment **staging**, then:
+
+- search by the `traceId` from the intake response (also written in both tickets as `Trace:`), or
+- filter by metadata `thread_id = <caseId>` to see the intake and every reply of that case together.
+
+A failed run shows as an errored trace, with the exception on the failing span. Inputs and outputs are hidden unless the environment allows them, so a trace shows structure, timing, model, tokens and errors, not customer text. If a qa case has no trace a minute after it settled, check the trace settings in [runtime secrets](runtime-secrets.md#trace-settings-github-environment-variables-not-secrets).
+
 ## Level 2: confirm the tickets (qa)
 
 Every Relay ticket is keyed by the case: the **correlation key** is `relay-<tenant>-<caseId>`, for example `relay-bun2too-3f2a…`. Writes are idempotent on that key, so a retry never duplicates a ticket.

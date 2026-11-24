@@ -26,7 +26,9 @@ def main() -> None:
     setup_telemetry("relay-agents")
     HTTPXClientInstrumentor().instrument()
     app = create_app(build_service(), offline=os.environ.get("RELAY_OFFLINE") == "1")
-    FastAPIInstrumentor.instrument_app(app, excluded_urls="healthz")
+    FastAPIInstrumentor.instrument_app(
+        app, excluded_urls="healthz", exclude_spans=["receive", "send"]
+    )
     port = int(os.environ.get("RELAY_AGENTS_PORT", "8000"))
     print(f"relay-agents listening on :{port}", flush=True)
     uvicorn.run(app, host=bind_host(), port=port, log_level="warning")
