@@ -94,6 +94,13 @@ def run_jobs(repo: str, run_id: int, token: str) -> list[dict]:
     return payload.get("jobs", []) if isinstance(payload, dict) else []
 
 
+def pending_deployments(repo: str, run_id: int, token: str) -> list[dict]:
+    payload = github_get(f"repos/{repo}/actions/runs/{run_id}/pending_deployments", token)
+    if not isinstance(payload, list):
+        raise ApiError("GitHub pending deployments response", 0)
+    return payload
+
+
 def is_environment_deploy(job: dict, environment: str) -> bool:
     name = job.get("name", "").lower()
     return "deploy" in name and re.search(rf"(^|[^a-z]){re.escape(environment)}([^a-z]|$)", name) is not None
@@ -113,9 +120,9 @@ def summarize_qa_job(job: dict) -> dict:
     }
 
 
-def is_waiting_for_prod_approval(job: dict) -> bool:
-    environment = job.get("environment") or {}
-    return environment.get("name") == "support-prod" and job.get("status") == "waiting"
+def is_pending_prod_approval(deployment: dict) -> bool:
+    environment = deployment.get("environment") or {}
+    return environment.get("name") == "support-prod"
 
 
 def product_area(files: list[dict]) -> str:
@@ -199,18 +206,22 @@ def build_report(repo: str, token: str) -> dict:
         if day < since or day > today:
             continue
         jobs = run_jobs(repo, run["id"], token)
-        pending_prod_approvals.extend(
-            {
-                "run_id": run["id"],
-                "url": f"https://github.com/{urllib.parse.quote(repo, safe='/')}/actions/runs/{run['id']}",
-                "sha": run.get("head_sha", ""),
-            }
-            for job in jobs
-            if is_waiting_for_prod_approval(job)
-        )
+        qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
+        if qa_jobs:
+            qa_status = summarize_qa_job(qa_jobs[0])
+            qa_is_green = qa_status["conclusion"] == "success" and qa_status["intake_conclusion"] == "success"
+            if qa_is_green and run.get("status") == "waiting":
+                pending_prod_approvals.extend(
+                    {
+                        "run_id": run["id"],
+                        "url": f"https://github.com/{urllib.parse.quote(repo, safe='/')}/actions/runs/{run['id']}",
+                        "sha": run.get("head_sha", ""),
+                    }
+                    for deployment in pending_deployments(repo, run["id"], token)
+                    if is_pending_prod_approval(deployment)
+                )
         if day not in days:
             continue
-        qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
         dev_jobs = [job for job in jobs if is_environment_deploy(job, "dev")]
         if dev_jobs:
             dev_summary = summarize_qa_job(dev_jobs[0])
