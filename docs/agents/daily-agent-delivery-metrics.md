@@ -8,7 +8,7 @@ The report measures whether changes produce a working, verified product. Pull re
 
 ## Initial scope
 
-The first version reads GitHub metadata for the Relay `deploy-support` workflow. It uses UTC days and shows a rolling 30-day history. A later, separately reviewed change can add crew-team and website mirrors after their release workflows expose comparable deployment records. Production releases stay separate because they require human environment approval.
+The first version reads GitHub metadata for the Relay `deploy-support` workflow. It uses UTC days and shows a rolling 30-day history. Legacy `dev` runs appear in a separate retired-dev series and never count as current QA delivery. A later, separately reviewed change can add crew-team and website mirrors after their release workflows expose comparable deployment records. Production releases stay separate because they require human environment approval.
 
 The collector does not read workflow logs, artifacts, PR bodies, review text, prompts, customer inquiries, model responses, or secrets. It reads workflow/run/job/step conclusions, timestamps, commit SHAs, PR state and file paths, and formal review states only.
 
@@ -20,6 +20,7 @@ The collector does not read workflow logs, artifacts, PR bodies, review text, pr
 | Verified customer outcomes | Count only when a future workflow publishes a sanitized structured outcome (`resolved`, `escalated`, or `awaiting_customer`) to the job summary or an output. | Currently **not instrumented**. Report as `not measured`, never infer it from a green job or count it as zero. |
 | QA attempt failures | QA deploy jobs that conclude failure, grouped by the first failed step name. | Separates verification, infrastructure, deployment, smoke, and intake failures without reading log content. Cancelled runs are shown separately and excluded from failure rate. |
 | QA gate completion rate | QA gate passes / non-cancelled QA attempts. | A process measure, not a product quality score. Show numerator and denominator. |
+| Retired-dev gate passes | Historical `dev / deploy` runs where the deployment job and intake step both concluded `success`. | Context only. Dev is no longer a deploy target and these runs never count toward current QA delivery. |
 | Merged PRs by area and author class | Merged PRs grouped by changed path prefix and GitHub's `Bot`/`User` author type. | Context for delivery; never a target or ranking. Root-only PRs are their own group. No individual agent ranking. |
 | PRs with requested changes | Merged PRs with at least one formal `CHANGES_REQUESTED` review before merge. | Rework context. It does not classify review as waste or infer coding effort. |
 | Open-to-QA time | Median time from merged PR creation to its first matching successful QA gate run, when the deployed SHA exactly matches its merge SHA. | Label this **PR-to-QA time**, not coding time. Missing SHA matches remain unlinked rather than guessed. |
@@ -29,7 +30,7 @@ Use the gate-pass count and failure stages as the primary view. Show merged PRs 
 
 ## Historical view
 
-Each daily page contains yesterday's UTC summary and a 30-day table with gate passes, non-cancelled QA attempts, failures, merged PRs, bot-authored PRs, requested-change PRs, and PR-to-QA time. Small Unicode bars beside gate-pass and failure counts make direction visible in Confluence without client-side macros. The daily report is recomputed from GitHub's retained metadata; it does not write a data branch or add `contents: write` to a workflow. The workflow also uploads a JSON/CSV artifact for 90 days. GitHub's API cannot distinguish a day with no runs from run metadata manually deleted before its normal retention period, so the report treats these as zero and states that limitation.
+Each daily page contains yesterday's UTC summary and a 30-day table with QA gate passes, non-cancelled QA attempts, failures, retired-dev passes, merged PRs, bot-authored PRs, requested-change PRs, and PR-to-QA time. Small Unicode bars beside gate-pass and failure counts make direction visible in Confluence without client-side macros. The daily report is recomputed from GitHub's retained metadata; it does not write a data branch or add `contents: write` to a workflow. The workflow also uploads a JSON/CSV artifact for 90 days. GitHub's API cannot distinguish a day with no runs from run metadata manually deleted before its normal retention period, so the report treats these as zero and states that limitation.
 
 ### Example page layout
 
