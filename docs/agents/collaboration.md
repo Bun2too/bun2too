@@ -117,7 +117,11 @@ Every PR that changes product code gets a quality pass from Antigravity before i
   - Antigravity posts it on the PR as `bun2too-antigravity[bot]` and tells the author with `agent-tell.sh`. If GitHub fails, it sends the verdict through `agent-tell.sh`, and the author posts it as a quoted relay.
 - **On FAIL** the author fixes or disputes each blocking finding, then asks again for the new head. Disagreements go on the PR, and the owner decides.
 - **Then cross-review** as usual. The cross-reviewer checks that the quality pass names the current head, or that the author said why it was skipped.
-- **No waiting game.** If Antigravity is not running in herdr, or has not answered within two hours, the author writes on the PR: `Quality pass skipped: <reason>`. Then the author tells the owner and continues. A skipped pass is visible, never silent.
+- **No waiting game.** The three agents run on separate quotas, so one can be out while the others work. When Antigravity is out of quota, not running in herdr, or has not answered within two hours, nobody waits for it. Do not wait for a quota reset.
+  - The author writes on the PR: `Quality pass skipped: <reason>`. For example: `Quality pass skipped: Antigravity quota exhausted, resets in 159h`.
+  - The author tells the owner, and continues.
+  - Claude and Codex are then the reviewers. A cross-review PASS at the exact head and green `ci` decide the outcome, as in AGENTS.md rule 9. The skip is not a FAIL, and the cross-reviewer does not hold its verdict for it.
+  - A skipped pass is visible, never silent. If Antigravity comes back before the merge, the author may still ask for a pass.
 - **Changes by Antigravity.** Antigravity pushes to another agent's PR branch only when that PR's author agrees, taking turns as in [One PR per feature](#one-pr-per-feature). An optimisation of its own is its own PR, reviewed by the owner of the area.
 
 ## Architecture Board of Review (ABR)
@@ -136,7 +140,7 @@ The ABR is Claude, Codex, Antigravity and the owner. It settles the solution des
   - Antigravity: performance, algorithms, security and testability.
 
 - **Decision.** The owner reads the positions and decides, in the PR or in chat. The proposer then records it in the ADR: status `accepted` (or `rejected`), with `Decided by: ABR, <date>, the owner`. It merges like any PR. Implementation starts only from an `accepted` ADR. A `rejected` one is kept as the record of what was decided against, and nothing is built from it. A later change to an accepted design goes back to the ABR.
-- **No waiting game.** The proposer chases missing reviews with `agent-tell.sh`. A review still missing after a day is noted in the PR and raised with the owner, who may decide without it.
+- **No waiting game.** The proposer chases missing reviews with `agent-tell.sh`. A review still missing after a day is noted in the PR and raised with the owner, who may decide without it. An agent that is out of quota is not waited for: the proposer notes it on the PR straight away, and the remaining reviews go to the owner.
 
 ## Never go silent
 
