@@ -8,6 +8,7 @@ from relay_agents.graph import Deps, GraphState, build_graph
 from relay_agents.telemetry import (
     ATTR_CASE_ID,
     ATTR_TENANT,
+    ATTR_TENANT_METADATA,
     ATTR_THREAD_ID,
     current_trace_id,
     tracer,
@@ -52,10 +53,11 @@ class CaseService:
             span.set_attribute(ATTR_TENANT, tenant)
             span.set_attribute(ATTR_CASE_ID, case_id)
             span.set_attribute(ATTR_THREAD_ID, case_id)
+            span.set_attribute(ATTR_TENANT_METADATA, tenant)
             state: GraphState = {"case_id": case_id, "tenant": tenant, "resume": resume}
             # LangSmith copies no metadata from a parent run to its children, so every
             # LangChain run in the graph gets the thread from the config it inherits.
-            config = {"metadata": {"thread_id": case_id, "relay_tenant": tenant}}
+            config = {"metadata": {"thread_id": case_id, "tenant": tenant}}
             try:
                 await self._graph.ainvoke(state, config=config)
             except Exception as error:

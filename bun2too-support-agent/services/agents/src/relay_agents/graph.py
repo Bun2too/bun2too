@@ -246,9 +246,9 @@ def _after_assess(state: GraphState) -> str:
     return state["decision"].outcome
 
 
-def build_graph(deps: Deps, nodes: Mapping[str, Any] = NODES) -> Any:
+def build_graph(deps: Deps) -> Any:
     graph = StateGraph(GraphState)
-    for name, fn in nodes.items():
+    for name, fn in NODES.items():
         graph.add_node(name, partial(fn, deps=deps))
     graph.add_conditional_edges(START, _start, ["classify", "run_specialist"])
     graph.add_edge("classify", "open_tickets")
