@@ -70,7 +70,25 @@ class MetricsTests(unittest.TestCase):
         )
         self.assertEqual(
             metrics.classify_run({}, [job("dev / deploy", "success", [{"name": "Offline intake journey", "conclusion": "success"}])]),
-            "retired_dev_offline",
+            "retired_dev_offline_passed",
+        )
+        self.assertEqual(
+            metrics.classify_run({}, [
+                job("dev / deploy", "success", [{"name": "Offline intake journey", "conclusion": "success"}]),
+                qa_job("failure", "skipped", "Intake journey"),
+            ]),
+            "qa_failed:Intake journey",
+        )
+        self.assertEqual(
+            metrics.classify_run({}, [job("dev / deploy", "failure", [{"name": "Offline intake journey", "conclusion": "failure"}])]),
+            "retired_dev_offline_failed",
+        )
+        self.assertEqual(
+            metrics.classify_run({}, [
+                qa_job("skipped"),
+                job("dev / deploy", "success", [{"name": "Offline intake journey", "conclusion": "success"}]),
+            ]),
+            "retired_dev_offline_passed",
         )
         self.assertEqual(metrics.classify_run({"conclusion": "cancelled"}, []), "cancelled")
 
@@ -96,6 +114,8 @@ class MetricsTests(unittest.TestCase):
             {"id": 5, "created_at": timestamp, "updated_at": timestamp, "head_sha": "sha-empty", "status": "completed", "conclusion": "failure"},
             {"id": 6, "created_at": timestamp, "updated_at": timestamp, "head_sha": "sha-dev", "status": "completed"},
             {"id": 7, "created_at": timestamp, "updated_at": timestamp, "head_sha": "sha-cancel", "status": "completed", "conclusion": "cancelled"},
+            {"id": 8, "created_at": timestamp, "updated_at": timestamp, "head_sha": "sha-mixed", "status": "completed"},
+            {"id": 9, "created_at": timestamp, "updated_at": timestamp, "head_sha": "sha-dev-failed", "status": "completed"},
         ]
         action_runs.return_value = runs
         jobs_by_id = {
@@ -106,6 +126,8 @@ class MetricsTests(unittest.TestCase):
             5: [],
             6: [job("dev / deploy", "success", [{"name": "Offline intake journey", "conclusion": "success"}])],
             7: [],
+            8: [job("dev / deploy", "success", [{"name": "Offline intake journey", "conclusion": "success"}]), qa_job("failure", "skipped", "Intake journey")],
+            9: [job("dev / deploy", "failure", [{"name": "Offline intake journey", "conclusion": "failure"}])],
         }
         run_jobs.side_effect = lambda repo, run_id, token: jobs_by_id[run_id]
         pending_deployments.return_value = [{"environment": {"name": "support-prod"}}]
@@ -125,16 +147,22 @@ class MetricsTests(unittest.TestCase):
             report = metrics.build_report("Bun2too/bun2too", "token")
 
         day = report["today"]
-        self.assertEqual(day["workflow_runs"], 7)
+        self.assertEqual(day["workflow_runs"], 9)
+        self.assertEqual(sum(day["run_classes"].values()), day["workflow_runs"])
+        self.assertEqual(sum(report["totals"]["run_classes"].values()), report["totals"]["workflow_runs"])
         self.assertEqual(day["qa_gate_passes"], 2)
-        self.assertEqual(day["qa_failures"], 1)
-        self.assertEqual(day["retired_dev_offline_attempts"], 1)
+        self.assertEqual(day["qa_failures"], 2)
+        self.assertEqual(day["retired_dev_offline_attempts"], 3)
+        self.assertEqual(day["retired_dev_offline_failures"], 1)
         self.assertEqual(day["run_classes"]["workflow_invalid"], 1)
         self.assertEqual(day["run_classes"]["verify_failed"], 1)
+        self.assertEqual(day["run_classes"]["qa_failed:Intake journey"], 2)
+        self.assertEqual(day["run_classes"]["retired_dev_offline_failed"], 1)
         self.assertEqual(day["failed_verdict_prs"], 1)
         self.assertEqual(day["pr_to_qa_minutes"], 120.0)
         self.assertEqual([entry["run_id"] for entry in report["pending_prod_approvals"]], [1])
         self.assertEqual(pending_deployments.call_count, 1)
+        ElementTree.fromstring(f"<root>{metrics.page_storage(report)}</root>")
 
     @patch.object(metrics, "confluence_request")
     def test_resolves_numeric_space_id_from_key(self, request):
@@ -154,7 +182,7 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics.publish_page("Report", "<p>y</p>", "api", "token", "12345"), "/updated")
         update_body = request.call_args.args[2]
         self.assertEqual(update_body["version"]["number"], 3)
-        self.assertEqual(update_body["spaceId"], 12345)
+        self.assertEqual(update_body["spaceId"], "12345")
 
         request.reset_mock()
         request.side_effect = None

@@ -215,9 +215,7 @@ def classify_run(run: dict, jobs: list[dict]) -> str:
         return "cancelled" if run.get("conclusion") == "cancelled" else "in_progress_no_jobs"
     qa_jobs = [job for job in jobs if is_environment_deploy(job, "qa")]
     dev_jobs = [job for job in jobs if is_environment_deploy(job, "dev")]
-    if dev_jobs and summarize_qa_job(dev_jobs[0])["intake_is_offline"]:
-        return "retired_dev_offline"
-    if qa_jobs:
+    if qa_jobs and qa_jobs[0].get("conclusion") != "skipped":
         qa = summarize_qa_job(qa_jobs[0])
         if qa["conclusion"] == "success" and qa["intake_conclusion"] == "success":
             return "qa_green"
@@ -226,6 +224,14 @@ def classify_run(run: dict, jobs: list[dict]) -> str:
         if qa["conclusion"] == "failure" or qa["intake_conclusion"] != "success":
             return f"qa_failed:{qa['failure_stage'] or 'unknown'}"
         return "qa_unclassified"
+    if dev_jobs:
+        dev = summarize_qa_job(dev_jobs[0])
+        if dev["intake_is_offline"]:
+            if dev["conclusion"] == "success" and dev["intake_conclusion"] == "success":
+                return "retired_dev_offline_passed"
+            if dev["conclusion"] == "cancelled":
+                return "cancelled"
+            return "retired_dev_offline_failed"
     verify = next((job for job in jobs if job.get("name", "").lower().startswith("verify")), None)
     if verify and verify.get("conclusion") == "failure":
         return "verify_failed"
@@ -250,6 +256,7 @@ def empty_day(day: dt.date) -> dict:
         "qa_completion_rate": None,
         "retired_dev_offline_attempts": 0,
         "retired_dev_offline_completions": 0,
+        "retired_dev_offline_failures": 0,
         "failure_stages": {},
         "merged_prs": 0,
         "requested_change_prs": 0,
@@ -303,6 +310,8 @@ def build_report(repo: str, token: str) -> dict:
                 days[day]["retired_dev_offline_attempts"] += 1
                 if dev_summary["conclusion"] == "success" and dev_summary["intake_conclusion"] == "success":
                     days[day]["retired_dev_offline_completions"] += 1
+                else:
+                    days[day]["retired_dev_offline_failures"] += 1
         # A skipped QA job (for example, a manual dev-only run) is not an attempt.
         if not qa_jobs:
             continue
@@ -384,6 +393,7 @@ def build_report(repo: str, token: str) -> dict:
             "qa_cancelled": sum(row["qa_cancelled"] for row in history),
             "retired_dev_offline_attempts": sum(row["retired_dev_offline_attempts"] for row in history),
             "retired_dev_offline_completions": sum(row["retired_dev_offline_completions"] for row in history),
+            "retired_dev_offline_failures": sum(row["retired_dev_offline_failures"] for row in history),
             "merged_prs": len(prs),
             "workflow_runs": sum(row["workflow_runs"] for row in history),
             "run_classes": dict(sum((Counter(row["run_classes"]) for row in history), Counter())),
@@ -420,7 +430,6 @@ def page_storage(report: dict) -> str:
     history = report["history"]
     max_pass = max((row["qa_gate_passes"] for row in history), default=0)
     max_fail = max((row["qa_failures"] for row in history), default=0)
-    title = f"Daily agent delivery and quality — {report['report_date_utc']} UTC"
     rows = []
     for row in history:
         classes = ", ".join(f"{name}: {count}" for name, count in sorted(row["run_classes"].items())) or "—"
@@ -429,7 +438,7 @@ def page_storage(report: dict) -> str:
             f"<td>{row['date']}</td><td>{row['workflow_runs']}</td><td>{html.escape(classes)}</td><td>{row['merged_prs']}</td>"
             f"<td>{row['qa_gate_passes']}</td><td>{row['qa_attempts']}</td>"
             f"<td>{row['qa_failures']}</td><td>{row['qa_cancelled']}</td>"
-            f"<td>{row['retired_dev_offline_completions']}/{row['retired_dev_offline_attempts']}</td><td>{row['merged_bot_prs']}</td>"
+            f"<td>{row['retired_dev_offline_completions']}/{row['retired_dev_offline_failures']}/{row['retired_dev_offline_attempts']}</td><td>{row['merged_bot_prs']}</td>"
             f"<td>{row['requested_change_prs']}</td><td>{row['failed_verdict_prs']}</td>"
             f"<td>{row['pr_to_qa_minutes'] if row['pr_to_qa_minutes'] is not None else '—'}</td>"
             "</tr>"
@@ -447,8 +456,8 @@ def page_storage(report: dict) -> str:
 <p>Read-only report from GitHub workflow and pull-request metadata. The report emphasizes verified release gates; merged PR count is context only.</p>
 <h2>Yesterday (UTC)</h2>
 <table><tbody>
-<tr><th>Workflow runs</th><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PRs with agent FAIL verdicts</th><th>PR-to-QA median</th></tr>
-<tr><td>{today['workflow_runs']}</td><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_offline_completions']} / {today['retired_dev_offline_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{today['failed_verdict_prs']}</td><td>{pr_to_qa}</td></tr>
+<tr><th>Workflow runs</th><th>QA gate passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks pass / fail / attempt</th><th>Completion rate</th><th>Merged PRs</th><th>Bot-authored PRs</th><th>PRs with requested changes</th><th>PRs with agent FAIL verdicts</th><th>PR-to-QA median</th></tr>
+<tr><td>{today['workflow_runs']}</td><td>{today['qa_gate_passes']}</td><td>{today['qa_attempts']}</td><td>{today['qa_failures']}</td><td>{today['qa_cancelled']}</td><td>{today['retired_dev_offline_completions']} / {today['retired_dev_offline_failures']} / {today['retired_dev_offline_attempts']}</td><td>{completion_rate}</td><td>{today['merged_prs']}</td><td>{today['merged_bot_prs']}</td><td>{today['requested_change_prs']}</td><td>{today['failed_verdict_prs']}</td><td>{pr_to_qa}</td></tr>
 </tbody></table>
 <h2>Delivery definition</h2>
 <p><strong>Delivered = QA green</strong>, as approved by the owner. A green QA run means deployment, smoke check, and intake journey completed. The intake script treats <code>rejected</code> as terminal success, so the metric does not prove an accepted resolution; production release remains separately human-approved.</p>
@@ -458,7 +467,7 @@ def page_storage(report: dict) -> str:
 <h2>30-day trend (each bar is scaled within its row)</h2>
 <table><tbody><tr><th>QA gate passes</th><td><code>{pass_chart}</code></td></tr><tr><th>QA failures</th><td><code>{fail_chart}</code></td></tr></tbody></table>
 <h2>Daily history (UTC)</h2>
-<table><tbody><tr><th>Date</th><th>Workflow runs</th><th>Run classifications</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks complete / attempts</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>Agent FAIL verdict PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
+<table><tbody><tr><th>Date</th><th>Workflow runs</th><th>Run classifications</th><th>Merged PRs</th><th>QA passes</th><th>QA attempts</th><th>QA failures</th><th>Cancelled</th><th>Retired dev offline checks pass / fail / attempt</th><th>Bot-authored PRs</th><th>Requested-change PRs</th><th>Agent FAIL verdict PRs</th><th>PR-to-QA median (min)</th></tr>{''.join(rows)}</tbody></table>
 <h2>Current-day workflow run classifications</h2><ul>{run_classes}</ul>
 <h2>Current-day QA failure stages</h2><ul>{failures}</ul>
 <h2>Merged PRs by product area (30 days)</h2><table><tbody><tr><th>Area</th><th>Count</th></tr>{product_rows or '<tr><td>None</td><td>0</td></tr>'}</tbody></table>
@@ -533,14 +542,14 @@ def publish_page(title: str, storage: str, api_base: str, token: str, space_id: 
             "id": page["id"],
             "status": "current",
             "title": title,
-            "spaceId": int(space_id),
+            "spaceId": space_id,
             "body": {"representation": "storage", "value": storage},
             "version": {"number": version + 1, "message": "Refresh daily delivery metrics"},
         }
         updated = confluence_request("PUT", f"/wiki/api/v2/pages/{page['id']}", payload, api_base, token)
         return updated.get("_links", {}).get("webui", "page updated")
     payload = {
-        "spaceId": int(space_id),
+        "spaceId": space_id,
         "parentId": PARENT_ID,
         "status": "current",
         "title": title,
@@ -613,7 +622,7 @@ def markdown_to_storage(markdown: str) -> str:
 def write_artifacts(report: dict) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    fields = ["date", "workflow_runs", "run_classes", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "retired_dev_offline_completions", "retired_dev_offline_attempts", "requested_change_prs", "failed_verdict_prs", "pr_to_qa_minutes"]
+    fields = ["date", "workflow_runs", "run_classes", "merged_prs", "merged_bot_prs", "merged_human_prs", "qa_gate_passes", "qa_attempts", "qa_failures", "qa_cancelled", "retired_dev_offline_completions", "retired_dev_offline_failures", "retired_dev_offline_attempts", "requested_change_prs", "failed_verdict_prs", "pr_to_qa_minutes"]
     with (OUTPUT_DIR / "history.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
