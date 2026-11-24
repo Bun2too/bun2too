@@ -11,6 +11,7 @@ ATTR_TENANT: Final = "relay.tenant"
 ATTR_CASE_ID: Final = "relay.case_id"
 # LangSmith groups runs that share a thread: one case, from intake through every reply.
 ATTR_THREAD_ID: Final = "langsmith.metadata.thread_id"
+ATTR_TENANT_METADATA: Final = "langsmith.metadata.tenant"
 ATTR_GEN_AI_SYSTEM: Final = "gen_ai.system"
 ATTR_GEN_AI_MODEL: Final = "gen_ai.request.model"
 ATTR_GEN_AI_INPUT_TOKENS: Final = "gen_ai.usage.input_tokens"

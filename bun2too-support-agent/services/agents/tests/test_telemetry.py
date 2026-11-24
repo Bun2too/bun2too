@@ -124,6 +124,7 @@ def test_a_case_is_one_trace_from_request_to_every_node(probe: dict[str, Any]) -
     run = next(s for s in in_trace if s["name"] == "relay.case.run")
     assert run["attributes"]["langsmith.metadata.thread_id"] == case_id
     assert run["attributes"]["relay.case_id"] == case_id
+    assert run["attributes"]["langsmith.metadata.tenant"] == "bun2too"
 
     by_id = {s["id"]: s for s in in_trace}
     graph = next(s for s in in_trace if s["name"] == "LangGraph")
@@ -134,6 +135,7 @@ def test_a_case_is_one_trace_from_request_to_every_node(probe: dict[str, Any]) -
     assert set(ran) <= set(nodes)
     for name in ran:
         assert nodes[name]["attributes"]["langsmith.metadata.thread_id"] == case_id
+        assert nodes[name]["attributes"]["langsmith.metadata.tenant"] == "bun2too"
         assert by_id[nodes[name]["parent"]] is graph
     assert sum(1 for s in in_trace if s["name"] == "classify") == 1
 
