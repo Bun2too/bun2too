@@ -42,6 +42,14 @@ jobs:
           TF_VAR_railway_api_token: ${{ secrets.RAILWAY_API_TOKEN }}
           TF_VAR_workspace_id: ${{ vars.RAILWAY_WORKSPACE_ID }}
           TF_VAR_otel_endpoint: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          # Trace settings (ADR 0009). The API key travels in SUPPORT_RUNTIME_SECRETS.
+          TF_VAR_langsmith: >-
+            {"LANGSMITH_ENDPOINT": "${{ vars.LANGSMITH_ENDPOINT }}",
+            "LANGSMITH_AGENT_ID": "${{ vars.LANGSMITH_AGENT_ID }}",
+            "LANGSMITH_AGENT_ENVIRONMENT": "${{ vars.LANGSMITH_AGENT_ENVIRONMENT }}",
+            "LANGSMITH_WORKSPACE_ID": "${{ vars.LANGSMITH_WORKSPACE_ID }}",
+            "LANGSMITH_HIDE_INPUTS": "${{ vars.LANGSMITH_HIDE_INPUTS }}",
+            "LANGSMITH_HIDE_OUTPUTS": "${{ vars.LANGSMITH_HIDE_OUTPUTS }}"}
           TF_VAR_runtime_secrets: ${{ secrets.SUPPORT_RUNTIME_SECRETS || '{}' }}
         run: |
           terraform init -input=false
