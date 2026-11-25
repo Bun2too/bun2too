@@ -155,7 +155,7 @@ jobs:
             echo
             echo "VERDICT: FAIL"
           } > factory/review.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: steps.ci.outputs.result == 'failed'
         with: { name: review, path: factory/review.md }
 
@@ -227,11 +227,11 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           printf 'agent step: %s. Cause: %s' "$OUTCOME" "${CAUSE:-not reported; see the run log}" > "$RUNNER_TEMP/out/cause.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with: { name: review, path: "${{ runner.temp }}/out/" }
       # For the trace job only, which scans it and then deletes it.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with: { name: trace-review, path: "${{ runner.temp }}/trace/", if-no-files-found: ignore, retention-days: 1 }
 
@@ -247,7 +247,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
       review_url: ${{ steps.verdict.outputs.url }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         if: needs.prepare.outputs.earlier == ''
         continue-on-error: true
         with: { name: review, path: in }
@@ -266,7 +266,7 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
       # The app token is minted only after the scan, so no earlier step can see it.
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
@@ -346,7 +346,7 @@ jobs:
     timeout-minutes: 10
     permissions: { contents: read, actions: read }
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
@@ -382,7 +382,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { ref: "${{ env.HEAD_SHA }}", sparse-checkout: .github, persist-credentials: false, path: scan }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         continue-on-error: true
         with: { pattern: trace-*, path: traces }
       # Rule 11, layer 4: a flagged transcript loses its content (prompts, replies, tool
@@ -411,7 +411,7 @@ jobs:
           python3 scan/.github/scripts/factory-trace.py "${content[@]}" --jobs out/jobs.jsonl --traces traces \
             --repo "$GH_REPO" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --pr "$PR" --head-sha "$HEAD_SHA" \
             --verdict "$VERDICT" --trace-url "$TRACE_URL" --out out/trace.otlp.json --summary "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with: { name: trace, path: out/trace.otlp.json, if-no-files-found: ignore, retention-days: 30 }
       - name: Delete the unscanned transcripts
         if: always()

@@ -18,14 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
           private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v5
         with: { fetch-depth: 0, token: "${{ steps.app.outputs.token }}" }
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
         with:
@@ -34,7 +34,7 @@ jobs:
             cache: pnpm,
             cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml,
           }
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen
       - run: git checkout -b agent/issue-${{ github.event.issue.number }}
       - uses: anthropics/claude-code-action@f431adaf77e0fecf918431e75a2b5b45b85af002 # v1.0.283

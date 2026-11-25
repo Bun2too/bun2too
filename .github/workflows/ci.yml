@@ -20,7 +20,7 @@ jobs:
       agent_ops: ${{ steps.filter.outputs.agent_ops }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -38,14 +38,14 @@ jobs:
     defaults: { run: { working-directory: bun2too-support-agent } }
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
         with:
           node-version-file: bun2too-support-agent/.nvmrc
           cache: pnpm
           cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: pnpm install --frozen-lockfile
       - run: uv sync --directory services/agents --frozen
       - run: pnpm check
@@ -68,7 +68,7 @@ jobs:
       { run: { working-directory: bun2too-support-agent/infra/terraform } }
     steps:
       - uses: actions/checkout@v5
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
       - run: terraform fmt -check -recursive
       - name: Validate and test the Railway module (mocked providers, no credentials)
         run: |
@@ -84,7 +84,7 @@ jobs:
     defaults: { run: { working-directory: bun2too-crew-team } }
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v5
         with: { node-version: "24" }
@@ -130,7 +130,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - name: Test and compile the daily metrics reporter
         run: |
@@ -145,7 +145,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

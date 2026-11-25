@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { ref: "${{ inputs.sha }}" }
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           {
             cli_config_credentials_token: "${{ secrets.TF_API_TOKEN }}",
