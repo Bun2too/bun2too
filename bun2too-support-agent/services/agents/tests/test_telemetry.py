@@ -46,6 +46,36 @@ def test_endpoint_and_workspace_are_configurable() -> None:
     assert headers["X-Tenant-Id"] == "ws-1"
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://api.smith.langchain.com",
+        "http://collector.example",
+        "ftp://api.smith.langchain.com",
+        "api.smith.langchain.com",
+        "https://",
+        "https://user:pass@api.smith.langchain.com",
+        "https://api.smith.langchain.com?x=1",
+        "https://api.smith.langchain.com#x",
+        "http://127.0.0.1.collector.example",
+    ],
+)
+def test_an_endpoint_that_could_leak_the_key_fails_loudly(endpoint: str) -> None:
+    """The key rides in a header, so it only goes to an HTTPS URL with nothing extra."""
+    with pytest.raises(ValueError, match="LANGSMITH_ENDPOINT") as raised:
+        langsmith_export({**LANGSMITH, "LANGSMITH_ENDPOINT": endpoint})
+    assert KEY not in str(raised.value)
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:4318", "localhost:4318", "[::1]:4318"])
+def test_plain_http_is_allowed_only_on_loopback(host: str) -> None:
+    endpoint, _ = langsmith_export({**LANGSMITH, "LANGSMITH_ENDPOINT": f"http://{host}"}) or (
+        "",
+        {},
+    )
+    assert endpoint == f"http://{host}/otel/v1/traces"
+
+
 @pytest.mark.parametrize("missing", sorted(LANGSMITH))
 def test_incomplete_settings_fail_loudly(missing: str) -> None:
     env = {k: v for k, v in LANGSMITH.items() if k != missing}
