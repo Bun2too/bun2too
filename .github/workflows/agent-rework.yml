@@ -133,7 +133,7 @@ jobs:
         with: { provider: "${{ vars.FACTORY_PROVIDER || 'anthropic' }}" }
 
       # Toolchains for the products the PR touches, matching ci.yml.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         if: contains(env.SCOPES, 'bun2too-support-agent')
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
@@ -144,13 +144,13 @@ jobs:
             cache: pnpm,
             cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml,
           }
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         if: contains(env.SCOPES, 'bun2too-support-agent')
       - if: contains(env.SCOPES, 'bun2too-support-agent')
         run: |
           .github/scripts/contained.sh bun2too-support-agent "$HOME/.npm" "$HOME/.cache/pnpm" "$HOME/.cache/uv" "$HOME/.cache/pip" "$HOME/.local/share/pnpm" "$HOME/.local/share/uv" "$HOME/.local/state/pnpm" "$RUNNER_TEMP/setup-uv-cache" -- \
             sh -c 'pnpm -C bun2too-support-agent install --frozen-lockfile && uv sync --directory bun2too-support-agent/services/agents --frozen'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: contains(env.SCOPES, 'bun2too-crew-team')
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v5
@@ -221,11 +221,11 @@ jobs:
           # and no hooks, whatever the agent wrote.
           rm -rf .git/hooks .git/info/attributes && mkdir .git/hooks
           printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n' > .git/config
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with: { name: rework, path: "${{ runner.temp }}/out/", if-no-files-found: error }
       # For agent-review's trace job only, which scans it and then deletes it.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with: { name: trace-rework, path: "${{ runner.temp }}/trace/", if-no-files-found: ignore, retention-days: 1 }
 
@@ -242,7 +242,7 @@ jobs:
       BRANCH: ${{ needs.plan.outputs.branch }}
       BEFORE: ${{ needs.plan.outputs.head }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         continue-on-error: true
         with: { name: rework, path: in }
       # Rule 11, layer 4: nothing the agent wrote is pushed or posted if it holds a secret. The scan
@@ -272,7 +272,7 @@ jobs:
       - name: Count the commits
         id: count
         run: echo "commits=$(grep -c '^From [0-9a-f]\{40\} ' in/rework.patch 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app
         if: steps.count.outputs.commits != '0' && steps.count.outputs.commits != ''
         with:

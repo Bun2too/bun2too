@@ -26,7 +26,7 @@ jobs:
         id: touched
         env: { GH_TOKEN: "${{ github.token }}" }
         run: echo "support=$(gh pr diff ${{ github.event.pull_request.number }} -R ${{ github.repository }} --name-only | grep -c '^bun2too-support-agent/' || true)" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         if: steps.touched.outputs.support != '0'
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
@@ -37,7 +37,7 @@ jobs:
             cache: pnpm,
             cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml,
           }
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         if: steps.touched.outputs.support != '0'
       - if: steps.touched.outputs.support != '0'
         working-directory: bun2too-support-agent
@@ -48,7 +48,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           git -c core.hooksPath=/dev/null -c core.fsmonitor=false diff --binary --no-ext-diff -- bun2too-support-agent > "$RUNNER_TEMP/out/autofix.patch"
           echo "changed=$([ -s "$RUNNER_TEMP/out/autofix.patch" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: steps.diff.outputs.changed == 'true'
         with: { name: autofix, path: "${{ runner.temp }}/out/autofix.patch" }
 
@@ -60,9 +60,9 @@ jobs:
     timeout-minutes: 5
     permissions: { contents: read }
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: autofix, path: in }
-      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}

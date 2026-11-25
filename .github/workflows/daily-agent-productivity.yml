@@ -22,7 +22,7 @@ jobs:
     environment: metrics
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Collect GitHub metadata and publish the UTC report
@@ -36,7 +36,7 @@ jobs:
         run: python3 scripts/metrics/daily_productivity.py
       - name: Preserve the report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: daily-agent-productivity-${{ github.run_id }}
           path: artifacts/daily-agent-productivity/

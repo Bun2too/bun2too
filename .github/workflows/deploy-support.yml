@@ -41,14 +41,14 @@ jobs:
           sha=$(git rev-parse HEAD)
           git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$sha is not on main"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with: { package_json_file: bun2too-support-agent/package.json }
       - uses: actions/setup-node@v5
         with:
           node-version-file: bun2too-support-agent/.nvmrc
           cache: pnpm
           cache-dependency-path: bun2too-support-agent/pnpm-lock.yaml
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: pnpm install --frozen-lockfile && uv sync --directory services/agents --frozen
       - run: pnpm check
 
