@@ -58,8 +58,8 @@ class ServiceNowConfig(Strict):
         default_factory=lambda: {"state": "6", "close_code": "Solution provided"}
     )
     instance_url_env: str
-    user_env: str
-    password_env: str
+    client_id_env: str
+    client_secret_env: str
 
 
 class Tickets(Strict):

@@ -1,5 +1,7 @@
 """ServiceNow Table API. https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI"""
 
+import time
+from collections.abc import Callable, Generator
 from typing import Any, Literal
 
 import httpx
@@ -7,6 +9,55 @@ import httpx
 from relay_agents.connectors.ports import TicketDraft, TicketWriteError
 from relay_agents.contracts import TicketRef
 from relay_agents.tenants import ServiceNowConfig
+
+
+class ClientCredentials(httpx.Auth):
+    """OAuth client-credentials grant: one bearer token, reused until shortly before it expires.
+
+    A 401 on a call fetches a new token and retries that call once.
+    """
+
+    requires_response_body = True
+    EARLY = 60.0
+
+    def __init__(
+        self,
+        instance_url: str,
+        client_id: str,
+        client_secret: str,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._token_url = f"{instance_url.rstrip('/')}/oauth_token.do"
+        self._form = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        self._clock = clock
+        self._token: str | None = None
+        self._expires = 0.0
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        fresh = self._token is None or self._clock() >= self._expires
+        if fresh:
+            self._store((yield httpx.Request("POST", self._token_url, data=self._form)))
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        response = yield request
+        if response.status_code == 401 and not fresh:
+            self._store((yield httpx.Request("POST", self._token_url, data=self._form)))
+            request.headers["Authorization"] = f"Bearer {self._token}"
+            yield request
+
+    def _store(self, response: httpx.Response) -> None:
+        token = response.json().get("access_token") if response.status_code == 200 else None
+        if not token:
+            raise httpx.HTTPStatusError(
+                f"ServiceNow token request: HTTP {response.status_code}",
+                request=response.request,
+                response=response,
+            )
+        self._token = str(token)
+        self._expires = self._clock() + float(response.json().get("expires_in", 0)) - self.EARLY
 
 
 class ServiceNowTicketPort:

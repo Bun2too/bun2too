@@ -13,20 +13,20 @@ Keys must be `UPPER_SNAKE_CASE`; Terraform rejects anything else. Never put thes
 
 Both `qa` and `prod` run live: the agents service reads every key the tenant file names at start-up and fails to start if one is missing.
 
-| Key                         | qa                 | prod     | Read by |
-| --------------------------- | ------------------ | -------- | ------- |
-| `RELAY_TENANT_KEYS`         | required           | required | gateway |
-| `ANTHROPIC_API_KEY`         | required           | required | agents  |
-| `CF_AIG_ACCOUNT_ID`         | required           | required | agents  |
-| `CF_AIG_GATEWAY_ID`         | required           | required | agents  |
-| `CF_AIG_TOKEN`              | required           | required | agents  |
-| `BUN2TOO_JIRA_BASE_URL`     | required           | required | agents  |
-| `BUN2TOO_JIRA_EMAIL`        | required           | required | agents  |
-| `BUN2TOO_JIRA_API_TOKEN`    | required           | required | agents  |
-| `BUN2TOO_SNOW_INSTANCE_URL` | required (sandbox) | required | agents  |
-| `BUN2TOO_SNOW_USER`         | required (sandbox) | required | agents  |
-| `BUN2TOO_SNOW_PASSWORD`     | required (sandbox) | required | agents  |
-| `LANGSMITH_API_KEY`         | required           | optional | agents  |
+| Key                          | qa                 | prod     | Read by |
+| ---------------------------- | ------------------ | -------- | ------- |
+| `RELAY_TENANT_KEYS`          | required           | required | gateway |
+| `ANTHROPIC_API_KEY`          | required           | required | agents  |
+| `CF_AIG_ACCOUNT_ID`          | required           | required | agents  |
+| `CF_AIG_GATEWAY_ID`          | required           | required | agents  |
+| `CF_AIG_TOKEN`               | required           | required | agents  |
+| `BUN2TOO_JIRA_BASE_URL`      | required           | required | agents  |
+| `BUN2TOO_JIRA_EMAIL`         | required           | required | agents  |
+| `BUN2TOO_JIRA_API_TOKEN`     | required           | required | agents  |
+| `BUN2TOO_SNOW_INSTANCE_URL`  | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_CLIENT_ID`     | required (sandbox) | required | agents  |
+| `BUN2TOO_SNOW_CLIENT_SECRET` | required (sandbox) | required | agents  |
+| `LANGSMITH_API_KEY`          | required           | optional | agents  |
 
 **Every qa deploy creates real tickets.** The deploy runs the intake journey against qa. For Bun2too, its Jira issue lands in project `BUN` (label `relay`), and its incident in the ServiceNow developer instance. Never point qa at a production ServiceNow. The journey never runs against prod.
 
@@ -113,20 +113,20 @@ Relay creates a Jira issue per escalated case, labels it with the case's correla
 
 ### `BUN2TOO_SNOW_*` (ServiceNow)
 
-Relay creates a record in the tenant's table (`incident` for Bun2too), finds it again by `correlation_id`, adds work notes, and closes it with `resolve_fields`. It uses the ServiceNow Table API with basic authentication.
+Relay creates a record in the tenant's table (`incident` for Bun2too), finds it again by `correlation_id`, adds work notes, and closes it with `resolve_fields`. It uses the ServiceNow Table API with an OAuth bearer token. Relay gets the token from `<instance>/oauth_token.do` with the client-credentials grant, reuses it until a minute before it expires, and fetches a new one after a 401.
 
-| Key                         | What                                   | Example shape                        |
-| --------------------------- | -------------------------------------- | ------------------------------------ |
-| `BUN2TOO_SNOW_INSTANCE_URL` | Your instance, without a trailing path | `https://<instance>.service-now.com` |
-| `BUN2TOO_SNOW_USER`         | User ID of the integration user        | `relay.integration`                  |
-| `BUN2TOO_SNOW_PASSWORD`     | That user's password                   | (secret)                             |
+| Key                          | What                                   | Example shape                        |
+| ---------------------------- | -------------------------------------- | ------------------------------------ |
+| `BUN2TOO_SNOW_INSTANCE_URL`  | Your instance, without a trailing path | `https://<instance>.service-now.com` |
+| `BUN2TOO_SNOW_CLIENT_ID`     | Client ID of the OAuth application     | (32 hex characters)                  |
+| `BUN2TOO_SNOW_CLIENT_SECRET` | That application's client secret       | (secret)                             |
 
 **How to get them:**
 
 1. **Instance.** For qa, request a free Personal Developer Instance at <https://developer.servicenow.com> (**Request Instance**). For prod, use the company instance and ask its ServiceNow admin for the steps below.
 2. **User.** As an admin, open **User Administration → Users → New**. Create `relay.integration`, tick **Web service access only** so it cannot sign in to the UI, and save.
 3. **Roles.** Give it a role that can create, read and update records in the table, for example `itil` for `incident`.
-4. **Password.** On the user record, use **Set Password**, generate a strong one, and copy it once.
+4. **OAuth client.** Open **System OAuth → Application Registry → New → Create an OAuth API endpoint for external clients**. Allow the client-credentials grant, and set its **OAuth Application User** to `relay.integration`, so the token acts with that user's roles. Save, then copy the **Client ID** and **Client Secret** once. If the instance answers the token request with `access_denied`, ask its admin to turn on the system property `glide.oauth.inbound.client.credential.grant_type.enabled`.
 5. **Instance URL.** The address you open ServiceNow at, up to `.service-now.com`.
 6. Developer instances go to sleep when unused and are reclaimed after a period of inactivity. Wake the qa instance before a qa deploy.
 
@@ -167,8 +167,8 @@ Build the JSON locally, set it, and delete the file. The shapes below show which
   "BUN2TOO_JIRA_EMAIL": "<relay-account-email>",
   "BUN2TOO_JIRA_API_TOKEN": "<jira-token>",
   "BUN2TOO_SNOW_INSTANCE_URL": "https://<instance>.service-now.com",
-  "BUN2TOO_SNOW_USER": "relay.integration",
-  "BUN2TOO_SNOW_PASSWORD": "<snow-password>",
+  "BUN2TOO_SNOW_CLIENT_ID": "<snow-client-id>",
+  "BUN2TOO_SNOW_CLIENT_SECRET": "<snow-client-secret>",
   "LANGSMITH_API_KEY": "<langsmith-service-key>"
 }
 ```

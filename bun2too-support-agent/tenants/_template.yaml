@@ -22,8 +22,8 @@ tickets:
     table: incident
     assignment_group: null
     instance_url_env: YOURBRAND_SNOW_INSTANCE_URL
-    user_env: YOURBRAND_SNOW_USER
-    password_env: YOURBRAND_SNOW_PASSWORD
+    client_id_env: YOURBRAND_SNOW_CLIENT_ID
+    client_secret_env: YOURBRAND_SNOW_CLIENT_SECRET
 policy:
   auto_resolve_min_confidence: 0.75
   always_escalate_intents: [privacy]
