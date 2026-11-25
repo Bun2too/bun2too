@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from relay_agents.telemetry import langsmith_export
+from relay_agents.telemetry import langsmith_export, without_error_text
 
 REPO = Path(__file__).resolve().parents[3]
 KEY = "trace-probe-key"
@@ -55,11 +58,31 @@ def test_unknown_agent_environment_fails_loudly() -> None:
         langsmith_export({**LANGSMITH, "LANGSMITH_AGENT_ENVIRONMENT": "qa"})
 
 
-@pytest.mark.parametrize("legacy", ["LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"])
+@pytest.mark.parametrize(
+    "legacy", ["LANGSMITH_PROJECT", "LANGCHAIN_PROJECT", "LANGSMITH_SESSION", "LANGCHAIN_SESSION"]
+)
 def test_a_project_alongside_agent_addressing_fails_loudly(legacy: str) -> None:
     """LangSmith answers 400 when a project and the agent headers arrive together."""
     with pytest.raises(ValueError, match=legacy):
         langsmith_export({**LANGSMITH, legacy: "anything"})
+
+
+def test_an_error_leaves_as_its_class_name_only() -> None:
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    with (
+        pytest.raises(RuntimeError),
+        provider.get_tracer("t").start_as_current_span("failing"),
+    ):
+        raise RuntimeError("customer wrote: my card is 4111")
+    (raw,) = memory.get_finished_spans()
+    assert "4111" in str(raw.status.description)
+
+    span = without_error_text(raw)
+    assert span.status.description == "RuntimeError"
+    (event,) = span.events
+    assert dict(event.attributes or {}) == {"exception.type": "RuntimeError"}
 
 
 def _run_probe(extra: dict[str, str]) -> dict[str, Any]:
@@ -87,6 +110,7 @@ def probe() -> dict[str, Any]:
 
 
 CUSTOMER_TEXT = "private inquiry"
+FAILURE_DETAIL = "upstream said: private inquiry body"
 
 
 def test_customer_text_stays_in_the_process_by_default(probe: dict[str, Any]) -> None:
@@ -94,6 +118,15 @@ def test_customer_text_stays_in_the_process_by_default(probe: dict[str, Any]) ->
     assert raw
     assert CUSTOMER_TEXT not in raw
     assert "hello" not in raw
+
+
+def test_a_failed_run_exports_its_error_class_but_not_its_message(
+    probe: dict[str, Any],
+) -> None:
+    raw = "".join(post["raw"] for post in probe["posts"])
+    assert FAILURE_DETAIL not in raw
+    failed = next(s for s in _spans(probe) if s["name"] == "relay.case.run" and s["status"] == 2)
+    assert failed["attributes"]["relay.case_id"] == probe["failed_case"]
 
 
 def test_an_environment_can_opt_in_to_payloads() -> None:

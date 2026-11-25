@@ -61,7 +61,8 @@ class CaseService:
             try:
                 await self._graph.ainvoke(state, config=config)
             except Exception as error:
-                span.record_exception(error)
+                # The class name only: an exception's message can carry customer text or
+                # a provider's response, which hidden payloads would not cover.
                 span.set_status(Status(StatusCode.ERROR, type(error).__name__))
                 log.exception("case run failed", extra={"case_id": case_id, "tenant": tenant})
                 await self._deps.store.note(

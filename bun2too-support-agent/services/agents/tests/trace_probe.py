@@ -19,16 +19,23 @@ from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tracers.langchain import wait_for_all_tracers
+from langgraph.graph import START, StateGraph
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 from relay_agents.api import create_app
+from relay_agents.graph import GraphState
 from relay_agents.service import CaseService
 from relay_agents.telemetry import setup_telemetry, tracer
 from relay_agents.tenants import load_tenants
 from relay_agents.wiring import build_deps
 
 received: list[dict[str, object]] = []
+FAILURE_DETAIL = "upstream said: private inquiry body"
+
+
+def explode(state: GraphState) -> GraphState:
+    raise RuntimeError(FAILURE_DETAIL)
 
 
 class FakeLangSmith(BaseHTTPRequestHandler):
@@ -89,10 +96,18 @@ def main() -> None:
             await model.ainvoke("hi", config={"run_name": "probe-model"})
 
     asyncio.run(model_call())
+
+    # A run that fails inside a node, with customer text in the exception's message.
+    failing = StateGraph(GraphState)
+    failing.add_node("explode", explode)
+    failing.add_edge(START, "explode")
+    service._graph = failing.compile()
+    failed_case = accepted.json()["caseId"]
+    asyncio.run(service.run("bun2too", failed_case))
     wait_for_all_tracers()
     provider.force_flush()
     server.shutdown()
-    print(json.dumps({"accepted": accepted.json(), "posts": received}))
+    print(json.dumps({"accepted": accepted.json(), "failed_case": failed_case, "posts": received}))
 
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
+from opentelemetry.trace import Status
 
 ATTR_TENANT: Final = "relay.tenant"
 ATTR_CASE_ID: Final = "relay.case_id"
@@ -27,6 +28,13 @@ _LANGSMITH_REQUIRED: Final = (
     "LANGSMITH_AGENT_ENVIRONMENT",
 )
 _AGENT_ENVIRONMENTS: Final = ("local", "development", "staging", "production")
+# Every name langsmith reads as a project, including the legacy SESSION aliases.
+_PROJECT_SETTINGS: Final = (
+    "LANGSMITH_PROJECT",
+    "LANGCHAIN_PROJECT",
+    "LANGSMITH_SESSION",
+    "LANGCHAIN_SESSION",
+)
 
 
 def langsmith_export(env: Mapping[str, str]) -> tuple[str, dict[str, str]] | None:
@@ -47,7 +55,7 @@ def langsmith_export(env: Mapping[str, str]) -> tuple[str, dict[str, str]] | Non
         raise ValueError(
             f"LANGSMITH_AGENT_ENVIRONMENT must be one of {', '.join(_AGENT_ENVIRONMENTS)}"
         )
-    for legacy in ("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"):
+    for legacy in _PROJECT_SETTINGS:
         if env.get(legacy, "").strip():
             raise ValueError(f"unset {legacy}: LangSmith rejects a project with agent addressing")
     base = (env.get("LANGSMITH_ENDPOINT", "").strip() or LANGSMITH_DEFAULT_ENDPOINT).rstrip("/")
@@ -59,6 +67,58 @@ def langsmith_export(env: Mapping[str, str]) -> tuple[str, dict[str, str]] | Non
     if workspace := env.get("LANGSMITH_WORKSPACE_ID", "").strip():
         headers["X-Tenant-Id"] = workspace
     return f"{base}/otel/v1/traces", headers
+
+
+def _error_class(description: str | None) -> str | None:
+    """OpenTelemetry writes "Type: message" into a failed span's status; keep the type."""
+    head = (description or "").split(":", 1)[0].strip()
+    return head if head.replace(".", "_").isidentifier() else None
+
+
+def _exception_type_only(event: Event) -> Event:
+    kind = str((event.attributes or {}).get("exception.type", ""))
+    return Event("exception", {"exception.type": kind}, event.timestamp)
+
+
+def without_error_text(span: ReadableSpan) -> ReadableSpan:
+    """The span with every error reduced to its class name.
+
+    An exception's message and traceback can carry customer text or a provider's
+    response. LangSmith records a failed run's whole error as an exception event, and
+    hiding inputs and outputs does not cover it.
+    """
+    status = span.status
+    events = [_exception_type_only(e) if e.name == "exception" else e for e in span.events]
+    if events == list(span.events) and status.description is None:
+        return span
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=span.attributes,
+        events=events,
+        links=span.links,
+        kind=span.kind,
+        status=Status(status.status_code, _error_class(status.description)),
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+class _WithoutErrorText(SpanExporter):
+    def __init__(self, inner: SpanExporter) -> None:
+        self._inner = inner
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        return self._inner.export([without_error_text(span) for span in spans])
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
 
 
 def setup_telemetry(
@@ -73,11 +133,13 @@ def setup_telemetry(
 
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
     if collector:
-        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        provider.add_span_processor(BatchSpanProcessor(_WithoutErrorText(OTLPSpanExporter())))
     if langsmith is not None:
         endpoint, headers = langsmith
         provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers))
+            BatchSpanProcessor(
+                _WithoutErrorText(OTLPSpanExporter(endpoint=endpoint, headers=headers))
+            )
         )
     # LangGraph nodes and model calls become spans of this provider, inside the case's
     # trace: one instrumentation, so the SDK never sends a second copy of its own.
