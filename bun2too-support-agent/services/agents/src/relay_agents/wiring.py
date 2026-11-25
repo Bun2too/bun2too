@@ -8,7 +8,7 @@ from relay_agents.classifier import Classifier, KeywordClassifier, LlmClassifier
 from relay_agents.connectors.fakes import InMemoryTicketPort
 from relay_agents.connectors.jira import JiraTicketPort
 from relay_agents.connectors.ports import TicketPort
-from relay_agents.connectors.servicenow import ServiceNowTicketPort
+from relay_agents.connectors.servicenow import ClientCredentials, ServiceNowTicketPort
 from relay_agents.contracts import Intent
 from relay_agents.graph import Deps
 from relay_agents.knowledge import InMemoryKnowledgeBase
@@ -30,8 +30,10 @@ def _live_tickets(tenant: TenantConfig, env: Mapping[str, str]) -> list[TicketPo
         ports.append(JiraTicketPort(client, env[jira.base_url_env], jira))
     snow = tenant.tickets.servicenow
     if snow:
-        client = httpx.AsyncClient(auth=(env[snow.user_env], env[snow.password_env]), timeout=10.0)
-        ports.append(ServiceNowTicketPort(client, env[snow.instance_url_env], snow))
+        instance = env[snow.instance_url_env]
+        auth = ClientCredentials(instance, env[snow.client_id_env], env[snow.client_secret_env])
+        client = httpx.AsyncClient(auth=auth, timeout=10.0)
+        ports.append(ServiceNowTicketPort(client, instance, snow))
     return ports
 
 
