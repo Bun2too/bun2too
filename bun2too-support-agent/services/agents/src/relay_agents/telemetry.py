@@ -1,6 +1,7 @@
 import os
 from collections.abc import Mapping, Sequence
 from typing import Final
+from urllib.parse import urlsplit
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -35,6 +36,30 @@ _PROJECT_SETTINGS: Final = (
     "LANGSMITH_SESSION",
     "LANGCHAIN_SESSION",
 )
+# Plain HTTP never leaves the machine on these, so the trace probe can use a local server.
+_LOOPBACK_HOSTS: Final = ("127.0.0.1", "localhost", "::1")
+
+
+def _langsmith_base(env: Mapping[str, str]) -> str:
+    """The endpoint the API key is sent to: HTTPS, or HTTP on loopback, with nothing extra.
+
+    A typo or a tampered variable must not send the key in clear text or to a URL that
+    smuggles in credentials, a query or a fragment.
+    """
+    base = (env.get("LANGSMITH_ENDPOINT", "").strip() or LANGSMITH_DEFAULT_ENDPOINT).rstrip("/")
+    try:
+        url = urlsplit(base)
+        host = url.hostname
+    except ValueError:
+        host = None
+    rule = "LANGSMITH_ENDPOINT must be an https:// URL (http:// only on loopback)"
+    if host is None or url.username is not None or url.password is not None:
+        raise ValueError(f"{rule} with no user or password")
+    if url.query or url.fragment or "?" in base or "#" in base:
+        raise ValueError(f"{rule} with no query or fragment")
+    if url.scheme != "https" and not (url.scheme == "http" and host in _LOOPBACK_HOSTS):
+        raise ValueError(rule)
+    return base
 
 
 def langsmith_export(env: Mapping[str, str]) -> tuple[str, dict[str, str]] | None:
@@ -58,7 +83,7 @@ def langsmith_export(env: Mapping[str, str]) -> tuple[str, dict[str, str]] | Non
     for legacy in _PROJECT_SETTINGS:
         if env.get(legacy, "").strip():
             raise ValueError(f"unset {legacy}: LangSmith rejects a project with agent addressing")
-    base = (env.get("LANGSMITH_ENDPOINT", "").strip() or LANGSMITH_DEFAULT_ENDPOINT).rstrip("/")
+    base = _langsmith_base(env)
     headers = {
         "x-api-key": values["LANGSMITH_API_KEY"],
         "Langsmith-Agent-Id": values["LANGSMITH_AGENT_ID"],
