@@ -266,7 +266,7 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
       # The app token is minted only after the scan, so no earlier step can see it.
-      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+      - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
@@ -346,7 +346,7 @@ jobs:
     timeout-minutes: 10
     permissions: { contents: read, actions: read }
     steps:
-      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+      - uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         id: app
         with:
           app-id: ${{ vars.FACTORY_APP_ID }}
