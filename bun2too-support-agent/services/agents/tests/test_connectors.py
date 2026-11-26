@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -165,3 +166,73 @@ async def test_a_refused_token_is_a_ticket_write_error_without_the_secret() -> N
     with pytest.raises(TicketWriteError, match="token request: HTTP 401") as raised:
         await port.ensure_ticket(DRAFT)
     assert SECRET not in str(raised.value)
+
+
+class LoopbackServiceNow:
+    """A real HTTP server on loopback whose token endpoint can hang, so client timeouts apply."""
+
+    def __init__(self, tokens_before_hang: int, table_oks: int) -> None:
+        self.tokens_left = tokens_before_hang
+        self.table_oks = table_oks
+        self.server: asyncio.Server | None = None
+
+    async def __aenter__(self) -> str:
+        self.server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
+        port = self.server.sockets[0].getsockname()[1]
+        return f"http://127.0.0.1:{port}"
+
+    async def __aexit__(self, *_: object) -> None:
+        assert self.server is not None
+        self.server.close()
+
+    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode()
+        length = next(
+            (
+                int(h.split(":")[1])
+                for h in head.split("\r\n")
+                if h.lower().startswith("content-length")
+            ),
+            0,
+        )
+        await reader.readexactly(length)
+        if " /oauth_token.do " in head.split("\r\n")[0]:
+            if self.tokens_left == 0:
+                await asyncio.sleep(3600)
+            self.tokens_left -= 1
+            status, body = 200, {"access_token": "tok", "expires_in": 1799}
+        elif self.table_oks > 0:
+            self.table_oks -= 1
+            status, body = 200, {"result": [{"sys_id": "s1", "number": "INC1"}]}
+        else:
+            status, body = 401, {"error": {"message": "User Not Authenticated"}}
+        data = json.dumps(body).encode()
+        writer.write(
+            f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+            + data
+        )
+        await writer.drain()
+        writer.close()
+
+
+def _loopback_snow(url: str) -> ServiceNowTicketPort:
+    auth = ClientCredentials(url, "client-id", SECRET)
+    return ServiceNowTicketPort(httpx.AsyncClient(auth=auth, timeout=0.05), url, SNOW)
+
+
+async def test_a_hung_token_request_times_out_with_the_clients_timeout() -> None:
+    async with LoopbackServiceNow(tokens_before_hang=0, table_oks=0) as url:
+        port = _loopback_snow(url)
+        with pytest.raises(TicketWriteError) as raised:
+            await asyncio.wait_for(port.ensure_ticket(DRAFT), timeout=2)
+        assert isinstance(raised.value.__cause__, httpx.TimeoutException)
+
+
+async def test_a_hung_token_refresh_after_a_401_times_out_too() -> None:
+    async with LoopbackServiceNow(tokens_before_hang=1, table_oks=1) as url:
+        port = _loopback_snow(url)
+        await port.ensure_ticket(DRAFT)  # token cached; the lookup finds INC1
+        with pytest.raises(TicketWriteError) as raised:
+            await asyncio.wait_for(port.ensure_ticket(DRAFT), timeout=2)
+        assert isinstance(raised.value.__cause__, httpx.TimeoutException)
