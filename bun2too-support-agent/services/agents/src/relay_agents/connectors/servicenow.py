@@ -40,13 +40,20 @@ class ClientCredentials(httpx.Auth):
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         fresh = self._token is None or self._clock() >= self._expires
         if fresh:
-            self._store((yield httpx.Request("POST", self._token_url, data=self._form)))
+            self._store((yield self._token_request(request)))
         request.headers["Authorization"] = f"Bearer {self._token}"
         response = yield request
         if response.status_code == 401 and not fresh:
-            self._store((yield httpx.Request("POST", self._token_url, data=self._form)))
+            self._store((yield self._token_request(request)))
             request.headers["Authorization"] = f"Bearer {self._token}"
             yield request
+
+    def _token_request(self, request: httpx.Request) -> httpx.Request:
+        # A request the flow builds itself gets no client defaults; carry the caller's timeout.
+        timeout = (
+            {"timeout": request.extensions["timeout"]} if "timeout" in request.extensions else {}
+        )
+        return httpx.Request("POST", self._token_url, data=self._form, extensions=timeout)
 
     def _store(self, response: httpx.Response) -> None:
         token = response.json().get("access_token") if response.status_code == 200 else None
