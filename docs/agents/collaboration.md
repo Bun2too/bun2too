@@ -165,9 +165,33 @@ On 2026-11-22 Codex could not reach api.github.com while reviewing the deploy fi
 
 AGENTS.md rule 12 applies to both agents. Neither adds the `agent-review` label, dispatches a paid workflow or re-enables a paused agent workflow unless the owner asks. Cross-review in our own sessions starts no paid factory run, but it does use the owner's plan limits, so keep reviews proportionate to the change. Push in batches, since every push runs CI.
 
+## Work without asking: harness setup
+
+AGENTS.md rule 19 makes routine work pre-approved. On 2026-11-27 the owner found Codex asking before almost every command, which defeats the point of an agentic factory. Each harness is therefore set up so that routine work runs without a prompt, while the owner's decisions still stop for the owner.
+
+| Runs without asking | Always stops for the owner |
+| --- | --- |
+| Reads, searches, `git` and `gh` reads | Reading or printing `.env*`, tokens or other secrets (rule 7) |
+| Edits, tests, builds and commits in your own checkout and worktrees | Deleting files outside a git checkout on this computer |
+| `scripts/as-agent.sh <you> …`: issues, PRs, comments, verdicts, merges under rules 9 and 13, cancelling or re-running superseded runs | Approving the `support-prod` environment, `sync-mirror.sh --release` |
+| `scripts/agent-tell.sh`, `wait-review.sh`, `sync-mirror.sh <you> <prefix>` | Force-pushes, direct pushes to `main`, `terraform apply` or `railway up` outside the pipeline |
+| Network access needed for that work (GitHub, package registries, LangSmith reads) | Paid runs (rule 12), app permissions, installations and keys |
+
+**The owner applies each harness's setup.** An agent never widens its own permissions. When a harness prompts for something in the left-hand column, the agent names the exact rule that is missing, once, and carries on with other work.
+
+- **Claude Code** (owner's `~/.claude/settings.json`, or this repo's `.claude/settings.json` through a PR the owner approves):
+  - allow `Bash(scripts/as-agent.sh claude:*)`, `Bash(scripts/agent-tell.sh:*)`, `Bash(scripts/wait-review.sh:*)`, and `Bash(scripts/sync-mirror.sh claude <prefix>)` for each prefix;
+  - allow the `git` and `gh` read and branch commands;
+  - deny the right-hand column, including when it is run through `as-agent.sh`: for example `Bash(scripts/as-agent.sh claude git push --force:*)`, `Bash(scripts/as-agent.sh claude git push origin main:*)`, `Bash(scripts/sync-mirror.sh:* --release:*)`, and `Bash(scripts/as-agent.sh codex:*)`.
+- **Codex** (`~/.codex/config.toml`): mark this checkout's path `trust_level = "trusted"`. Run with `approval_policy = "never"` and `sandbox_mode = "workspace-write"`, with `[sandbox_workspace_write] network_access = true`, so GitHub calls need no escalation. Codex keeps the right-hand column off by its own rule. Codex confirms these keys for its installed version.
+- **Antigravity:** set terminal command auto-execution to always proceed, with a deny list matching the right-hand column.
+- **GitHub Apps** (org settings → installed GitHub Apps): accept each app's pending permission request. The apps declare `actions: write`, but their installation tokens do not carry it yet, so cancelling a superseded run returns `403`.
+
 ## What stays with the owner
 
 - Approving prod deploys, PRs that grant a new write permission, and any decision recorded in an ADR.
+- Deleting files outside a git checkout on this computer, and anything that reads or moves secrets.
+- Each harness's permission setup (above).
 - The agents' GitHub Apps: their permissions, installations and private keys.
 - Settling disagreements between the agents.
 - Turning agents, budgets and paid workflows on or off.
