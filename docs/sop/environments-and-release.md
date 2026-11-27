@@ -19,6 +19,8 @@ merge to main
           └─ prod  [human approval] → terraform apply → railway up → smoke (read-only, no tickets created)
 ```
 
+qa and prod queue separately, so a prod deploy waiting for approval never holds up qa. Deploys to one environment run one at a time. A pushed deploy that a newer Relay commit on `main` has superseded fails before it changes anything, even if it is approved; the newer commit's own run ships. A manual dispatch (rollback) is exempt.
+
 Each environment gets the same commit SHA, recorded as the Railway deployment message. Railway builds each environment from that commit's source with lockfiles and pinned base images. On GCP (GA), the pipeline will build once and promote one immutable image digest instead; see [ADR 0004](../adr/0004-railway-poc-gcp-ga.md).
 
 ## Configuration changes
