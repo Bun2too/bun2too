@@ -23,7 +23,20 @@ jobs:
     defaults: { run: { working-directory: bun2too-support-agent } }
     steps:
       - uses: actions/checkout@v5
-        with: { ref: "${{ inputs.sha }}" }
+        with: { ref: "${{ inputs.sha }}", fetch-depth: 0 }
+      # A run that waited (for prod's approval, or in the queue) while a newer Relay commit
+      # reached main must not ship older code over it. A manual dispatch (rollback) may.
+      - name: Refuse a superseded deploy
+        if: github.event_name == 'push'
+        working-directory: .
+        run: |
+          newer=$(git log --format=%h "${{ inputs.sha }}..origin/main" -- \
+            bun2too-support-agent .github/workflows/deploy-support.yml \
+            .github/workflows/_deploy-support-env.yml .github/scripts/tf-workspace-check.sh)
+          if [ -n "$newer" ]; then
+            echo "::error::${{ inputs.sha }} is superseded on main by $(echo "$newer" | head -1); its own run deploys it."
+            exit 1
+          fi
       - uses: hashicorp/setup-terraform@v4
         with:
           {

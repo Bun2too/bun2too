@@ -22,9 +22,8 @@ on:
         required: false
 permissions:
   contents: read
-concurrency:
-  group: deploy-support-${{ github.event.inputs.environment || 'pipeline' }}
-  cancel-in-progress: false
+# Each environment queues on its own (issue #57): a prod deploy waiting for its approval
+# never holds up qa. Deploys to one environment never overlap or cancel each other.
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -56,6 +55,7 @@ jobs:
   qa:
     needs: verify
     if: github.event_name == 'push' || inputs.environment == 'qa'
+    concurrency: { group: deploy-support-qa, cancel-in-progress: false }
     uses: ./.github/workflows/_deploy-support-env.yml
     with: { environment: qa, sha: "${{ needs.verify.outputs.sha }}" }
     secrets: inherit
@@ -63,6 +63,7 @@ jobs:
   prod:
     needs: [verify, qa]
     if: always() && needs.verify.result == 'success' && (github.event_name == 'push' && needs.qa.result == 'success' || inputs.environment == 'prod')
+    concurrency: { group: deploy-support-prod, cancel-in-progress: false }
     uses: ./.github/workflows/_deploy-support-env.yml
     with: { environment: prod, sha: "${{ needs.verify.outputs.sha }}" }
     secrets: inherit
