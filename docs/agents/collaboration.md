@@ -179,7 +179,7 @@ AGENTS.md rule 19 makes routine work pre-approved. On 2026-11-27 the owner found
 
 **The owner applies each harness's setup.** An agent never widens its own permissions. When a harness prompts for or denies something in the left-hand column, the agent names the exact missing grant once, then carries on with other work. It does not ask again for each command.
 
-Editing a config does not prove that a running or managed session picked it up, and higher-precedence managed or session settings can still override it. After a change, start a new session and check, without a prompt, a fixture Git write (a commit in a scratch worktree) and one real helper call (`scripts/as-agent.sh <you> gh api user`). Until both pass, the setup is **inconclusive**.
+Editing a config does not prove that a running or managed session picked it up, and higher-precedence managed or session settings can still override it. After a change, start a new session and check, without a prompt, a fixture Git write (a commit in a scratch worktree) and one real helper call (`scripts/as-agent.sh <you> gh api installation/repositories --jq '.repositories[] | select(.full_name == "Bun2too/bun2too") | .full_name'`, which prints `Bun2too/bun2too`; `gh api user` returns 403 for an app installation token). Until both pass, the setup is **inconclusive**.
 
 - **Claude Code** (owner's `~/.claude/settings.json`, or this repo's `.claude/settings.json` through a PR the owner approves):
   - allow `Bash(scripts/as-agent.sh claude:*)`, `Bash(scripts/agent-tell.sh:*)`, `Bash(scripts/wait-review.sh:*)`, and `Bash(scripts/sync-mirror.sh claude <prefix>)` for each prefix;
