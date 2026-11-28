@@ -177,13 +177,31 @@ AGENTS.md rule 19 makes routine work pre-approved. On 2026-11-27 the owner found
 | `scripts/agent-tell.sh`, `wait-review.sh`, `sync-mirror.sh <you> <prefix>` | Force-pushes, direct pushes to `main`, `terraform apply` or `railway up` outside the pipeline |
 | Network access needed for that work (GitHub, package registries, LangSmith reads) | Paid runs (rule 12), app permissions, installations and keys |
 
-**The owner applies each harness's setup.** An agent never widens its own permissions. When a harness prompts for something in the left-hand column, the agent names the exact rule that is missing, once, and carries on with other work.
+**The owner applies each harness's setup.** An agent never widens its own permissions. When a harness prompts for or denies something in the left-hand column, the agent names the exact missing grant once, then carries on with other work. It does not ask again for each command.
+
+Editing a config does not prove that a running or managed session picked it up, and higher-precedence managed or session settings can still override it. After a change, start a new session and check, without a prompt, a fixture Git write (a commit in a scratch worktree) and one real helper call (`scripts/as-agent.sh <you> gh api user`). Until both pass, the setup is **inconclusive**.
 
 - **Claude Code** (owner's `~/.claude/settings.json`, or this repo's `.claude/settings.json` through a PR the owner approves):
   - allow `Bash(scripts/as-agent.sh claude:*)`, `Bash(scripts/agent-tell.sh:*)`, `Bash(scripts/wait-review.sh:*)`, and `Bash(scripts/sync-mirror.sh claude <prefix>)` for each prefix;
   - allow the `git` and `gh` read and branch commands;
   - deny the right-hand column, including when it is run through `as-agent.sh`: for example `Bash(scripts/as-agent.sh claude git push --force:*)`, `Bash(scripts/as-agent.sh claude git push origin main:*)`, `Bash(scripts/sync-mirror.sh:* --release:*)`, and `Bash(scripts/as-agent.sh codex:*)`.
-- **Codex** (`~/.codex/config.toml`): mark this checkout's path `trust_level = "trusted"`. Run with `approval_policy = "never"` and `sandbox_mode = "workspace-write"`, with `[sandbox_workspace_write] network_access = true`, so GitHub calls need no escalation. Codex keeps the right-hand column off by its own rule. Codex confirms these keys for its installed version.
+- **Codex** (`~/.codex/config.toml`, keys confirmed for codex-cli 0.171.0). `approval_policy = "never"` only stops the prompts. Anything the sandbox blocks then fails with an error instead of asking, so the setup must also grant what routine work needs:
+
+  ```toml
+  approval_policy = "never"
+  sandbox_mode = "workspace-write"
+
+  [sandbox_workspace_write]
+  network_access = true
+
+  [projects."/absolute/path/to/checkout"]
+  trust_level = "trusted"
+  ```
+
+  - `trust_level` sits under `projects.<absolute path>`, one table per checkout and worktree. It grants no filesystem access by itself.
+  - Workspace-write keeps `.git` read-only, including a worktree's Git directory, so commits and `git worktree add` fail on these settings alone. Grant the actual checkout, worktree and Git directory paths through narrow writable roots, execution rules or a permission profile, plus the local socket `agent-tell.sh` uses if the sandbox blocks it.
+  - Do not use `danger-full-access` as the remedy.
+  - Codex keeps the right-hand column off by its own rule.
 - **Antigravity:** set terminal command auto-execution to always proceed, with a deny list matching the right-hand column.
 - **GitHub Apps** (org settings → installed GitHub Apps): accept each app's pending permission request. The apps declare `actions: write`, but their installation tokens do not carry it yet, so cancelling a superseded run returns `403`.
 
